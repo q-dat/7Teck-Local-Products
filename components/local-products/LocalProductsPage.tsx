@@ -15,6 +15,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Geist } from "next/font/google";
 import {
   FiArrowUp,
   FiArchive,
@@ -41,8 +42,162 @@ import {
   FiUploadCloud,
   FiX,
 } from "react-icons/fi";
-import { toast, ToastContainer, type ToastOptions } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+import {
+  toast,
+  ToastContainer,
+  type ToastOptions,
+} from "react-toastify/unstyled";
+
+const localProductsFont = Geist({
+  subsets: ["latin"],
+  display: "swap",
+  fallback: ["Segoe UI", "Arial", "sans-serif"],
+});
+
+const TOASTIFY_BASE_STYLES = `
+  .Toastify__toast-container {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    z-index: 1000000;
+    display: flex;
+    width: min(340px, calc(100vw - 32px));
+    flex-direction: column;
+    gap: 10px;
+    color: #ffffff;
+  }
+
+  .Toastify__toast {
+    position: relative;
+    display: flex;
+    min-height: 58px;
+    width: 100%;
+    align-items: center;
+    overflow: hidden;
+    padding: 12px 38px 12px 14px;
+    font-family: inherit;
+    word-break: break-word;
+    touch-action: none;
+  }
+
+  .Toastify__toast-body {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .Toastify__toast-icon {
+    display: flex;
+    width: 20px;
+    flex: 0 0 20px;
+  }
+
+  .Toastify__toast-icon > svg {
+    height: 20px;
+    width: 20px;
+    fill: currentColor;
+  }
+
+  .Toastify__toast--success .Toastify__toast-icon { color: #6ee7b7; }
+  .Toastify__toast--warning .Toastify__toast-icon { color: #fde68a; }
+  .Toastify__toast--error .Toastify__toast-icon { color: #fda4af; }
+  .Toastify__toast--info .Toastify__toast-icon { color: #7dd3fc; }
+
+  .Toastify__close-button {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    height: 22px;
+    width: 22px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: currentColor;
+    opacity: 0.62;
+    cursor: pointer;
+  }
+
+  .Toastify__close-button:hover,
+  .Toastify__close-button:focus-visible {
+    opacity: 1;
+  }
+
+  .Toastify__close-button > svg {
+    height: 15px;
+    width: 15px;
+    fill: currentColor;
+  }
+
+  .Toastify__progress-bar--wrp {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    overflow: hidden;
+  }
+
+  .Toastify__progress-bar--bg {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .Toastify__progress-bar {
+    position: absolute;
+    inset: 0;
+    transform-origin: left;
+  }
+
+  .Toastify__progress-bar--animated {
+    animation: localProductsToastProgress linear 1 forwards;
+  }
+
+  .Toastify--animate {
+    animation-duration: 320ms;
+    animation-fill-mode: both;
+  }
+
+  .Toastify__bounce-enter--top-right {
+    animation-name: localProductsToastEnter;
+  }
+
+  .Toastify__bounce-exit--top-right {
+    animation-name: localProductsToastExit;
+  }
+
+  @keyframes localProductsToastProgress {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+  }
+
+  @keyframes localProductsToastEnter {
+    from { opacity: 0; transform: translate3d(24px, -8px, 0) scale(0.98); }
+    to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  }
+
+  @keyframes localProductsToastExit {
+    from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    to { opacity: 0; transform: translate3d(24px, 0, 0) scale(0.98); }
+  }
+
+  @media (max-width: 480px) {
+    .Toastify__toast-container {
+      top: max(8px, env(safe-area-inset-top));
+      right: 8px;
+      left: 8px;
+      width: auto;
+    }
+  }
+`;
 
 type ProductImage = {
   id: string;
@@ -149,20 +304,24 @@ type GlobalSettings = {
   commonDescription: string;
   globalNote: string;
   contactOptions: ContactOption[];
-  selectedContactId: string;
   facebookPages: FacebookPageOption[];
   facebookDuplicatePosts: FacebookDuplicatePostOption[];
   facebookGroups: FacebookGroupOption[];
   selectedFacebookGroupIds: string[];
   categoryColors: CategoryColorMap;
   categoryOrder: string[];
-  includeSocialTags: boolean;
   autoCopyShareMode: AutoCopyShareMode;
   updatedAt: string;
 };
 
+type DevicePreferences = {
+  includeSocialTags: boolean;
+  isCopyNfkcEnabled: boolean;
+  selectedContactId: string;
+};
+
 type ExportPayload = {
-  version: 20;
+  version: 21;
   settings: GlobalSettings;
   products: LocalProduct[];
   scheduleConfig: ScheduleConfig;
@@ -258,6 +417,7 @@ type ModalName =
   | "globalNote"
   | "globalDescription"
   | "shareCopyOption"
+  | "contactSelection"
   | "contact"
   | "facebookPages"
   | "facebookDuplicatePosts"
@@ -351,6 +511,55 @@ type ScreenWithAvailablePosition = Screen & {
 };
 
 const API_BASE_URL = "/api/local-products";
+const DEVICE_PREFERENCES_STORAGE_KEY =
+  "local-products-device-preferences-v1";
+const defaultDevicePreferences: DevicePreferences = {
+  includeSocialTags: false,
+  isCopyNfkcEnabled: false,
+  selectedContactId: "",
+};
+
+const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
+  if (!value || typeof value !== "object") return defaultDevicePreferences;
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    includeSocialTags: record.includeSocialTags === true,
+    isCopyNfkcEnabled: record.isCopyNfkcEnabled === true,
+    selectedContactId:
+      typeof record.selectedContactId === "string"
+        ? record.selectedContactId.trim()
+        : "",
+  };
+};
+
+const loadDevicePreferences = (): DevicePreferences => {
+  if (typeof window === "undefined") return defaultDevicePreferences;
+
+  try {
+    const raw = window.localStorage.getItem(DEVICE_PREFERENCES_STORAGE_KEY);
+    return raw
+      ? normalizeDevicePreferences(JSON.parse(raw) as unknown)
+      : defaultDevicePreferences;
+  } catch {
+    return defaultDevicePreferences;
+  }
+};
+
+const saveDevicePreferences = (preferences: DevicePreferences): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      DEVICE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences),
+    );
+  } catch {
+    return;
+  }
+};
+
 const DOWNLOADED_PRODUCT_IDS_SESSION_KEY =
   "local_product_meta_downloaded_product_ids_v1";
 const FACEBOOK_SEARCH_BASE_URL = "https://www.facebook.com/search/top";
@@ -420,14 +629,12 @@ const defaultSettings: GlobalSettings = {
   commonDescription: "",
   globalNote: "",
   contactOptions: [],
-  selectedContactId: "",
   facebookPages: [],
   facebookDuplicatePosts: [],
   facebookGroups: [],
   selectedFacebookGroupIds: [],
   categoryColors: {},
   categoryOrder: [],
-  includeSocialTags: false,
   autoCopyShareMode: "post",
   updatedAt: "",
 };
@@ -1073,6 +1280,20 @@ type BootstrapPayload = {
   postedRecords?: unknown;
 };
 
+type CloudinaryCleanupPayload = {
+  deleted: Array<{ publicId: string; result: string }>;
+  failed: Array<{ publicId: string; message: string }>;
+};
+
+type ProductMutationPayload = {
+  cleanup?: CloudinaryCleanupPayload;
+};
+
+const emptyCloudinaryCleanup = (): CloudinaryCleanupPayload => ({
+  deleted: [],
+  failed: [],
+});
+
 const getBootstrapData = async (): Promise<BootstrapPayload> => {
   return apiRequest<BootstrapPayload>("/bootstrap");
 };
@@ -1082,15 +1303,29 @@ const getAllProductsFromDb = async (): Promise<LocalProduct[]> => {
   return normalizeProductsArray(payload.products);
 };
 
-const saveProductToDb = async (product: LocalProduct): Promise<void> => {
-  await apiRequest(`/products/${encodeURIComponent(product.id)}`, {
+const saveProductToDb = async (
+  product: LocalProduct,
+): Promise<CloudinaryCleanupPayload> => {
+  const payload = await apiRequest<ProductMutationPayload>(
+    `/products/${encodeURIComponent(product.id)}`,
+    {
     method: "PUT",
     body: JSON.stringify(product),
-  });
+    },
+  );
+
+  return payload.cleanup ?? emptyCloudinaryCleanup();
 };
 
-const deleteProductFromDb = async (id: string): Promise<void> => {
-  await apiRequest(`/products/${encodeURIComponent(id)}`, { method: "DELETE" });
+const deleteProductFromDb = async (
+  id: string,
+): Promise<CloudinaryCleanupPayload> => {
+  const payload = await apiRequest<ProductMutationPayload>(
+    `/products/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+
+  return payload.cleanup ?? emptyCloudinaryCleanup();
 };
 
 const replaceAllProductsInDb = async (products: LocalProduct[]): Promise<void> => {
@@ -1936,11 +2171,6 @@ const normalizeGlobalSettings = (
 
   const record = value as Record<string, unknown>;
   const contactOptions = normalizeContactOptions(record.contactOptions);
-  const selectedContactId =
-    typeof record.selectedContactId === "string" &&
-      contactOptions.some((option) => option.id === record.selectedContactId)
-      ? record.selectedContactId
-      : "";
   const facebookPages = normalizeFacebookPageOptions(record.facebookPages);
   const facebookDuplicatePosts = normalizeFacebookDuplicatePostOptions(
     record.facebookDuplicatePosts,
@@ -1960,17 +2190,12 @@ const normalizeGlobalSettings = (
         : "",
     globalNote: typeof record.globalNote === "string" ? record.globalNote : "",
     contactOptions,
-    selectedContactId,
     facebookPages,
     facebookDuplicatePosts,
     facebookGroups,
     selectedFacebookGroupIds,
     categoryColors,
     categoryOrder,
-    includeSocialTags:
-      typeof record.includeSocialTags === "boolean"
-        ? record.includeSocialTags
-        : false,
     autoCopyShareMode:
       record.autoCopyShareMode === "comment" ? "comment" : "post",
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
@@ -2137,10 +2362,13 @@ const writeClipboardText = async (value: string): Promise<void> => {
   throw new Error("Không thể copy. Hãy kiểm tra quyền clipboard của trình duyệt.");
 };
 
-const getSelectedContactText = (settings: GlobalSettings): string => {
+const getSelectedContactText = (
+  contactOptions: ContactOption[],
+  selectedContactId: string,
+): string => {
   return (
-    settings.contactOptions.find(
-      (option) => option.id === settings.selectedContactId,
+    contactOptions.find(
+      (option) => option.id === selectedContactId,
     )?.text.trim() ?? ""
   );
 };
@@ -2501,7 +2729,7 @@ const createExportPayload = (params: {
   postedRecords: PostedRecord[];
 }): ExportPayload => {
   return {
-    version: 20,
+    version: 21,
     settings: params.settings,
     products: params.products,
     scheduleConfig: params.scheduleConfig,
@@ -2994,6 +3222,8 @@ const buildRandomSchedule = (
 export default function LocalProductsPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
+  const contactSelectionPromptedRef = useRef<boolean>(false);
+  const previousContactOptionCountRef = useRef<number>(0);
   const handleLocalWorkspaceKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>): void => {
       if (event.key.toLowerCase() !== "f" || !isTypingTarget(event.target)) {
@@ -3056,6 +3286,11 @@ export default function LocalProductsPage() {
   const [isScrollTopVisible, setIsScrollTopVisible] =
     useState<boolean>(false);
   const [isCopyNfkcEnabled, setIsCopyNfkcEnabled] =
+    useState<boolean>(false);
+  const [includeSocialTags, setIncludeSocialTags] =
+    useState<boolean>(false);
+  const [selectedContactId, setSelectedContactId] = useState<string>("");
+  const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
   const prefersReducedMotion = useReducedMotion();
   const [imageDownloadCategory, setImageDownloadCategory] =
@@ -3132,6 +3367,52 @@ export default function LocalProductsPage() {
     useState<HourlyNotificationConfig>(() => loadHourlyNotificationConfig());
   const hourlyNotificationTimeoutRef = useRef<number | null>(null);
   const hourlyAudioContextRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    const applyPreferences = (preferences: DevicePreferences): void => {
+      setIncludeSocialTags(preferences.includeSocialTags);
+      setIsCopyNfkcEnabled(preferences.isCopyNfkcEnabled);
+      setSelectedContactId(preferences.selectedContactId);
+    };
+
+    applyPreferences(loadDevicePreferences());
+    setIsDevicePreferencesReady(true);
+
+    const handleStorage = (event: StorageEvent): void => {
+      if (event.key !== DEVICE_PREFERENCES_STORAGE_KEY) return;
+
+      try {
+        applyPreferences(
+          event.newValue
+            ? normalizeDevicePreferences(JSON.parse(event.newValue) as unknown)
+            : defaultDevicePreferences,
+        );
+      } catch {
+        applyPreferences(defaultDevicePreferences);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDevicePreferencesReady) return;
+
+    saveDevicePreferences({
+      includeSocialTags,
+      isCopyNfkcEnabled,
+      selectedContactId,
+    });
+  }, [
+    includeSocialTags,
+    isCopyNfkcEnabled,
+    isDevicePreferencesReady,
+    selectedContactId,
+  ]);
 
   const copyText = useCallback(
     async (value: string): Promise<void> => {
@@ -3544,10 +3825,26 @@ export default function LocalProductsPage() {
     return getNextScheduledNotification(nowTick, hourlyNotificationConfig);
   }, [hourlyNotificationConfig, nowTick]);
 
-  const activeContactText = useMemo(
-    () => getSelectedContactText(settings),
-    [settings],
+  const activeContactOption = useMemo(
+    () =>
+      settings.contactOptions.find(
+        (option) => option.id === selectedContactId,
+      ) ?? null,
+    [selectedContactId, settings.contactOptions],
   );
+  const activeContactText = useMemo(
+    () => getSelectedContactText(settings.contactOptions, selectedContactId),
+    [selectedContactId, settings.contactOptions],
+  );
+  const activeContactLabel = useMemo(() => {
+    if (!activeContactOption) return "Chưa chọn";
+
+    const activeIndex = settings.contactOptions.findIndex(
+      (option) => option.id === activeContactOption.id,
+    );
+
+    return activeIndex >= 0 ? `Liên hệ ${activeIndex + 1}` : "Đã chọn";
+  }, [activeContactOption, settings.contactOptions]);
   const activeFacebookPage = useMemo(
     () =>
       settings.facebookPages.find(
@@ -4411,14 +4708,14 @@ export default function LocalProductsPage() {
       scheduleConfig,
       settings.commonDescription,
       activeContactText,
-      settings.includeSocialTags,
+      includeSocialTags,
     );
   }, [
     activeContactText,
     products,
     scheduleConfig,
     settings.commonDescription,
-    settings.includeSocialTags,
+    includeSocialTags,
   ]);
 
   const scheduleTaskIndexes = useMemo(() => {
@@ -4609,6 +4906,50 @@ export default function LocalProductsPage() {
       cancelled = true;
     };
   }, [applyBootstrapPayload]);
+
+  useEffect(() => {
+    if (!isSettingsReady || !isDevicePreferencesReady) return;
+
+    const contactOptionCount = settings.contactOptions.length;
+    const receivedFirstContactList =
+      previousContactOptionCountRef.current === 0 && contactOptionCount > 0;
+
+    previousContactOptionCountRef.current = contactOptionCount;
+
+    if (receivedFirstContactList && !selectedContactId) {
+      contactSelectionPromptedRef.current = false;
+    }
+
+    const selectedContactExists = settings.contactOptions.some(
+      (option) => option.id === selectedContactId,
+    );
+
+    if (selectedContactExists) {
+      setModalStack((current) =>
+        current.filter((modalName) => modalName !== "contactSelection"),
+      );
+      return;
+    }
+
+    if (selectedContactId) {
+      contactSelectionPromptedRef.current = false;
+      setSelectedContactId("");
+    }
+
+    if (contactSelectionPromptedRef.current) return;
+
+    contactSelectionPromptedRef.current = true;
+    setModalStack((current) =>
+      current.includes("contactSelection")
+        ? current
+        : [...current, "contactSelection"],
+    );
+  }, [
+    isDevicePreferencesReady,
+    isSettingsReady,
+    selectedContactId,
+    settings.contactOptions,
+  ]);
 
   useEffect(() => {
     if (!isSettingsReady) return;
@@ -4869,14 +5210,12 @@ export default function LocalProductsPage() {
     settings.commonDescription,
     settings.globalNote,
     settings.contactOptions,
-    settings.selectedContactId,
     settings.facebookPages,
     settings.facebookDuplicatePosts,
     settings.facebookGroups,
     settings.selectedFacebookGroupIds,
     settings.categoryColors,
     settings.categoryOrder,
-    settings.includeSocialTags,
     settings.autoCopyShareMode,
     isSettingsReady,
   ]);
@@ -5067,28 +5406,36 @@ export default function LocalProductsPage() {
       return;
     }
 
-    setSettings((current) => {
-      const option: ContactOption = {
-        id: crypto.randomUUID(),
-        text,
-      };
+    const option: ContactOption = {
+      id: crypto.randomUUID(),
+      text,
+    };
 
-      return {
-        ...current,
-        contactOptions: [...current.contactOptions, option],
-        selectedContactId: option.id,
-      };
-    });
+    setSettings((current) => ({
+      ...current,
+      contactOptions: [...current.contactOptions, option],
+    }));
+
+    if (!selectedContactId) {
+      setSelectedContactId(option.id);
+    }
 
     resetContactEditor();
     Toastify("Đã thêm liên hệ", 200);
   };
 
   const selectContactOption = (id: string): void => {
-    setSettings((current) => ({
-      ...current,
-      selectedContactId: id,
-    }));
+    setSelectedContactId(id);
+    Toastify("Đã chọn liên hệ cho thiết bị này", 200);
+  };
+
+  const confirmInitialContactSelection = (id: string): void => {
+    setSelectedContactId(id);
+    contactSelectionPromptedRef.current = true;
+    setModalStack((current) =>
+      current.filter((modalName) => modalName !== "contactSelection"),
+    );
+    Toastify("Đã lưu liên hệ cho thiết bị này", 200);
   };
 
   const removeContactOption = (id: string): void => {
@@ -5097,25 +5444,21 @@ export default function LocalProductsPage() {
 
     requestConfirm({
       title: "Xóa nội dung liên hệ?",
-      description: "Nội dung liên hệ đã chọn sẽ bị xóa khỏi local và file backup tiếp theo.",
+      description: "Liên hệ sẽ bị xóa khỏi MongoDB và file backup tiếp theo. Thiết bị đang chọn liên hệ này sẽ phải chọn lại.",
       confirmLabel: "Xóa liên hệ",
       tone: "danger",
       onConfirm: () => {
-        setSettings((current) => {
-          const contactOptions = current.contactOptions.filter(
+        setSettings((current) => ({
+          ...current,
+          contactOptions: current.contactOptions.filter(
             (item) => item.id !== id,
-          );
-          const selectedContactId =
-            current.selectedContactId === id
-              ? (contactOptions[0]?.id ?? "")
-              : current.selectedContactId;
+          ),
+        }));
 
-          return {
-            ...current,
-            contactOptions,
-            selectedContactId,
-          };
-        });
+        if (selectedContactId === id) {
+          contactSelectionPromptedRef.current = false;
+          setSelectedContactId("");
+        }
 
         if (editingContactOptionId === id) {
           resetContactEditor();
@@ -5881,7 +6224,7 @@ export default function LocalProductsPage() {
     setPageLoadingText(editingId ? "Đang cập nhật sản phẩm..." : "Đang thêm sản phẩm...");
 
     try {
-      await saveProductToDb(product);
+      const cleanup = await saveProductToDb(product);
       persistedDraftPublicIdsRef.current = new Set(
         [...product.images, ...product.internalImages].map((image) => image.publicId),
       );
@@ -5889,7 +6232,14 @@ export default function LocalProductsPage() {
 
       closeAllModals();
       resetForm();
-      Toastify(editingId ? "Đã cập nhật sản phẩm" : "Đã thêm sản phẩm", 200);
+      Toastify(
+        cleanup.failed.length > 0
+          ? `Đã lưu sản phẩm nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`
+          : editingId
+            ? "Đã cập nhật sản phẩm"
+            : "Đã thêm sản phẩm",
+        cleanup.failed.length > 0 ? 300 : 200,
+      );
     } catch {
       Toastify(editingId ? "Không thể cập nhật sản phẩm" : "Không thể thêm sản phẩm", 400);
     } finally {
@@ -5928,7 +6278,7 @@ export default function LocalProductsPage() {
       confirmLabel: "Xóa sản phẩm",
       tone: "danger",
       onConfirm: async () => {
-        await deleteProductFromDb(id);
+        const cleanup = await deleteProductFromDb(id);
 
         setSelectedProductId((current) => (current === id ? "" : current));
         setExpandedProductIds((current) => {
@@ -5963,7 +6313,12 @@ export default function LocalProductsPage() {
         });
 
         await loadProducts();
-        Toastify("Đã xóa vĩnh viễn sản phẩm", 200);
+        Toastify(
+          cleanup.failed.length > 0
+            ? `Đã xóa sản phẩm khỏi MongoDB nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`
+            : `Đã xóa sản phẩm và ${cleanup.deleted.length} ảnh Cloudinary`,
+          cleanup.failed.length > 0 ? 300 : 200,
+        );
       },
     });
   };
@@ -6489,7 +6844,7 @@ export default function LocalProductsPage() {
       text: composeCopyText(
         source.postText,
         activeContactText,
-        settings.includeSocialTags,
+        includeSocialTags,
       ),
     };
   };
@@ -6766,7 +7121,7 @@ export default function LocalProductsPage() {
       ? composeCopyText(
         request.postText,
         activeContactText,
-        settings.includeSocialTags,
+        includeSocialTags,
       )
       : composeCopyText(
         request.commentText,
@@ -8063,7 +8418,7 @@ export default function LocalProductsPage() {
         product,
         settings.commonDescription,
         activeContactText,
-        settings.includeSocialTags,
+        includeSocialTags,
       ),
       done: postedIds.has(createPostedKey(date, slotIndex, taskIndex)),
     };
@@ -8073,7 +8428,7 @@ export default function LocalProductsPage() {
     scheduleAssignments,
     products,
     activeContactText,
-    settings.includeSocialTags,
+    includeSocialTags,
     settings.commonDescription,
     scheduleConfig,
     postedIds,
@@ -8372,8 +8727,11 @@ export default function LocalProductsPage() {
 
   if (!isSettingsReady) {
     return (
-      <main className="min-h-dvh w-full bg-[#050a11] text-slate-100">
+      <main
+        className={`${localProductsFont.className} min-h-dvh w-full bg-[#050a11] text-slate-100`}
+      >
         <ToastContainer style={{ zIndex: 1000000 }} />
+        <style>{TOASTIFY_BASE_STYLES}</style>
         <LoadingOverlay text={pageLoadingText || "Đang tải dữ liệu, vui lòng chờ..."} />
       </main>
     );
@@ -8381,7 +8739,7 @@ export default function LocalProductsPage() {
 
   const localProductsWorkspace = (
     <main
-      className={`local-products-workspace min-h-dvh w-full overflow-x-hidden bg-[#050a11] text-slate-100 ${pictureInPictureWindow
+      className={`${localProductsFont.className} local-products-workspace min-h-dvh w-full overflow-x-hidden bg-[#050a11] text-slate-100 ${pictureInPictureWindow
         ? "pb-[50px]"
         : "pb-[100px] xl:pb-[50px]"
         }`}
@@ -8391,6 +8749,7 @@ export default function LocalProductsPage() {
       onKeyDown={handleLocalWorkspaceKeyDown}
     >
       <ToastContainer style={{ zIndex: 1000000 }} />
+      <style>{TOASTIFY_BASE_STYLES}</style>
 
       <input
         id={IMPORT_BACKUP_INPUT_ID}
@@ -8407,6 +8766,7 @@ export default function LocalProductsPage() {
       <style>{`
         .local-products-workspace {
           color-scheme: dark;
+          font-family: inherit;
           background:
             linear-gradient(rgba(216, 201, 159, 0.011) 1px, transparent 1px),
             linear-gradient(90deg, rgba(216, 201, 159, 0.011) 1px, transparent 1px),
@@ -8423,6 +8783,7 @@ export default function LocalProductsPage() {
         }
 
         .local-products-workspace * {
+          font-family: inherit;
           scrollbar-color: rgba(216, 201, 159, 0.42) rgba(255, 255, 255, 0.025);
           scrollbar-width: thin;
         }
@@ -9476,36 +9837,39 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="emerald"
-                title={settings.includeSocialTags ? "Tắt Tag khi copy" : "Bật Tag khi copy"}
-                aria-label={settings.includeSocialTags ? "Tắt Tag khi copy" : "Bật Tag khi copy"}
-                aria-pressed={settings.includeSocialTags}
-                className={`${headerActionButtonBaseClassName} min-w-0 ${settings.includeSocialTags
+                title={includeSocialTags ? "Tắt Tag khi copy" : "Bật Tag khi copy"}
+                aria-label={includeSocialTags ? "Tắt Tag khi copy" : "Bật Tag khi copy"}
+                aria-pressed={includeSocialTags}
+                className={`${headerActionButtonBaseClassName} min-w-0 ${includeSocialTags
                   ? headerActiveButtonClassName
                   : headerNeutralButtonClassName
                   }`}
-                onClick={() =>
-                  updateSettingField(
-                    "includeSocialTags",
-                    !settings.includeSocialTags,
-                  )
-                }
+                onClick={() => {
+                  const nextEnabled = !includeSocialTags;
+
+                  setIncludeSocialTags(nextEnabled);
+                  Toastify(
+                    `Đã ${nextEnabled ? "bật" : "tắt"} Tag cho thiết bị này`,
+                    200,
+                  );
+                }}
               >
                 <span
                   aria-hidden="true"
-                  className={`relative h-3 w-[18px] flex-none overflow-hidden border transition-colors duration-200 ${settings.includeSocialTags
+                  className={`relative h-3 w-[18px] flex-none overflow-hidden border transition-colors duration-200 ${includeSocialTags
                     ? "border-[#17130a]/45 bg-[#17130a]/20"
                     : "border-white/20 bg-black/30"
                     }`}
                 >
                   <span
-                    className={`absolute top-[2px] h-1.5 w-1.5 transition-[left,background-color] duration-200 ${settings.includeSocialTags
+                    className={`absolute top-[2px] h-1.5 w-1.5 transition-[left,background-color] duration-200 ${includeSocialTags
                       ? "left-[10px] bg-[#17130a]"
                       : "left-[2px] bg-slate-400"
                       }`}
                   />
                 </span>
                 <span className="min-w-0 truncate">
-                  {settings.includeSocialTags ? "Bật Tag" : "Tắt Tag"}
+                  {includeSocialTags ? "Bật Tag" : "Tắt Tag"}
                 </span>
               </button>
 
@@ -9690,13 +10054,21 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="teal"
-                title="Liên hệ khi copy Post hoặc Cmt"
-                aria-label="Liên hệ khi copy Post hoặc Cmt"
-                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                title={
+                  activeContactOption
+                    ? `${activeContactLabel}: ${activeContactOption.text}`
+                    : "Chưa chọn liên hệ cho thiết bị này"
+                }
+                aria-label={`Liên hệ khi copy Post hoặc Cmt: ${activeContactLabel}`}
+                aria-pressed={Boolean(activeContactOption)}
+                className={`${headerActionButtonBaseClassName} ${activeContactOption
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName
+                  }`}
                 onClick={() => openModal("contact")}
               >
                 <FiPhone aria-hidden="true" className={iconClassName} />
-                Liên hệ
+                <span className="min-w-0 truncate">{activeContactLabel}</span>
               </button>
 
               <button
@@ -10354,7 +10726,7 @@ export default function LocalProductsPage() {
                                 composeCopyText(
                                   descriptionPreview,
                                   activeContactText,
-                                  settings.includeSocialTags,
+                                  includeSocialTags,
                                 ),
                               );
                             }}
@@ -10503,7 +10875,8 @@ export default function LocalProductsPage() {
                   {activeModal === "shareCopyOption" ? (
                     <FiShare2 aria-hidden="true" className={iconClassName} />
                   ) : null}
-                  {activeModal === "contact" ? (
+                  {activeModal === "contact" ||
+                    activeModal === "contactSelection" ? (
                     <FiPhone aria-hidden="true" className={iconClassName} />
                   ) : null}
                   {activeModal === "facebookPages" ? (
@@ -10542,6 +10915,9 @@ export default function LocalProductsPage() {
                     {activeModal === "globalDescription" ? "Mô tả chung" : null}
                     {activeModal === "shareCopyOption"
                       ? "Tùy chọn tự copy"
+                      : null}
+                    {activeModal === "contactSelection"
+                      ? "Chọn liên hệ của bạn"
                       : null}
                     {activeModal === "contact" ? "Liên hệ khi copy" : null}
                     {activeModal === "facebookPages"
@@ -12425,8 +12801,71 @@ export default function LocalProductsPage() {
                 </section>
               ) : null}
 
+              {activeModal === "contactSelection" ? (
+                <section className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-3">
+                  <article className="rounded-md border border-emerald-300/30 bg-emerald-300/10 p-3">
+                    <h3 className="text-sm font-black text-white">
+                      Vui lòng chọn liên hệ của bạn
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-emerald-100/80">
+                      Lựa chọn này chỉ được lưu trên thiết bị hiện tại và sẽ tự
+                      động dùng khi copy Post hoặc Cmt.
+                    </p>
+                  </article>
+
+                  <article className="grid grid-cols-1 gap-2 rounded-md border border-white/10 bg-slate-950/60 p-2">
+                    {settings.contactOptions.length > 0 ? (
+                      settings.contactOptions.map((option, index) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className="flex min-w-0 items-start gap-3 rounded-md border border-white/10 bg-slate-900/80 p-3 text-left transition hover:border-emerald-300/50 hover:bg-emerald-300/10 focus-visible:border-emerald-200 focus-visible:outline-none"
+                          onClick={() =>
+                            confirmInitialContactSelection(option.id)
+                          }
+                        >
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-emerald-300/30 bg-emerald-300/10 text-[10px] font-black text-emerald-100">
+                            {index + 1}
+                          </span>
+                          <span className="min-w-0 whitespace-pre-wrap text-xs leading-5 text-slate-100 [overflow-wrap:anywhere]">
+                            {option.text}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed border-white/15 bg-slate-950/50 p-4 text-center">
+                        <p className="text-xs leading-5 text-slate-400">
+                          Chưa có liên hệ nào. Hãy tạo liên hệ trước khi chọn.
+                        </p>
+                        <button
+                          type="button"
+                          className="mt-3 rounded-md border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-300/20"
+                          onClick={() => openModal("contact")}
+                        >
+                          Mở quản lý Liên hệ
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                </section>
+              ) : null}
+
               {activeModal === "contact" ? (
                 <section className="grid w-full grid-cols-1 gap-2">
+                  <article className="rounded-md border border-cyan-300/25 bg-cyan-300/[0.07] p-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.08em] text-cyan-200">
+                      Liên hệ đang chọn trên thiết bị này
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-white [overflow-wrap:anywhere]">
+                      {activeContactOption?.text || "Chưa chọn liên hệ"}
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      {activeContactOption
+                        ? activeContactLabel
+                        : "Hãy chọn một liên hệ trong danh sách bên dưới"}
+                    </p>
+                  </article>
+
                   <article className="rounded-md border border-emerald-300/20 bg-emerald-300/10 p-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -12436,7 +12875,8 @@ export default function LocalProductsPage() {
                             : "Thêm nội dung liên hệ"}
                         </h3>
                         <p className="mt-1 text-[10px] leading-4 text-emerald-100/80">
-                          Liên hệ được chọn sẽ cách nội dung Post hoặc Cmt một dòng trống và được lưu trong file backup JSON.
+                          Danh sách liên hệ được lưu trong MongoDB và file backup.
+                          Liên hệ đang chọn chỉ lưu trên thiết bị hiện tại.
                         </p>
                       </div>
                       <span className="shrink-0 rounded-md bg-emerald-300 px-2 py-1 text-[9px] font-black text-slate-950">
@@ -12485,21 +12925,21 @@ export default function LocalProductsPage() {
                       settings.contactOptions.map((option, index) => (
                         <div
                           key={option.id}
-                          className={`grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-stretch gap-2 rounded-md border p-2 ${settings.selectedContactId === option.id
+                          className={`grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-stretch gap-2 rounded-md border p-2 ${selectedContactId === option.id
                             ? "border-emerald-300/60 bg-emerald-300/15"
                             : "border-white/10 bg-slate-900/70"
                             }`}
                         >
                           <button
                             type="button"
-                            aria-pressed={settings.selectedContactId === option.id}
+                            aria-pressed={selectedContactId === option.id}
                             className="flex min-w-0 items-start gap-2 p-2 text-left"
                             onClick={() => selectContactOption(option.id)}
                             aria-label={`Chọn liên hệ ${index + 1}`}
                           >
                             <span
                               aria-hidden="true"
-                              className={`mt-1 h-3 w-3 shrink-0 rounded-full border ${settings.selectedContactId === option.id
+                              className={`mt-1 h-3 w-3 shrink-0 rounded-full border ${selectedContactId === option.id
                                 ? "border-emerald-200 bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.45)]"
                                 : "border-slate-500 bg-slate-950"
                                 }`}
@@ -13642,7 +14082,7 @@ export default function LocalProductsPage() {
                               composeCopyText(
                                 albumSource.description,
                                 activeContactText,
-                                settings.includeSocialTags,
+                                includeSocialTags,
                               ),
                             )
                           }
@@ -14608,7 +15048,9 @@ export default function LocalProductsPage() {
 
   return (
     <>
-      <main className="flex min-h-dvh w-full items-center justify-center bg-[radial-gradient(circle_at_50%_0,rgba(230,207,139,0.15),transparent_34%),linear-gradient(rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(145deg,#050a11,#0a1520)] bg-[length:auto,32px_32px,32px_32px,auto] p-4 text-slate-100">
+      <main
+        className={`${localProductsFont.className} flex min-h-dvh w-full items-center justify-center bg-[radial-gradient(circle_at_50%_0,rgba(230,207,139,0.15),transparent_34%),linear-gradient(rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(145deg,#050a11,#0a1520)] bg-[length:auto,32px_32px,32px_32px,auto] p-4 text-slate-100`}
+      >
         <section className="w-full max-w-md border border-[#e6cf8b]/35 bg-[linear-gradient(145deg,rgba(14,29,43,0.99),rgba(4,10,17,0.998))] p-5 text-center shadow-[inset_3px_0_0_rgba(230,207,139,0.16),0_32px_90px_rgba(0,0,0,0.6)] [clip-path:polygon(12px_0,calc(100%_-_5px)_0,100%_5px,100%_calc(100%_-_12px),calc(100%_-_12px)_100%,5px_100%,0_calc(100%_-_5px),0_12px)]">
           <div className="mx-auto flex h-10 w-10 items-center justify-center border border-[#f5e9c7]/75 bg-[linear-gradient(135deg,#f5e9c7,#d6ba6b)] text-[#17130a] shadow-[0_0_22px_rgba(230,207,139,0.24),0_12px_32px_rgba(0,0,0,0.28)] [clip-path:polygon(8px_0,100%_0,100%_calc(100%_-_8px),calc(100%_-_8px)_100%,0_100%,0_8px)]">
             <FiMonitor aria-hidden="true" className="h-5 w-5" />
