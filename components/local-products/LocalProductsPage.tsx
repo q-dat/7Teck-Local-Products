@@ -1309,8 +1309,8 @@ const saveProductToDb = async (
   const payload = await apiRequest<ProductMutationPayload>(
     `/products/${encodeURIComponent(product.id)}`,
     {
-    method: "PUT",
-    body: JSON.stringify(product),
+      method: "PUT",
+      body: JSON.stringify(product),
     },
   );
 
@@ -2568,9 +2568,27 @@ const renameDraftImagesByField = (
 };
 
 const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-  const response = await fetch(dataUrl);
+  const response = await fetch(dataUrl, {
+    cache: "no-store",
+    credentials: "omit",
+    mode: "cors",
+  });
 
-  return response.blob();
+  if (!response.ok) {
+    throw new Error(`Không thể tải ảnh (${response.status})`);
+  }
+
+  const blob = await response.blob();
+
+  if (blob.size === 0) {
+    throw new Error("Ảnh tải về không có dữ liệu");
+  }
+
+  if (blob.type && !blob.type.startsWith("image/")) {
+    throw new Error("Nguồn Cloudinary không trả về tệp ảnh hợp lệ");
+  }
+
+  return blob;
 };
 
 const getNativeShareNavigator = (): NativeShareNavigator | null => {
@@ -2583,8 +2601,7 @@ const dataUrlToShareFile = async (
   dataUrl: string,
   fileName: string,
 ): Promise<File> => {
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
+  const blob = await dataUrlToBlob(dataUrl);
   const fallbackType = dataUrl.startsWith("data:image/png")
     ? "image/png"
     : "image/jpeg";
@@ -2594,26 +2611,46 @@ const dataUrlToShareFile = async (
   });
 };
 
-const dataUrlToPngBlob = async (dataUrl: string): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const image = document.createElement("img");
+const imageBlobToPngBlob = async (
+  sourceBlob: Blob,
+  targetDocument: Document,
+): Promise<Blob> => {
+  if (sourceBlob.type.toLowerCase() === "image/png") {
+    return sourceBlob;
+  }
 
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
+  const targetUrl = targetDocument.defaultView?.URL ?? URL;
+  const objectUrl = targetUrl.createObjectURL(sourceBlob);
 
-      const context = canvas.getContext("2d");
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const candidate = targetDocument.createElement("img");
 
-      if (!context) {
-        reject(new Error("Không thể xử lý ảnh để copy"));
-        return;
-      }
+      candidate.onload = () => resolve(candidate);
+      candidate.onerror = () =>
+        reject(new Error("Trình duyệt không thể giải mã ảnh Cloudinary"));
+      candidate.decoding = "async";
+      candidate.src = objectUrl;
+    });
 
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0);
+    if (image.naturalWidth === 0 || image.naturalHeight === 0) {
+      throw new Error("Ảnh Cloudinary không có kích thước hợp lệ");
+    }
 
+    const canvas = targetDocument.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Không thể xử lý ảnh để copy");
+    }
+
+    // Ảnh được vẽ từ Blob nội bộ nên canvas không bị khóa CORS dù nguồn là Cloudinary.
+    context.drawImage(image, 0, 0);
+
+    return await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (!blob) {
           reject(new Error("Không thể tạo ảnh PNG để copy"));
@@ -2622,14 +2659,86 @@ const dataUrlToPngBlob = async (dataUrl: string): Promise<Blob> => {
 
         resolve(blob);
       }, "image/png");
-    };
+    });
+  } finally {
+    targetUrl.revokeObjectURL(objectUrl);
+  }
+};
 
-    image.onerror = () => {
-      reject(new Error("Không thể đọc ảnh để copy"));
-    };
+const dataUrlToPngBlob = async (
+  dataUrl: string,
+  targetDocument: Document,
+): Promise<Blob> => {
+  const sourceBlob = await dataUrlToBlob(dataUrl);
+  return imageBlobToPngBlob(sourceBlob, targetDocument);
+};
 
-    image.src = dataUrl;
+const blobToDataUrl = async (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Không thể chuẩn bị ảnh cho clipboard"));
+    };
+    reader.onerror = () =>
+      reject(new Error("Không thể chuẩn bị ảnh cho clipboard"));
+    reader.readAsDataURL(blob);
   });
+};
+
+const copyImageWithLegacyClipboard = async (
+  imageBlob: Blob,
+  interactionWindow: Window,
+  imageName: string,
+): Promise<boolean> => {
+  const targetDocument = interactionWindow.document;
+  const dataUrl = await blobToDataUrl(imageBlob);
+  const container = targetDocument.createElement("div");
+  const image = targetDocument.createElement("img");
+
+  container.contentEditable = "true";
+  container.style.position = "fixed";
+  container.style.left = "-100000px";
+  container.style.top = "0";
+  container.style.opacity = "0";
+  container.style.pointerEvents = "none";
+  image.alt = imageName || "Ảnh sản phẩm";
+  image.src = dataUrl;
+  container.appendChild(image);
+  targetDocument.body.appendChild(container);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      if (image.complete && image.naturalWidth > 0) {
+        resolve();
+        return;
+      }
+
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Không thể đọc ảnh để copy"));
+    });
+
+    const selection = interactionWindow.getSelection();
+
+    if (!selection) return false;
+
+    const range = targetDocument.createRange();
+    range.selectNode(image);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    container.focus({ preventScroll: true });
+
+    const copied = targetDocument.execCommand("copy");
+    selection.removeAllRanges();
+    return copied;
+  } finally {
+    container.remove();
+  }
 };
 
 const copyImageToClipboard = async (image: ProductImage): Promise<void> => {
@@ -2639,24 +2748,65 @@ const copyImageToClipboard = async (image: ProductImage): Promise<void> => {
 
   const interactionWindow =
     getActiveInteractionWindow() as ClipboardCapableWindow;
-  const clipboard = interactionWindow.navigator.clipboard;
+  const clipboard =
+    interactionWindow.navigator.clipboard ?? window.navigator.clipboard;
   const ClipboardItemClass =
     interactionWindow.ClipboardItem ??
     (typeof ClipboardItem !== "undefined"
       ? (ClipboardItem as ClipboardItemConstructor)
       : undefined);
 
-  if (!clipboard || !ClipboardItemClass) {
-    throw new Error("Trình duyệt chưa hỗ trợ copy ảnh vào clipboard");
+  const pngBlobPromise = dataUrlToPngBlob(
+    image.dataUrl,
+    interactionWindow.document,
+  );
+  let clipboardError: unknown;
+
+  if (clipboard?.write && ClipboardItemClass) {
+    try {
+      // Gọi write ngay trong thao tác bấm và truyền Promise để Safari/iPhone
+      // không làm mất user activation trong lúc đang tải ảnh Cloudinary.
+      await clipboard.write([
+        new ClipboardItemClass({
+          "image/png": pngBlobPromise,
+        }),
+      ]);
+      return;
+    } catch (error) {
+      clipboardError = error;
+    }
+
+    try {
+      // Một số Chromium cũ không nhận Promise trong ClipboardItem.
+      const pngBlob = await pngBlobPromise;
+      await clipboard.write([
+        new ClipboardItemClass({
+          "image/png": pngBlob,
+        }),
+      ]);
+      return;
+    } catch (error) {
+      clipboardError = error;
+    }
   }
 
-  const pngBlobPromise = dataUrlToPngBlob(image.dataUrl);
+  const pngBlob = await pngBlobPromise;
 
-  await clipboard.write([
-    new ClipboardItemClass({
-      "image/png": pngBlobPromise,
-    }),
-  ]);
+  if (
+    await copyImageWithLegacyClipboard(
+      pngBlob,
+      interactionWindow,
+      image.name,
+    )
+  ) {
+    return;
+  }
+
+  const errorMessage =
+    clipboardError instanceof Error && clipboardError.name === "NotAllowedError"
+      ? "Trình duyệt đang chặn quyền ghi ảnh vào clipboard"
+      : "Trình duyệt này chưa hỗ trợ copy ảnh tự động";
+  throw new Error(errorMessage);
 };
 
 const downloadOriginalImage = async (
@@ -9927,8 +10077,8 @@ export default function LocalProductsPage() {
                 aria-label="Cấu hình thông báo theo thời gian"
                 aria-pressed={hourlyNotificationConfig.enabled}
                 className={`${headerActionButtonBaseClassName} ${hourlyNotificationConfig.enabled
-                    ? headerActiveButtonClassName
-                    : headerNeutralButtonClassName
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName
                   }`}
                 onClick={() => {
                   setHourlyNotificationDraft(hourlyNotificationConfig);
@@ -12417,8 +12567,8 @@ export default function LocalProductsPage() {
                       </div>
                       <span
                         className={`shrink-0 rounded-md px-2.5 py-1 text-[10px] font-black ${hourlyNotificationConfig.enabled
-                            ? "bg-emerald-300 text-slate-950"
-                            : "border border-white/10 bg-slate-950 text-slate-400"
+                          ? "bg-emerald-300 text-slate-950"
+                          : "border border-white/10 bg-slate-950 text-slate-400"
                           }`}
                       >
                         {hourlyNotificationConfig.enabled ? "ĐANG BẬT" : "ĐANG TẮT"}
