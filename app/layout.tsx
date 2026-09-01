@@ -2,6 +2,29 @@ import './globals.css';
 import { Inter, Roboto_Mono } from 'next/font/google';
 import { Metadata } from 'next';
 
+export const metadata = {
+  title: {
+    absolute: '7Teck.vn',
+  },
+  robots: {
+    index: false,
+    follow: true,
+    googleBot: {
+      index: false,
+      follow: true,
+    },
+  },
+  icons: {
+    icon: {
+      url: '/favicon.png',
+      type: 'image/png',
+    },
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
+} satisfies Metadata;
+
+
 const geistSans = Inter({
   variable: '--font-geist-sans',
   subsets: ['latin'],

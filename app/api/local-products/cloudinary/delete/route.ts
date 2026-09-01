@@ -29,7 +29,10 @@ export async function DELETE(request: Request) {
     }
 
     const cleanup = await destroyCloudinaryImages(publicIds);
-    return jsonNoStore({ ok: cleanup.failed.length === 0, cleanup });
+    return jsonNoStore(
+      { ok: cleanup.failed.length === 0, cleanup },
+      { status: cleanup.failed.length === 0 ? 200 : 502 },
+    );
   } catch (error) {
     return apiError(error, 400);
   }
