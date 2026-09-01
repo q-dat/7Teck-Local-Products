@@ -1,15 +1,31 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import './globals.css';
+import { Inter, Roboto_Mono } from 'next/font/google';
+import { Metadata } from 'next';
 
-export const metadata: Metadata = {
-  title: "Local Product Manager",
-  description: "Quản lý sản phẩm với MongoDB và ảnh gốc trên Cloudinary",
-};
+const geistSans = Inter({
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
+  display: 'swap', // Giảm CLS
+});
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+const geistMono = Roboto_Mono({
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
+  display: 'swap', // Giảm CLS
+});
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="vi">
-      <body>{children}</body>
+    <html lang="vi" data-theme="mytheme">
+      <head>
+      </head>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        {children}
+      </body>
     </html>
   );
 }
