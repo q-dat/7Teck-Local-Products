@@ -36,6 +36,7 @@ import {
   FiPhone,
   FiPlus,
   FiRefreshCcw,
+  FiRotateCw,
   FiSearch,
   FiShare2,
   FiTrash2,
@@ -932,23 +933,79 @@ const getNextScheduledNotification = (
   return null;
 };
 
+const LOADING_PARTICLES = Array.from({ length: 32 }, (_, index) => ({
+  angle: index * 11.25,
+  delay: -((index % 8) * 0.19),
+  duration: 1.45 + (index % 5) * 0.17,
+  size: 2 + (index % 3),
+}));
+
 const LoadingOverlay = ({ text }: { text: string }) => {
   return (
     <div
-      className="fixed inset-0 z-[999998] flex h-dvh w-full items-center justify-center bg-[#03070d]/[0.9] backdrop-blur-xl"
+      className="fixed inset-0 z-[999998] flex h-dvh w-full flex-col items-center justify-center gap-4 bg-[#03070d]/[0.9] px-6 backdrop-blur-xl"
       role="status"
       aria-live="polite"
       aria-busy="true"
     >
-      <div aria-hidden="true" className="relative h-24 w-24">
-        <div className="absolute inset-0 animate-[spin_2.4s_linear_infinite] border-2 border-[#e6cf8b]/80 border-r-transparent shadow-[0_0_30px_rgba(230,207,139,0.24)] [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
-        <div className="absolute inset-[10px] animate-[spin_1.8s_linear_infinite_reverse] border border-[#f3e5ba]/55 border-b-transparent [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
-        <div className="absolute inset-[24px] animate-[spin_1.2s_linear_infinite] border border-slate-300/40 border-l-transparent [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
-        <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-[#e6cf8b]/40 to-transparent" />
-        <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-gradient-to-r from-transparent via-[#f3e5ba]/35 to-transparent" />
-        <div className="absolute inset-[39px] animate-pulse bg-[#f3e5ba] shadow-[0_0_24px_rgba(230,207,139,0.7)] [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
+      <style>{`
+        @keyframes localProductsParticleDrift {
+          0% { opacity: 0; transform: translateX(22px) scale(0.25); }
+          28% { opacity: 0.95; }
+          74% { opacity: 0.52; }
+          100% { opacity: 0; transform: translateX(82px) scale(0.15); }
+        }
+        @keyframes localProductsLoadingHalo {
+          0%, 100% { opacity: 0.24; transform: scale(0.82); }
+          50% { opacity: 0.68; transform: scale(1.08); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .local-products-loading-particle,
+          .local-products-loading-halo {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+          }
+        }
+      `}</style>
+
+      <div aria-hidden="true" className="relative h-44 w-44">
+        <div className="local-products-loading-halo absolute inset-4 rounded-full border border-[#e6cf8b]/10 shadow-[0_0_70px_rgba(230,207,139,0.14)] [animation:localProductsLoadingHalo_2.2s_ease-in-out_infinite]" />
+        {LOADING_PARTICLES.map((particle, index) => (
+          <span
+            key={particle.angle}
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ transform: `rotate(${particle.angle}deg)` }}
+          >
+            <span
+              className={`local-products-loading-particle block rounded-full ${index % 4 === 0
+                ? "bg-cyan-200 shadow-[0_0_10px_rgba(165,243,252,0.9)]"
+                : "bg-[#f3e5ba] shadow-[0_0_10px_rgba(243,229,186,0.9)]"
+                }`}
+              style={{
+                width: particle.size,
+                height: particle.size,
+                animationName: "localProductsParticleDrift",
+                animationDuration: `${particle.duration}s`,
+                animationDelay: `${particle.delay}s`,
+                animationTimingFunction: "ease-out",
+                animationIterationCount: "infinite",
+              }}
+            />
+          </span>
+        ))}
+
+        <div className="absolute inset-10">
+          <div className="absolute inset-0 animate-[spin_2.4s_linear_infinite] border-2 border-[#e6cf8b]/80 border-r-transparent shadow-[0_0_30px_rgba(230,207,139,0.24)] [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
+          <div className="absolute inset-[10px] animate-[spin_1.8s_linear_infinite_reverse] border border-[#f3e5ba]/55 border-b-transparent [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
+          <div className="absolute inset-[24px] animate-[spin_1.2s_linear_infinite] border border-slate-300/40 border-l-transparent [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
+          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-[#e6cf8b]/40 to-transparent" />
+          <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-gradient-to-r from-transparent via-[#f3e5ba]/35 to-transparent" />
+          <div className="absolute inset-[39px] animate-pulse bg-[#f3e5ba] shadow-[0_0_24px_rgba(230,207,139,0.7)] [clip-path:polygon(50%_0,100%_50%,50%_100%,0_50%)]" />
+        </div>
       </div>
-      <span className="sr-only">{text}</span>
+      <div className="max-w-sm text-center text-[11px] font-bold tracking-[0.08em] text-[#eadfbe]">
+        {text}
+      </div>
     </div>
   );
 };
@@ -1280,6 +1337,250 @@ type BootstrapPayload = {
   postedRecords?: unknown;
 };
 
+const sortProductsByUpdatedAt = (
+  products: LocalProduct[],
+): LocalProduct[] => {
+  return [...products].sort(
+    (first, second) =>
+      new Date(second.updatedAt).getTime() -
+      new Date(first.updatedAt).getTime(),
+  );
+};
+
+type BootstrapCacheRecord = {
+  version: 1;
+  cachedAt: string;
+  payload: BootstrapPayload;
+};
+
+const BOOTSTRAP_CACHE_DATABASE_NAME = "local-products-cloud-cache";
+const BOOTSTRAP_CACHE_DATABASE_VERSION = 1;
+const BOOTSTRAP_CACHE_STORE_NAME = "snapshots";
+const BOOTSTRAP_CACHE_RECORD_KEY = "latest-bootstrap";
+const BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v1";
+const BOOTSTRAP_HOT_CACHE_MAX_CHARACTERS = 2_750_000;
+const INITIAL_PRODUCT_RENDER_LIMIT = 24;
+const PRODUCT_RENDER_BATCH_SIZE = 20;
+
+const normalizeBootstrapCacheRecord = (
+  value: unknown,
+): BootstrapCacheRecord | null => {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  const payload = record.payload;
+
+  if (
+    record.version !== 1 ||
+    typeof record.cachedAt !== "string" ||
+    !payload ||
+    typeof payload !== "object"
+  ) {
+    return null;
+  }
+
+  const payloadRecord = payload as Record<string, unknown>;
+
+  if (!Array.isArray(payloadRecord.products)) return null;
+
+  return {
+    version: 1,
+    cachedAt: record.cachedAt,
+    payload: {
+      products: payloadRecord.products,
+      settings: payloadRecord.settings,
+      scheduleConfig: payloadRecord.scheduleConfig,
+      scheduleAssignments: payloadRecord.scheduleAssignments,
+      postedRecords: payloadRecord.postedRecords,
+    },
+  };
+};
+
+const openBootstrapCacheDatabase = async (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) {
+      reject(new Error("IndexedDB không khả dụng"));
+      return;
+    }
+
+    const request = window.indexedDB.open(
+      BOOTSTRAP_CACHE_DATABASE_NAME,
+      BOOTSTRAP_CACHE_DATABASE_VERSION,
+    );
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+
+      if (!database.objectStoreNames.contains(BOOTSTRAP_CACHE_STORE_NAME)) {
+        database.createObjectStore(BOOTSTRAP_CACHE_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () =>
+      reject(request.error ?? new Error("Không thể mở cache IndexedDB"));
+    request.onblocked = () =>
+      reject(new Error("Cache IndexedDB đang bị tab khác khóa"));
+  });
+};
+
+const readBootstrapCacheFromIndexedDb = async (): Promise<BootstrapCacheRecord | null> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        BOOTSTRAP_CACHE_STORE_NAME,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(BOOTSTRAP_CACHE_STORE_NAME)
+        .get(BOOTSTRAP_CACHE_RECORD_KEY);
+
+      request.onsuccess = () =>
+        resolve(normalizeBootstrapCacheRecord(request.result as unknown));
+      request.onerror = () =>
+        reject(request.error ?? new Error("Không thể đọc cache IndexedDB"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Đọc cache IndexedDB bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const writeBootstrapCacheToIndexedDb = async (
+  record: BootstrapCacheRecord,
+): Promise<void> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        BOOTSTRAP_CACHE_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction
+        .objectStore(BOOTSTRAP_CACHE_STORE_NAME)
+        .put(record, BOOTSTRAP_CACHE_RECORD_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể ghi cache IndexedDB"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Ghi cache IndexedDB bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const readBootstrapHotCache = (): BootstrapCacheRecord | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    return raw
+      ? normalizeBootstrapCacheRecord(JSON.parse(raw) as unknown)
+      : null;
+  } catch {
+    window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    return null;
+  }
+};
+
+const writeBootstrapHotCache = (record: BootstrapCacheRecord): boolean => {
+  if (typeof window === "undefined") return false;
+
+  try {
+    const serializedRecord = JSON.stringify(record);
+
+    if (serializedRecord.length > BOOTSTRAP_HOT_CACHE_MAX_CHARACTERS) {
+      window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+      return false;
+    }
+
+    window.localStorage.setItem(
+      BOOTSTRAP_CACHE_FALLBACK_KEY,
+      serializedRecord,
+    );
+    return true;
+  } catch {
+    window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    return false;
+  }
+};
+
+const readBootstrapCache = async (): Promise<BootstrapCacheRecord | null> => {
+  const hotCacheRecord = readBootstrapHotCache();
+
+  if (hotCacheRecord) return hotCacheRecord;
+
+  try {
+    const indexedDbRecord = await readBootstrapCacheFromIndexedDb();
+
+    if (indexedDbRecord) return indexedDbRecord;
+  } catch {
+    // localStorage chỉ là phương án dự phòng khi IndexedDB không khả dụng.
+  }
+  return null;
+};
+
+const writeBootstrapCache = async (
+  payload: BootstrapPayload,
+): Promise<void> => {
+  const record: BootstrapCacheRecord = {
+    version: 1,
+    cachedAt: new Date().toISOString(),
+    payload,
+  };
+
+  let indexedDbError: unknown;
+
+  try {
+    await writeBootstrapCacheToIndexedDb(record);
+  } catch (error) {
+    indexedDbError = error;
+  }
+
+  const hotCacheWritten = writeBootstrapHotCache(record);
+
+  if (indexedDbError && !hotCacheWritten) {
+    throw indexedDbError;
+  }
+};
+
+const clearBootstrapCache = async (): Promise<void> => {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+  }
+
+  try {
+    const database = await openBootstrapCacheDatabase();
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(
+          BOOTSTRAP_CACHE_STORE_NAME,
+          "readwrite",
+        );
+
+        transaction
+          .objectStore(BOOTSTRAP_CACHE_STORE_NAME)
+          .delete(BOOTSTRAP_CACHE_RECORD_KEY);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () =>
+          reject(transaction.error ?? new Error("Không thể xóa cache IndexedDB"));
+        transaction.onabort = () =>
+          reject(transaction.error ?? new Error("Xóa cache IndexedDB bị hủy"));
+      });
+    } finally {
+      database.close();
+    }
+  } catch {
+    return;
+  }
+};
+
 type CloudinaryCleanupPayload = {
   deleted: Array<{ publicId: string; result: string }>;
   failed: Array<{ publicId: string; message: string }>;
@@ -1296,11 +1597,6 @@ const emptyCloudinaryCleanup = (): CloudinaryCleanupPayload => ({
 
 const getBootstrapData = async (): Promise<BootstrapPayload> => {
   return apiRequest<BootstrapPayload>("/bootstrap");
-};
-
-const getAllProductsFromDb = async (): Promise<LocalProduct[]> => {
-  const payload = await apiRequest<{ products: unknown[] }>("/products");
-  return normalizeProductsArray(payload.products);
 };
 
 const saveProductToDb = async (
@@ -2534,6 +2830,28 @@ const normalizeImageExtension = (image: Pick<ProductImage, "format" | "type" | "
   return fromName || "img";
 };
 
+const createCloudinaryThumbnailUrl = (sourceUrl: string): string => {
+  try {
+    const url = new URL(sourceUrl);
+    const uploadPathMarker = "/image/upload/";
+
+    if (
+      url.hostname !== "res.cloudinary.com" ||
+      !url.pathname.includes(uploadPathMarker)
+    ) {
+      return sourceUrl;
+    }
+
+    url.pathname = url.pathname.replace(
+      uploadPathMarker,
+      `${uploadPathMarker}f_auto,q_auto:good,c_limit,w_640,dpr_auto/`,
+    );
+    return url.toString();
+  } catch {
+    return sourceUrl;
+  }
+};
+
 const createSystemImageFilename = (
   index: number,
   imageId: string,
@@ -2998,7 +3316,7 @@ const restorePayloadToLocal = async (
     setScheduleConfig: (config: ScheduleConfig) => void;
     setScheduleAssignments: (assignments: ScheduleAssignmentMap) => void;
     setPostedRecords: (records: PostedRecord[]) => void;
-    loadProducts: () => Promise<void>;
+    setProducts: (products: LocalProduct[]) => void;
   },
 ): Promise<void> => {
   const today = getTodayString();
@@ -3029,8 +3347,7 @@ const restorePayloadToLocal = async (
   params.setScheduleConfig(nextScheduleConfig);
   params.setScheduleAssignments(nextScheduleAssignments);
   params.setPostedRecords(nextPostedRecords);
-
-  await params.loadProducts();
+  params.setProducts(sortProductsByUpdatedAt(cloudProducts));
 };
 
 type DirectoryPickerWindow = Window & {
@@ -3374,6 +3691,15 @@ export default function LocalProductsPage() {
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
   const contactSelectionPromptedRef = useRef<boolean>(false);
   const previousContactOptionCountRef = useRef<number>(0);
+  const persistedAppStateSignaturesRef = useRef<{
+    settings: string;
+    scheduleConfig: string;
+    scheduleAssignments: string;
+  }>({
+    settings: "",
+    scheduleConfig: "",
+    scheduleAssignments: "",
+  });
   const handleLocalWorkspaceKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>): void => {
       if (event.key.toLowerCase() !== "f" || !isTypingTarget(event.target)) {
@@ -3421,6 +3747,10 @@ export default function LocalProductsPage() {
     useState<boolean>(false);
   const [editingId, setEditingId] = useState<string>("");
   const [query, setQuery] = useState<string>("");
+  const [productRenderState, setProductRenderState] = useState<{
+    key: string;
+    limit: number;
+  }>({ key: "", limit: INITIAL_PRODUCT_RENDER_LIMIT });
   const [activeCategoryTab, setActiveCategoryTab] =
     useState<CategoryTab>("all");
   const [draggingCategoryKey, setDraggingCategoryKey] =
@@ -4739,6 +5069,53 @@ export default function LocalProductsPage() {
     );
   }, [activeCategoryTab, categories, pendingDoneProductIds, products, query]);
 
+  const productRenderKey = useMemo(() => {
+    return [
+      activeCategoryTab,
+      query,
+      products.length,
+      products[0]?.updatedAt ?? "",
+      categories.join("\u0000"),
+    ].join("\u0001");
+  }, [activeCategoryTab, categories, products, query]);
+  const visibleProductLimit =
+    productRenderState.key === productRenderKey
+      ? productRenderState.limit
+      : INITIAL_PRODUCT_RENDER_LIMIT;
+  const visibleProducts = useMemo(() => {
+    return filteredProducts.slice(0, visibleProductLimit);
+  }, [filteredProducts, visibleProductLimit]);
+
+  useEffect(() => {
+    if (productRenderState.key !== productRenderKey) {
+      setProductRenderState({
+        key: productRenderKey,
+        limit: INITIAL_PRODUCT_RENDER_LIMIT,
+      });
+      return;
+    }
+
+    if (productRenderState.limit >= filteredProducts.length) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setProductRenderState((current) => {
+        if (current.key !== productRenderKey) return current;
+
+        return {
+          ...current,
+          limit: Math.min(
+            current.limit + PRODUCT_RENDER_BATCH_SIZE,
+            filteredProducts.length,
+          ),
+        };
+      });
+    }, 24);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [filteredProducts.length, productRenderKey, productRenderState]);
+
   const groupedProductsByCategory = useMemo(() => {
     return orderGroupsByCategories(
       createGroupedProducts(filteredProducts, pendingDoneProductIds),
@@ -4991,29 +5368,48 @@ export default function LocalProductsPage() {
     return Math.max(totalTodayTaskCount - postedTodayCount, 0);
   }, [postedTodayCount, totalTodayTaskCount]);
 
-  const loadProducts = async (): Promise<void> => {
-    const list = await getAllProductsFromDb();
-    const sortedList = list.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
-
-    setProducts(sortedList);
-  };
-
   const applyBootstrapPayload = useCallback((payload: BootstrapPayload): void => {
-    const list = normalizeProductsArray(payload.products).sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    const nextProducts = sortProductsByUpdatedAt(
+      normalizeProductsArray(payload.products),
     );
+    const nextSettings =
+      normalizeGlobalSettings(payload.settings) ?? loadGlobalSettings();
+    const nextScheduleConfig =
+      normalizeScheduleConfig(payload.scheduleConfig) ?? loadScheduleConfig();
+    const nextScheduleAssignments =
+      normalizeScheduleAssignments(payload.scheduleAssignments) ??
+      loadScheduleAssignments();
+    const nextPostedRecords =
+      normalizePostedRecords(payload.postedRecords) ?? loadPostedRecords();
 
-    setProducts(list);
-    setSettings(normalizeGlobalSettings(payload.settings) ?? loadGlobalSettings());
-    setScheduleConfig(normalizeScheduleConfig(payload.scheduleConfig) ?? loadScheduleConfig());
-    setScheduleAssignments(
-      normalizeScheduleAssignments(payload.scheduleAssignments) ?? loadScheduleAssignments(),
-    );
-    setPostedRecords(normalizePostedRecords(payload.postedRecords) ?? loadPostedRecords());
+    persistedAppStateSignaturesRef.current = {
+      settings: JSON.stringify(nextSettings),
+      scheduleConfig: JSON.stringify(nextScheduleConfig),
+      scheduleAssignments: JSON.stringify(nextScheduleAssignments),
+    };
+
+    setProducts(nextProducts);
+    setSettings(nextSettings);
+    setScheduleConfig(nextScheduleConfig);
+    setScheduleAssignments(nextScheduleAssignments);
+    setPostedRecords(nextPostedRecords);
   }, []);
+
+  const createCurrentBootstrapPayload = useCallback((): BootstrapPayload => {
+    return {
+      products,
+      settings,
+      scheduleConfig,
+      scheduleAssignments,
+      postedRecords,
+    };
+  }, [
+    postedRecords,
+    products,
+    scheduleAssignments,
+    scheduleConfig,
+    settings,
+  ]);
 
   const handleRefreshCloudData = async (): Promise<void> => {
     setPageLoadingText("Đang đồng bộ dữ liệu MongoDB...");
@@ -5021,8 +5417,11 @@ export default function LocalProductsPage() {
 
     try {
       await flushQueuedAppStatePatch();
-      applyBootstrapPayload(await getBootstrapData());
-      Toastify("Đã đồng bộ dữ liệu mới nhất từ MongoDB", 200);
+      const payload = await getBootstrapData();
+
+      applyBootstrapPayload(payload);
+      await writeBootstrapCache(payload);
+      Toastify("Đã lấy dữ liệu mới từ MongoDB và cập nhật cache", 200);
     } catch (error) {
       Toastify(
         error instanceof Error ? error.message : "Không thể đồng bộ dữ liệu MongoDB",
@@ -5033,17 +5432,47 @@ export default function LocalProductsPage() {
     }
   };
 
+  const handleReloadPage = async (): Promise<void> => {
+    setPageLoadingText("Đang lưu cache và làm mới trang...");
+    await waitForUiPaint();
+
+    try {
+      await writeBootstrapCache(createCurrentBootstrapPayload());
+    } catch (error) {
+      setPageLoadingText("");
+      Toastify(
+        error instanceof Error
+          ? error.message
+          : "Không thể lưu cache trước khi làm mới trang",
+        400,
+      );
+      return;
+    }
+
+    await flushQueuedAppStatePatch().catch(() => undefined);
+    window.location.reload();
+  };
+
   useEffect(() => {
     let cancelled = false;
-    setPageLoadingText("Đang tải dữ liệu từ MongoDB...");
+    setPageLoadingText("Đang đọc dữ liệu cache trên thiết bị...");
 
-    void getBootstrapData()
-      .then((payload) => {
+    void readBootstrapCache()
+      .then((cacheRecord) => {
         if (cancelled) return;
-        applyBootstrapPayload(payload);
-      })
-      .catch((error) => {
-        if (!cancelled) Toastify(error instanceof Error ? error.message : "Không thể tải dữ liệu MongoDB", 400);
+
+        if (cacheRecord) {
+          applyBootstrapPayload(cacheRecord.payload);
+          return;
+        }
+
+        const initialScheduleConfig = loadScheduleConfig();
+        persistedAppStateSignaturesRef.current = {
+          settings: JSON.stringify(defaultSettings),
+          scheduleConfig: JSON.stringify(initialScheduleConfig),
+          scheduleAssignments: JSON.stringify({}),
+        };
+        Toastify("Thiết bị chưa có cache, nhấn Đồng bộ để lấy dữ liệu", 300);
       })
       .finally(() => {
         if (!cancelled) {
@@ -5056,6 +5485,20 @@ export default function LocalProductsPage() {
       cancelled = true;
     };
   }, [applyBootstrapPayload]);
+
+  useEffect(() => {
+    if (!isSettingsReady) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void writeBootstrapCache(createCurrentBootstrapPayload()).catch((error) => {
+        console.error("Không thể cập nhật cache thiết bị", error);
+      });
+    }, 900);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [createCurrentBootstrapPayload, isSettingsReady]);
 
   useEffect(() => {
     if (!isSettingsReady || !isDevicePreferencesReady) return;
@@ -5144,11 +5587,29 @@ export default function LocalProductsPage() {
 
   useEffect(() => {
     if (!isSettingsReady) return;
+    const signature = JSON.stringify(scheduleConfig);
+
+    if (
+      persistedAppStateSignaturesRef.current.scheduleConfig === signature
+    ) {
+      return;
+    }
+
+    persistedAppStateSignaturesRef.current.scheduleConfig = signature;
     saveScheduleConfig(scheduleConfig);
   }, [isSettingsReady, scheduleConfig]);
 
   useEffect(() => {
     if (!isSettingsReady) return;
+    const signature = JSON.stringify(scheduleAssignments);
+
+    if (
+      persistedAppStateSignaturesRef.current.scheduleAssignments === signature
+    ) {
+      return;
+    }
+
+    persistedAppStateSignaturesRef.current.scheduleAssignments = signature;
     saveScheduleAssignments(scheduleAssignments);
   }, [isSettingsReady, scheduleAssignments]);
 
@@ -5351,24 +5812,19 @@ export default function LocalProductsPage() {
 
   useEffect(() => {
     if (!isSettingsReady) return;
+    const signature = JSON.stringify(settings);
+
+    if (persistedAppStateSignaturesRef.current.settings === signature) {
+      return;
+    }
+
+    persistedAppStateSignaturesRef.current.settings = signature;
 
     saveGlobalSettings({
       ...settings,
       updatedAt: new Date().toISOString(),
     });
-  }, [
-    settings.commonDescription,
-    settings.globalNote,
-    settings.contactOptions,
-    settings.facebookPages,
-    settings.facebookDuplicatePosts,
-    settings.facebookGroups,
-    settings.selectedFacebookGroupIds,
-    settings.categoryColors,
-    settings.categoryOrder,
-    settings.autoCopyShareMode,
-    isSettingsReady,
-  ]);
+  }, [isSettingsReady, settings]);
 
   useEffect(() => {
     setFacebookGroupActiveIndex(0);
@@ -6378,7 +6834,12 @@ export default function LocalProductsPage() {
       persistedDraftPublicIdsRef.current = new Set(
         [...product.images, ...product.internalImages].map((image) => image.publicId),
       );
-      await loadProducts();
+      setProducts((current) =>
+        sortProductsByUpdatedAt([
+          product,
+          ...current.filter((item) => item.id !== product.id),
+        ]),
+      );
 
       closeAllModals();
       resetForm();
@@ -6462,7 +6923,9 @@ export default function LocalProductsPage() {
           return nextRecords;
         });
 
-        await loadProducts();
+        setProducts((current) =>
+          current.filter((item) => item.id !== id),
+        );
         Toastify(
           cleanup.failed.length > 0
             ? `Đã xóa sản phẩm khỏi MongoDB nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`
@@ -6783,6 +7246,7 @@ export default function LocalProductsPage() {
             "1",
           );
           await clearAllLocalProductData();
+          await clearBootstrapCache();
           window.location.reload();
         } catch (error) {
           window.sessionStorage.removeItem(RESTORE_BACKUP_AFTER_RELOAD_KEY);
@@ -6806,6 +7270,7 @@ export default function LocalProductsPage() {
 
         try {
           await clearAllLocalProductData();
+          await clearBootstrapCache();
           resetLocalProductState();
           closeAllModals();
           Toastify("Đã xóa toàn bộ dữ liệu MongoDB và Cloudinary", 200);
@@ -6830,6 +7295,12 @@ export default function LocalProductsPage() {
       selectedCategories: [],
     };
 
+    persistedAppStateSignaturesRef.current = {
+      settings: JSON.stringify(nextSettings),
+      scheduleConfig: JSON.stringify(nextScheduleConfig),
+      scheduleAssignments: JSON.stringify({}),
+    };
+
     setProducts([]);
     setSettings(nextSettings);
     setContactDraft("");
@@ -6851,6 +7322,7 @@ export default function LocalProductsPage() {
         setPageLoadingText("Đang xóa dữ liệu hiện tại...");
         await waitForUiPaint();
         await clearAllLocalProductData();
+        await clearBootstrapCache();
         resetLocalProductState();
       }
 
@@ -6864,7 +7336,7 @@ export default function LocalProductsPage() {
         setScheduleConfig,
         setScheduleAssignments,
         setPostedRecords,
-        loadProducts,
+        setProducts,
       });
 
       setContactDraft("");
@@ -10223,9 +10695,21 @@ export default function LocalProductsPage() {
 
               <button
                 type="button"
+                data-luxury-accent="cyan"
+                title="Làm mới trang bằng dữ liệu cache trên thiết bị"
+                aria-label="Làm mới trang bằng dữ liệu cache trên thiết bị"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => void handleReloadPage()}
+              >
+                <FiRotateCw aria-hidden="true" className={iconClassName} />
+                Làm mới
+              </button>
+
+              <button
+                type="button"
                 data-luxury-accent="blue"
-                title="Đồng bộ dữ liệu từ MongoDB"
-                aria-label="Đồng bộ dữ liệu từ MongoDB"
+                title="Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                aria-label="Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={() => void handleRefreshCloudData()}
               >
@@ -10394,7 +10878,7 @@ export default function LocalProductsPage() {
           </div>
 
           <div
-            className={`fixed bottom-[72px] left-2 flex-row items-center gap-1.5 ${isScrollTopVisible ? "flex" : "hidden"} ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+            className={`fixed bottom-3 left-2 flex-row items-center gap-2 md:bottom-[72px] md:gap-1.5 ${isScrollTopVisible ? "flex" : "hidden"} ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
           >
             <motion.button
               type="button"
@@ -10411,7 +10895,7 @@ export default function LocalProductsPage() {
                   : "Mở menu chức năng"
               }
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-9 w-9 shrink-0 items-center justify-center border backdrop-blur-xl transition ${isHeaderActionsMenuOpen
+              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition md:h-9 md:w-9 ${isHeaderActionsMenuOpen
                 ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                 : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                 }`}
@@ -10421,9 +10905,9 @@ export default function LocalProductsPage() {
               }}
             >
               {isHeaderActionsMenuOpen ? (
-                <FiX aria-hidden="true" className="h-4 w-4" />
+                <FiX aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
               ) : (
-                <FiMenu aria-hidden="true" className="h-4 w-4" />
+                <FiMenu aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
               )}
             </motion.button>
 
@@ -10439,10 +10923,10 @@ export default function LocalProductsPage() {
                   }}
                   aria-label="Cuộn lên đầu trang"
                   title="Lên đầu trang"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95 md:h-9 md:w-9"
                   onClick={handleScrollToTop}
                 >
-                  <FiArrowUp aria-hidden="true" className="h-4 w-4" />
+                  <FiArrowUp aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
                 </motion.button>
               ) : null}
             </AnimatePresence>
@@ -10583,7 +11067,7 @@ export default function LocalProductsPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-2 xl:gap-4 2xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
-                {filteredProducts.map((product, index) => {
+                {visibleProducts.map((product, index) => {
                   const descriptionPreview =
                     product.description.trim() ||
                     settings.commonDescription.trim();
@@ -10610,6 +11094,8 @@ export default function LocalProductsPage() {
                           settings.categoryColors,
                         ),
                         animationDelay: `${Math.min(index * 34, 340)}ms`,
+                        contentVisibility: "auto",
+                        containIntrinsicSize: "520px",
                       }}
                       className={`luxury-product-card product-wave-card group min-w-0 overflow-hidden border transition duration-300 hover:-translate-y-1 ${productDone ? "opacity-65" : ""
                         } ${active
@@ -10644,10 +11130,14 @@ export default function LocalProductsPage() {
                       >
                         {product.images[0] ? (
                           <img
-                            src={product.images[0].dataUrl}
+                            src={createCloudinaryThumbnailUrl(
+                              product.images[0].dataUrl,
+                            )}
                             alt={product.name}
                             width={1200}
                             height={1200}
+                            loading={index < 4 ? "eager" : "lazy"}
+                            decoding="async"
                             className={`h-full w-full object-contain transition glass duration-500 group-hover:scale-105 ${productDone ? "blur-[2px] grayscale opacity-40" : ""
                               }`}
                           />
@@ -10992,6 +11482,12 @@ export default function LocalProductsPage() {
                     </article>
                   );
                 })}
+                {visibleProducts.length < filteredProducts.length ? (
+                  <div className="col-span-full flex items-center justify-center gap-2 border border-[#d8c99f]/10 bg-[#d8c99f]/[0.025] px-3 py-2 text-[10px] font-bold text-slate-400">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#e6cf8b]" />
+                    Đang dựng {visibleProducts.length}/{filteredProducts.length} sản phẩm
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
