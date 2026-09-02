@@ -147,6 +147,10 @@ type CategoryColorStyle = CSSProperties & {
   "--category-contrast": string;
 };
 
+type CategorySceneStyle = CSSProperties & {
+  "--active-category-color": string;
+};
+
 type GlobalSettings = {
   commonDescription: string;
   globalNote: string;
@@ -5426,6 +5430,17 @@ export default function LocalProductsPage() {
       categories,
     );
   }, [activeCategoryTab, categories, pendingDoneProductIds, products, query]);
+
+  const activeCategorySceneColor = useMemo(() => {
+    if (activeCategoryTab === "all") return "";
+
+    return settings.categoryColors[normalizeTextKey(activeCategoryTab)] ?? "";
+  }, [activeCategoryTab, settings.categoryColors]);
+
+  const activeCategorySceneStyle: CategorySceneStyle | undefined =
+    activeCategorySceneColor
+      ? { "--active-category-color": activeCategorySceneColor }
+      : undefined;
 
   const productRenderKey = useMemo(() => {
     return [
@@ -10885,6 +10900,326 @@ export default function LocalProductsPage() {
           box-shadow: 0 0 14px color-mix(in srgb, var(--category-color) 22%, transparent);
         }
 
+        .category-product-stage {
+          position: relative;
+          isolation: isolate;
+          overflow: hidden;
+          border: 0;
+          padding: 0;
+          transition: background 680ms ease;
+        }
+
+        .category-product-stage[data-category-scene="true"] {
+          background:
+            radial-gradient(
+              circle at 18% 100%,
+              color-mix(in srgb, var(--active-category-color) 16%, transparent) 0%,
+              color-mix(in srgb, var(--active-category-color) 5%, transparent) 29%,
+              transparent 56%
+            ),
+            radial-gradient(
+              circle at 88% 8%,
+              color-mix(in srgb, var(--active-category-color) 9%, transparent) 0%,
+              transparent 40%
+            ),
+            linear-gradient(
+              180deg,
+              color-mix(in srgb, var(--active-category-color) 4%, #08121c 96%),
+              rgba(4, 10, 17, 0.92)
+            );
+        }
+
+        .category-product-stage[data-category-scene="true"]::before {
+          content: "";
+          position: absolute;
+          z-index: 0;
+          inset: -12% -6% -18%;
+          pointer-events: none;
+          background:
+            radial-gradient(
+              ellipse at 24% 90%,
+              color-mix(in srgb, var(--active-category-color) 12%, transparent),
+              transparent 31%
+            ),
+            radial-gradient(
+              ellipse at 76% 94%,
+              color-mix(in srgb, var(--active-category-color) 8%, transparent),
+              transparent 27%
+            );
+          filter: blur(19px) saturate(1.12);
+          opacity: 0.56;
+          animation: categoryEmberGlow 9.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        .category-product-stage[data-category-scene="true"]::after {
+          content: "";
+          position: absolute;
+          z-index: 0;
+          left: 3%;
+          right: 3%;
+          bottom: -15%;
+          height: 38%;
+          pointer-events: none;
+          background:
+            radial-gradient(
+              ellipse at 18% 100%,
+              color-mix(in srgb, var(--active-category-color) 16%, transparent),
+              transparent 31%
+            ),
+            radial-gradient(
+              ellipse at 51% 108%,
+              color-mix(in srgb, var(--active-category-color) 11%, transparent),
+              transparent 27%
+            ),
+            radial-gradient(
+              ellipse at 82% 100%,
+              color-mix(in srgb, var(--active-category-color) 13%, transparent),
+              transparent 29%
+            );
+          filter: blur(13px) saturate(1.16);
+          opacity: 0.34;
+          animation: categoryLowFlameBreath 10.8s cubic-bezier(0.37, 0, 0.24, 1) infinite;
+        }
+
+        .category-product-stage > :not(.category-ember-field) {
+          position: relative;
+          z-index: 3;
+        }
+
+        .category-ember-field {
+          position: absolute !important;
+          z-index: 1 !important;
+          inset: 0;
+          overflow: hidden;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 700ms ease;
+          mask-image: linear-gradient(to top, black 0%, black 78%, transparent 100%);
+        }
+
+        .category-product-stage[data-category-scene="true"] .category-ember-field {
+          opacity: 1;
+        }
+
+        .category-ember-layer {
+          position: absolute;
+          inset: -18% -10% -30%;
+          pointer-events: none;
+          mix-blend-mode: screen;
+          will-change: transform, opacity, background-position;
+        }
+
+        .category-ember-layer[data-ember-layer="1"] {
+          background:
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 76%, white 24%) 0 0.48px,
+              transparent 1.05px
+            ) 9px 17px / 43px 67px,
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 82%, white 18%) 0 0.62px,
+              transparent 1.22px
+            ) 27px 41px / 79px 103px;
+          filter:
+            brightness(1.22)
+            saturate(1.28)
+            drop-shadow(0 0 2.4px color-mix(in srgb, var(--active-category-color) 88%, white 12%));
+          opacity: 0.56;
+          animation: categoryEmberDriftOne 14.8s cubic-bezier(0.37, 0, 0.2, 1) infinite;
+        }
+
+        .category-ember-layer[data-ember-layer="2"] {
+          background:
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 72%, white 28%) 0 0.38px,
+              transparent 0.95px
+            ) 5px 31px / 59px 83px,
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 78%, white 22%) 0 0.52px,
+              transparent 1.08px
+            ) 33px 11px / 97px 127px;
+          filter:
+            brightness(1.18)
+            saturate(1.24)
+            drop-shadow(0 0 2px color-mix(in srgb, var(--active-category-color) 82%, white 18%));
+          opacity: 0.43;
+          animation: categoryEmberDriftTwo 18.6s cubic-bezier(0.33, 0, 0.18, 1) -6.4s infinite;
+        }
+
+        .category-ember-layer[data-ember-layer="3"] {
+          background:
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 68%, white 32%) 0 0.32px,
+              transparent 0.82px
+            ) 19px 7px / 37px 71px,
+            radial-gradient(
+              circle,
+              color-mix(in srgb, var(--active-category-color) 74%, white 26%) 0 0.42px,
+              transparent 0.94px
+            ) 41px 53px / 113px 149px;
+          filter:
+            brightness(1.14)
+            saturate(1.2)
+            drop-shadow(0 0 1.8px color-mix(in srgb, var(--active-category-color) 76%, white 24%));
+          opacity: 0.34;
+          animation: categoryEmberDriftThree 22.4s cubic-bezier(0.4, 0, 0.16, 1) -11.2s infinite;
+        }
+
+        .category-product-stage[data-category-scene="true"] .luxury-product-card {
+          z-index: 4;
+          translate: 0 -2px;
+          transform-style: preserve-3d;
+          backface-visibility: hidden;
+          border-color: color-mix(
+            in srgb,
+            var(--active-category-color) 18%,
+            rgba(226, 214, 180, 0.3)
+          ) !important;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.09),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.34),
+            0 5px 0 rgba(0, 0, 0, 0.22),
+            0 17px 34px rgba(0, 0, 0, 0.42),
+            0 0 22px color-mix(in srgb, var(--active-category-color) 6%, transparent) !important;
+          transition-property: translate, transform, border-color, box-shadow, filter;
+          transition-duration: 360ms;
+          transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .category-product-stage[data-category-scene="true"] .luxury-product-card:hover {
+          translate: 0 -4px;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.11),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.32),
+            0 6px 0 rgba(0, 0, 0, 0.19),
+            0 24px 48px rgba(0, 0, 0, 0.48),
+            0 0 28px color-mix(in srgb, var(--active-category-color) 10%, transparent) !important;
+        }
+
+        @keyframes categoryEmberGlow {
+          0%,
+          100% {
+            opacity: 0.42;
+            transform: translate3d(-1.2%, 1.8%, 0) scale(0.98);
+          }
+          36% {
+            opacity: 0.58;
+            transform: translate3d(0.8%, -0.6%, 0) scale(1.015);
+          }
+          68% {
+            opacity: 0.49;
+            transform: translate3d(-0.4%, -1.2%, 0) scale(1.025);
+          }
+        }
+
+        @keyframes categoryLowFlameBreath {
+          0%,
+          100% {
+            opacity: 0.22;
+            transform: translate3d(-1%, 3%, 0) scaleX(0.96) scaleY(0.9);
+          }
+          33% {
+            opacity: 0.35;
+            transform: translate3d(1.4%, -1%, 0) scaleX(1.02) scaleY(1.02);
+          }
+          67% {
+            opacity: 0.28;
+            transform: translate3d(-0.8%, 0, 0) scaleX(1.04) scaleY(0.96);
+          }
+        }
+
+        @keyframes categoryEmberDriftOne {
+          0% {
+            opacity: 0;
+            transform: translate3d(-1%, 18%, 0) rotate(-0.35deg) scale(0.98);
+            background-position: 9px 17px, 27px 41px;
+          }
+          13% { opacity: 0.24; }
+          28% {
+            opacity: 0.31;
+            transform: translate3d(2.6%, 7%, 0) rotate(0.28deg) scale(1);
+            background-position: 18px 4px, 17px 25px;
+          }
+          49% {
+            opacity: 0.27;
+            transform: translate3d(-2.2%, -7%, 0) rotate(-0.52deg) scale(1.015);
+            background-position: 4px -13px, 36px 8px;
+          }
+          71% {
+            opacity: 0.22;
+            transform: translate3d(1.7%, -21%, 0) rotate(0.42deg) scale(1.025);
+            background-position: 22px -31px, 12px -14px;
+          }
+          88% { opacity: 0.12; }
+          100% {
+            opacity: 0;
+            transform: translate3d(-0.9%, -43%, 0) rotate(-0.18deg) scale(1.04);
+            background-position: 2px -58px, 31px -46px;
+          }
+        }
+
+        @keyframes categoryEmberDriftTwo {
+          0% {
+            opacity: 0;
+            transform: translate3d(2.4%, 20%, 0) rotate(0.48deg) scale(0.97);
+            background-position: 5px 31px, 33px 11px;
+          }
+          18% { opacity: 0.18; }
+          34% {
+            opacity: 0.24;
+            transform: translate3d(-2.8%, 5%, 0) rotate(-0.36deg) scale(1);
+            background-position: -8px 13px, 48px -4px;
+          }
+          57% {
+            opacity: 0.21;
+            transform: translate3d(1.1%, -11%, 0) rotate(0.22deg) scale(1.01);
+            background-position: 14px -9px, 24px -26px;
+          }
+          78% {
+            opacity: 0.16;
+            transform: translate3d(-1.7%, -27%, 0) rotate(-0.3deg) scale(1.025);
+            background-position: -3px -32px, 42px -48px;
+          }
+          100% {
+            opacity: 0;
+            transform: translate3d(2.2%, -46%, 0) rotate(0.16deg) scale(1.035);
+            background-position: 17px -63px, 18px -74px;
+          }
+        }
+
+        @keyframes categoryEmberDriftThree {
+          0% {
+            opacity: 0;
+            transform: translate3d(-2.5%, 17%, 0) rotate(-0.22deg) scale(0.985);
+            background-position: 19px 7px, 41px 53px;
+          }
+          16% { opacity: 0.13; }
+          31% {
+            opacity: 0.2;
+            transform: translate3d(1.2%, 4%, 0) rotate(0.34deg) scale(1);
+            background-position: 31px -8px, 29px 31px;
+          }
+          52% {
+            opacity: 0.18;
+            transform: translate3d(-1.1%, -10%, 0) rotate(-0.18deg) scale(1.012);
+            background-position: 11px -27px, 52px 4px;
+          }
+          73% {
+            opacity: 0.14;
+            transform: translate3d(2.8%, -24%, 0) rotate(0.38deg) scale(1.02);
+            background-position: 34px -49px, 25px -28px;
+          }
+          100% {
+            opacity: 0;
+            transform: translate3d(-1.8%, -41%, 0) rotate(-0.12deg) scale(1.035);
+            background-position: 8px -73px, 49px -67px;
+          }
+        }
+
         @keyframes categoryTaskbarPulse {
           0%, 100% {
             filter: brightness(1);
@@ -11713,9 +12048,18 @@ export default function LocalProductsPage() {
           </div>
 
           <div
+            data-category-scene={activeCategorySceneColor ? "true" : undefined}
+            style={activeCategorySceneStyle}
+            className="category-product-stage"
             onTouchStart={handleProductsTouchStart}
             onTouchEnd={handleProductsTouchEnd}
           >
+            <div className="category-ember-field" aria-hidden="true">
+              <span className="category-ember-layer" data-ember-layer="1" />
+              <span className="category-ember-layer" data-ember-layer="2" />
+              <span className="category-ember-layer" data-ember-layer="3" />
+            </div>
+
             {filteredProducts.length === 0 ? (
               <div className="luxury-dialog border p-5 text-center text-xs font-semibold tracking-wide text-slate-400">
                 Chưa có sản phẩm phù hợp.
