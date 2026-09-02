@@ -1,10 +1,12 @@
-import './globals.css';
-import { Inter, Roboto_Mono } from 'next/font/google';
-import { Metadata } from 'next';
+import "./globals.css";
+import { Inter, Roboto_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+
+const APP_BACKGROUND_COLOR = "#050a11";
 
 export const metadata = {
   title: {
-    absolute: '7Teck.vn',
+    absolute: "7Teck.vn",
   },
   robots: {
     index: false,
@@ -24,6 +26,9 @@ export const metadata = {
   },
 } satisfies Metadata;
 
+export const viewport = {
+  themeColor: APP_BACKGROUND_COLOR,
+} satisfies Viewport;
 
 const geistSans = Inter({
   variable: '--font-geist-sans',
@@ -43,10 +48,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" data-theme="mytheme">
-      <head>
-      </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html
+      lang="vi"
+      data-theme="mytheme"
+      className="bg-[#050a11]"
+      style={{
+        backgroundColor: APP_BACKGROUND_COLOR,
+        colorScheme: "dark",
+      }}
+    >
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} min-h-dvh bg-[#050a11] antialiased`}
+        style={{
+          backgroundColor: APP_BACKGROUND_COLOR,
+        }}
+      >
         {children}
       </body>
     </html>
