@@ -43,162 +43,8 @@ import {
   FiUploadCloud,
   FiX,
 } from "react-icons/fi";
-import {
-  toast,
-  ToastContainer,
-  type ToastOptions,
-} from "react-toastify/unstyled";
-
-const localProductsFont = Geist({
-  subsets: ["latin"],
-  display: "swap",
-  fallback: ["Segoe UI", "Arial", "sans-serif"],
-});
-
-const TOASTIFY_BASE_STYLES = `
-  .Toastify__toast-container {
-    position: fixed;
-    top: max(16px, env(safe-area-inset-top));
-    right: max(16px, env(safe-area-inset-right));
-    z-index: 1000000;
-    display: flex;
-    width: min(340px, calc(100vw - 32px));
-    flex-direction: column;
-    gap: 10px;
-    color: #ffffff;
-  }
-
-  .Toastify__toast {
-    position: relative;
-    display: flex;
-    min-height: 58px;
-    width: 100%;
-    align-items: center;
-    overflow: hidden;
-    padding: 12px 38px 12px 14px;
-    font-family: inherit;
-    word-break: break-word;
-    touch-action: none;
-  }
-
-  .Toastify__toast-body {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    align-items: center;
-    gap: 10px;
-    padding: 0;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.45;
-  }
-
-  .Toastify__toast-icon {
-    display: flex;
-    width: 20px;
-    flex: 0 0 20px;
-  }
-
-  .Toastify__toast-icon > svg {
-    height: 20px;
-    width: 20px;
-    fill: currentColor;
-  }
-
-  .Toastify__toast--success .Toastify__toast-icon { color: #6ee7b7; }
-  .Toastify__toast--warning .Toastify__toast-icon { color: #fde68a; }
-  .Toastify__toast--error .Toastify__toast-icon { color: #fda4af; }
-  .Toastify__toast--info .Toastify__toast-icon { color: #7dd3fc; }
-
-  .Toastify__close-button {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    display: flex;
-    height: 22px;
-    width: 22px;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    background: transparent;
-    color: currentColor;
-    opacity: 0.62;
-    cursor: pointer;
-  }
-
-  .Toastify__close-button:hover,
-  .Toastify__close-button:focus-visible {
-    opacity: 1;
-  }
-
-  .Toastify__close-button > svg {
-    height: 15px;
-    width: 15px;
-    fill: currentColor;
-  }
-
-  .Toastify__progress-bar--wrp {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    height: 3px;
-    overflow: hidden;
-  }
-
-  .Toastify__progress-bar--bg {
-    position: absolute;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .Toastify__progress-bar {
-    position: absolute;
-    inset: 0;
-    transform-origin: left;
-  }
-
-  .Toastify__progress-bar--animated {
-    animation: localProductsToastProgress linear 1 forwards;
-  }
-
-  .Toastify--animate {
-    animation-duration: 320ms;
-    animation-fill-mode: both;
-  }
-
-  .Toastify__bounce-enter--top-right {
-    animation-name: localProductsToastEnter;
-  }
-
-  .Toastify__bounce-exit--top-right {
-    animation-name: localProductsToastExit;
-  }
-
-  @keyframes localProductsToastProgress {
-    from { transform: scaleX(1); }
-    to { transform: scaleX(0); }
-  }
-
-  @keyframes localProductsToastEnter {
-    from { opacity: 0; transform: translate3d(24px, -8px, 0) scale(0.98); }
-    to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  }
-
-  @keyframes localProductsToastExit {
-    from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-    to { opacity: 0; transform: translate3d(24px, 0, 0) scale(0.98); }
-  }
-
-  @media (max-width: 480px) {
-    .Toastify__toast-container {
-      top: max(8px, env(safe-area-inset-top));
-      right: 8px;
-      left: 8px;
-      width: auto;
-    }
-  }
-`;
+import { toast, ToastContainer, type ToastOptions } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 type ProductImage = {
   id: string;
@@ -1132,6 +978,7 @@ const Toastify = (
 
   Object.values(message).forEach(showToast);
 };
+
 
 const getTodayString = (): string => {
   return new Date().toISOString().slice(0, 10);
@@ -9350,10 +9197,9 @@ export default function LocalProductsPage() {
   if (!isSettingsReady) {
     return (
       <main
-        className={`${localProductsFont.className} min-h-dvh w-full bg-[#050a11] text-slate-100`}
+        className={`min-h-dvh w-full bg-[#050a11] text-slate-100`}
       >
         <ToastContainer style={{ zIndex: 1000000 }} />
-        <style>{TOASTIFY_BASE_STYLES}</style>
         <LoadingOverlay text={pageLoadingText || "Đang tải dữ liệu, vui lòng chờ..."} />
       </main>
     );
@@ -9361,7 +9207,7 @@ export default function LocalProductsPage() {
 
   const localProductsWorkspace = (
     <main
-      className={`${localProductsFont.className} local-products-workspace min-h-dvh w-full overflow-x-hidden bg-[#050a11] text-slate-100 ${pictureInPictureWindow
+      className={`local-products-workspace min-h-dvh w-full overflow-x-hidden bg-[#050a11] text-slate-100 ${pictureInPictureWindow
         ? "pb-[50px]"
         : "pb-[100px] xl:pb-[50px]"
         }`}
@@ -9371,7 +9217,7 @@ export default function LocalProductsPage() {
       onKeyDown={handleLocalWorkspaceKeyDown}
     >
       <ToastContainer style={{ zIndex: 1000000 }} />
-      <style>{TOASTIFY_BASE_STYLES}</style>
+
 
       <input
         id={IMPORT_BACKUP_INPUT_ID}
@@ -9388,7 +9234,6 @@ export default function LocalProductsPage() {
       <style>{`
         .local-products-workspace {
           color-scheme: dark;
-          font-family: inherit;
           background:
             linear-gradient(rgba(216, 201, 159, 0.011) 1px, transparent 1px),
             linear-gradient(90deg, rgba(216, 201, 159, 0.011) 1px, transparent 1px),
@@ -9405,7 +9250,6 @@ export default function LocalProductsPage() {
         }
 
         .local-products-workspace * {
-          font-family: inherit;
           scrollbar-color: rgba(216, 201, 159, 0.42) rgba(255, 255, 255, 0.025);
           scrollbar-width: thin;
         }
@@ -15695,7 +15539,7 @@ export default function LocalProductsPage() {
   return (
     <>
       <main
-        className={`${localProductsFont.className} flex min-h-dvh w-full items-center justify-center bg-[radial-gradient(circle_at_50%_0,rgba(230,207,139,0.15),transparent_34%),linear-gradient(rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(145deg,#050a11,#0a1520)] bg-[length:auto,32px_32px,32px_32px,auto] p-4 text-slate-100`}
+        className={`flex min-h-dvh w-full items-center justify-center bg-[radial-gradient(circle_at_50%_0,rgba(230,207,139,0.15),transparent_34%),linear-gradient(rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(230,207,139,0.025)_1px,transparent_1px),linear-gradient(145deg,#050a11,#0a1520)] bg-[length:auto,32px_32px,32px_32px,auto] p-4 text-slate-100`}
       >
         <section className="w-full max-w-md border border-[#e6cf8b]/35 bg-[linear-gradient(145deg,rgba(14,29,43,0.99),rgba(4,10,17,0.998))] p-5 text-center shadow-[inset_3px_0_0_rgba(230,207,139,0.16),0_32px_90px_rgba(0,0,0,0.6)] [clip-path:polygon(12px_0,calc(100%_-_5px)_0,100%_5px,100%_calc(100%_-_12px),calc(100%_-_12px)_100%,5px_100%,0_calc(100%_-_5px),0_12px)]">
           <div className="mx-auto flex h-10 w-10 items-center justify-center border border-[#f5e9c7]/75 bg-[linear-gradient(135deg,#f5e9c7,#d6ba6b)] text-[#17130a] shadow-[0_0_22px_rgba(230,207,139,0.24),0_12px_32px_rgba(0,0,0,0.28)] [clip-path:polygon(8px_0,100%_0,100%_calc(100%_-_8px),calc(100%_-_8px)_100%,0_100%,0_8px)]">
