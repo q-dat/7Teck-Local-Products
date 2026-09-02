@@ -10910,7 +10910,7 @@ export default function LocalProductsPage() {
                 Chưa có sản phẩm phù hợp.
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 xl:gap-4 2xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 xl:gap-4 xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
                 {visibleProducts.map((product, index) => {
                   const descriptionPreview =
                     product.description.trim() ||
