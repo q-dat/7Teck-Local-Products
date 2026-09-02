@@ -596,7 +596,17 @@ const openFacebookPopupWindow = (
     "status=no",
   ].join(",");
 
-  return interactionWindow.open(url, popupName, popupFeatures);
+  const popupWindow = interactionWindow.open(
+    url,
+    popupName,
+    popupFeatures,
+  );
+
+  if (popupWindow) return popupWindow;
+
+  // Một số profile/extension chặn cửa sổ dạng popup nhưng vẫn cho phép
+  // điều hướng do người dùng chủ động sang tab mới.
+  return interactionWindow.open(url, "_blank");
 };
 
 const IMPORT_BACKUP_INPUT_ID = "local-products-backup-input";
@@ -7661,6 +7671,11 @@ export default function LocalProductsPage() {
       return;
     }
 
+    const composerWindow = openFacebookPopupWindow(
+      composerUrl,
+      `composer-${page.id}`,
+    );
+
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
       ? copyText(textValue).then(
@@ -7673,11 +7688,6 @@ export default function LocalProductsPage() {
     const imageDownloadLabel = prepareMetaImageDownload(
       request,
       shouldDownload,
-    );
-
-    const composerWindow = openFacebookPopupWindow(
-      composerUrl,
-      `composer-${page.id}`,
     );
 
     if (!composerWindow) {
@@ -7743,6 +7753,7 @@ export default function LocalProductsPage() {
     mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
+    const groupWindow = openFacebookPopupWindow(group.url, group.id);
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
       ? copyText(textValue).then(
@@ -7756,7 +7767,6 @@ export default function LocalProductsPage() {
       request,
       shouldDownload,
     );
-    const groupWindow = openFacebookPopupWindow(group.url, group.id);
 
     if (!groupWindow) {
       const copiedToClipboard = await copyPromise;
