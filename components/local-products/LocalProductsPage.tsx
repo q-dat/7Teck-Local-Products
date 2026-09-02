@@ -272,6 +272,7 @@ type ModalName =
   | "slotDetail"
   | "imageAlbum"
   | "imageDownload"
+  | "localImageManager"
   | "";
 
 type CategoryTab = "all" | string;
@@ -328,16 +329,9 @@ type PreparedBackup = {
   label: string;
 };
 
-type DocumentPictureInPictureOptions = {
-  width?: number;
-  height?: number;
-};
-
 type DocumentPictureInPictureApi = {
   window: Window | null;
-  requestWindow: (
-    options?: DocumentPictureInPictureOptions,
-  ) => Promise<Window>;
+  requestWindow: () => Promise<Window>;
 };
 
 type WindowWithDocumentPictureInPicture = Window & {
@@ -545,68 +539,76 @@ const getActiveInteractionWindow = (): Window => {
   return window;
 };
 
+type FacebookWindowOpenMode = "popup" | "tab";
+
+type FacebookWindowOpenResult = {
+  window: Window | null;
+  mode: FacebookWindowOpenMode;
+  usedPopupFallback: boolean;
+};
+
+const focusOpenedWindow = (openedWindow: Window): void => {
+  try {
+    openedWindow.opener = null;
+  } catch {
+    // Cross-origin WindowProxy có thể không cho thay đổi opener.
+  }
+
+  try {
+    openedWindow.focus();
+  } catch {
+    // focus() chỉ tối ưu UX, không ảnh hưởng kết quả điều hướng.
+  }
+};
+
+const hasActivePictureInPictureWindow = (): boolean => {
+  if (typeof window === "undefined") return false;
+
+  const browserWindow = window as WindowWithDocumentPictureInPicture;
+  const pictureInPictureWindow = browserWindow.documentPictureInPicture?.window;
+
+  return Boolean(pictureInPictureWindow && !pictureInPictureWindow.closed);
+};
+
 const openFacebookPopupWindow = (
+  openerWindow: Window,
   url: string,
   popupId: string,
-): Window | null => {
-  const interactionWindow = getActiveInteractionWindow();
-  const availableWidth = Math.max(
-    320,
-    interactionWindow.screen.availWidth || interactionWindow.innerWidth,
-  );
-  const availableHeight = Math.max(
-    480,
-    interactionWindow.screen.availHeight || interactionWindow.innerHeight,
-  );
+): FacebookWindowOpenResult => {
+  // Khi Local Product Manager đang ở Document PiP, mở Share bằng _blank
+  // để Chrome xử lý như tab bình thường thay vì sinh thêm popup từ PiP.
+  if (hasActivePictureInPictureWindow()) {
+    const newTab = openerWindow.open(url, "_blank");
 
-  const isCompactScreen = availableWidth < 768;
-  const popupWidth = Math.min(
-    760,
-    Math.max(320, availableWidth - (isCompactScreen ? 16 : 48)),
-  );
-  const popupHeight = Math.min(
-    900,
-    Math.max(480, availableHeight - (isCompactScreen ? 16 : 48)),
-  );
-  const popupLeft = Math.max(
-    0,
-    Math.round(
-      interactionWindow.screenX +
-      (interactionWindow.outerWidth - popupWidth) / 2,
-    ),
-  );
-  const popupTop = Math.max(
-    0,
-    Math.round(
-      interactionWindow.screenY +
-      (interactionWindow.outerHeight - popupHeight) / 2,
-    ),
-  );
-  const popupName = `facebook-popup-${popupId.replace(/[^a-zA-Z0-9_-]/gu, "-")}`;
-  const popupFeatures = [
-    "popup=yes",
-    `width=${popupWidth}`,
-    `height=${popupHeight}`,
-    `left=${popupLeft}`,
-    `top=${popupTop}`,
-    "resizable=yes",
-    "scrollbars=yes",
-    "toolbar=no",
-    "menubar=no",
-    "status=no",
-  ].join(",");
+    if (!newTab) {
+      return { window: null, mode: "tab", usedPopupFallback: false };
+    }
 
-  const popupWindow = interactionWindow.open(
-    url,
-    popupName,
-    popupFeatures,
-  );
+    focusOpenedWindow(newTab);
+    return { window: newTab, mode: "tab", usedPopupFallback: false };
+  }
 
-  if (popupWindow) return popupWindow;
+  const safePopupId = popupId.replace(/[^a-zA-Z0-9_-]/gu, "-");
+  const popupName = `facebook-${safePopupId}-${crypto.randomUUID()}`;
 
-  // Một số profile/extension chặn cửa sổ dạng popup nhưng vẫn cho phép
-  // điều hướng do người dùng chủ động sang tab mới.
-  return interactionWindow.open(url, "_blank");
+  // Chế độ bình thường luôn ưu tiên cửa sổ popup riêng.
+  // Không truyền width/height/position; Chrome tự quyết định kích thước.
+  const popupWindow = openerWindow.open(url, popupName, "popup");
+
+  if (popupWindow) {
+    focusOpenedWindow(popupWindow);
+    return { window: popupWindow, mode: "popup", usedPopupFallback: false };
+  }
+
+  // Popup bị chặn/lỗi: thử _blank đúng theo fallback mong muốn.
+  const fallbackTab = openerWindow.open(url, "_blank");
+
+  if (!fallbackTab) {
+    return { window: null, mode: "tab", usedPopupFallback: true };
+  }
+
+  focusOpenedWindow(fallbackTab);
+  return { window: fallbackTab, mode: "tab", usedPopupFallback: true };
 };
 
 const IMPORT_BACKUP_INPUT_ID = "local-products-backup-input";
@@ -3207,22 +3209,93 @@ const restorePayloadToLocal = async (
   params.setProducts(sortProductsByUpdatedAt(cloudProducts));
 };
 
-type DirectoryPickerWindow = Window & {
-  showDirectoryPicker?: () => Promise<{
-    getFileHandle: (
-      name: string,
-      options?: { create?: boolean },
-    ) => Promise<{
-      createWritable: () => Promise<{
-        write: (data: Blob) => Promise<void>;
-        close: () => Promise<void>;
-      }>;
-    }>;
-  }>;
+type LocalFileSystemPermissionState = "granted" | "denied" | "prompt";
+type LocalFileSystemPermissionDescriptor = { mode: "read" | "readwrite" };
+
+type LocalFileSystemHandle = {
+  kind: "file" | "directory";
+  name: string;
+  queryPermission?: (
+    descriptor: LocalFileSystemPermissionDescriptor,
+  ) => Promise<LocalFileSystemPermissionState>;
+  requestPermission?: (
+    descriptor: LocalFileSystemPermissionDescriptor,
+  ) => Promise<LocalFileSystemPermissionState>;
 };
 
+type LocalFileSystemWritable = {
+  write: (data: Blob) => Promise<void>;
+  close: () => Promise<void>;
+};
+
+type LocalFileSystemFileHandle = LocalFileSystemHandle & {
+  kind: "file";
+  getFile: () => Promise<File>;
+  createWritable: () => Promise<LocalFileSystemWritable>;
+};
+
+type LocalFileSystemDirectoryHandle = LocalFileSystemHandle & {
+  kind: "directory";
+  getFileHandle: (
+    name: string,
+    options?: { create?: boolean },
+  ) => Promise<LocalFileSystemFileHandle>;
+  getDirectoryHandle: (
+    name: string,
+    options?: { create?: boolean },
+  ) => Promise<LocalFileSystemDirectoryHandle>;
+  removeEntry: (
+    name: string,
+    options?: { recursive?: boolean },
+  ) => Promise<void>;
+  values: () => AsyncIterableIterator<LocalFileSystemHandle>;
+};
+
+type DirectoryPickerOptions = {
+  id?: string;
+  mode?: "read" | "readwrite";
+  startIn?:
+  | "desktop"
+  | "documents"
+  | "downloads"
+  | "music"
+  | "pictures"
+  | "videos"
+  | LocalFileSystemHandle;
+};
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (
+    options?: DirectoryPickerOptions,
+  ) => Promise<LocalFileSystemDirectoryHandle>;
+};
+
+type LocalManagedImage = {
+  name: string;
+  size: number;
+  lastModified: number;
+};
+
+type LocalImageDirectorySnapshot = {
+  active: LocalManagedImage[];
+  trash: LocalManagedImage[];
+};
+
+type LocalImageMoveResult = {
+  moved: number;
+  failed: number;
+};
+
+const LOCAL_IMAGE_DIRECTORY_DATABASE_NAME = "local-products-file-system";
+const LOCAL_IMAGE_DIRECTORY_DATABASE_VERSION = 1;
+const LOCAL_IMAGE_DIRECTORY_STORE_NAME = "handles";
+const LOCAL_IMAGE_DIRECTORY_HANDLE_KEY = "image-directory";
+const LOCAL_IMAGE_TRASH_DIRECTORY_NAME = "_trash";
+const LOCAL_IMAGE_RENDER_LIMIT = 250;
+const LOCAL_IMAGE_EXTENSION_PATTERN = /\.(?:jpe?g|png|webp|heic|heif)$/iu;
+
 const canUseDirectoryPicker = (): boolean => {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined" || !window.isSecureContext) return false;
 
   const interactionWindow = getActiveInteractionWindow();
 
@@ -3232,33 +3305,393 @@ const canUseDirectoryPicker = (): boolean => {
   );
 };
 
-const saveImagesToChosenFolder = async (
-  request: DownloadRequest,
+const openLocalImageDirectoryDatabase = async (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) {
+      reject(new Error("IndexedDB không khả dụng"));
+      return;
+    }
+
+    const request = window.indexedDB.open(
+      LOCAL_IMAGE_DIRECTORY_DATABASE_NAME,
+      LOCAL_IMAGE_DIRECTORY_DATABASE_VERSION,
+    );
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+
+      if (!database.objectStoreNames.contains(LOCAL_IMAGE_DIRECTORY_STORE_NAME)) {
+        database.createObjectStore(LOCAL_IMAGE_DIRECTORY_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () =>
+      reject(
+        request.error ?? new Error("Không thể mở IndexedDB của thư mục ảnh"),
+      );
+  });
+};
+
+const readStoredLocalImageDirectoryHandle = async (): Promise<LocalFileSystemDirectoryHandle | null> => {
+  const database = await openLocalImageDirectoryDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        LOCAL_IMAGE_DIRECTORY_STORE_NAME,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(LOCAL_IMAGE_DIRECTORY_STORE_NAME)
+        .get(LOCAL_IMAGE_DIRECTORY_HANDLE_KEY);
+
+      request.onsuccess = () => {
+        const value = request.result as unknown;
+
+        if (
+          value &&
+          typeof value === "object" &&
+          (value as LocalFileSystemHandle).kind === "directory"
+        ) {
+          resolve(value as LocalFileSystemDirectoryHandle);
+          return;
+        }
+
+        resolve(null);
+      };
+      request.onerror = () =>
+        reject(
+          request.error ?? new Error("Không thể đọc thư mục ảnh đã lưu"),
+        );
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const storeLocalImageDirectoryHandle = async (
+  handle: LocalFileSystemDirectoryHandle,
 ): Promise<void> => {
+  const database = await openLocalImageDirectoryDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        LOCAL_IMAGE_DIRECTORY_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction
+        .objectStore(LOCAL_IMAGE_DIRECTORY_STORE_NAME)
+        .put(handle, LOCAL_IMAGE_DIRECTORY_HANDLE_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(
+          transaction.error ?? new Error("Không thể lưu quyền thư mục ảnh"),
+        );
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const clearStoredLocalImageDirectoryHandle = async (): Promise<void> => {
+  const database = await openLocalImageDirectoryDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        LOCAL_IMAGE_DIRECTORY_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction
+        .objectStore(LOCAL_IMAGE_DIRECTORY_STORE_NAME)
+        .delete(LOCAL_IMAGE_DIRECTORY_HANDLE_KEY);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(
+          transaction.error ?? new Error("Không thể bỏ liên kết thư mục ảnh"),
+        );
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const queryLocalImageDirectoryPermission = async (
+  handle: LocalFileSystemDirectoryHandle,
+): Promise<LocalFileSystemPermissionState> => {
+  if (!handle.queryPermission) return "prompt";
+
+  try {
+    return await handle.queryPermission({ mode: "readwrite" });
+  } catch {
+    return "prompt";
+  }
+};
+
+const requestLocalImageDirectoryPermission = async (
+  handle: LocalFileSystemDirectoryHandle,
+): Promise<LocalFileSystemPermissionState> => {
+  const currentPermission = await queryLocalImageDirectoryPermission(handle);
+
+  if (currentPermission === "granted") return currentPermission;
+  if (!handle.requestPermission) return currentPermission;
+
+  return handle.requestPermission({ mode: "readwrite" });
+};
+
+const chooseLocalImageDirectory = async (): Promise<LocalFileSystemDirectoryHandle> => {
   const interactionWindow = getActiveInteractionWindow();
   const directoryPicker = (interactionWindow as DirectoryPickerWindow)
     .showDirectoryPicker;
 
   if (!directoryPicker) {
-    throw new Error("Trình duyệt chưa hỗ trợ chọn thư mục lưu.");
+    throw new Error("Trình duyệt chưa hỗ trợ chọn thư mục lưu");
   }
 
-  const directoryHandle = await directoryPicker();
+  return directoryPicker.call(interactionWindow, {
+    id: "local-product-images",
+    mode: "readwrite",
+    startIn: "downloads",
+  });
+};
 
+const isLocalManagedImageName = (name: string): boolean => {
+  return LOCAL_IMAGE_EXTENSION_PATTERN.test(name.trim());
+};
+
+const readLocalImagesFromDirectory = async (
+  directoryHandle: LocalFileSystemDirectoryHandle,
+): Promise<LocalManagedImage[]> => {
+  const images: LocalManagedImage[] = [];
+
+  for await (const entry of directoryHandle.values()) {
+    if (entry.kind !== "file" || !isLocalManagedImageName(entry.name)) continue;
+
+    const file = await (entry as LocalFileSystemFileHandle).getFile();
+
+    images.push({
+      name: entry.name,
+      size: file.size,
+      lastModified: file.lastModified,
+    });
+  }
+
+  return images.sort((first, second) => second.lastModified - first.lastModified);
+};
+
+const getLocalImageTrashDirectory = async (
+  rootHandle: LocalFileSystemDirectoryHandle,
+  create: boolean,
+): Promise<LocalFileSystemDirectoryHandle | null> => {
+  try {
+    return await rootHandle.getDirectoryHandle(LOCAL_IMAGE_TRASH_DIRECTORY_NAME, {
+      create,
+    });
+  } catch (error) {
+    if (!create && error instanceof DOMException && error.name === "NotFoundError") {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
+const readLocalImageDirectorySnapshot = async (
+  rootHandle: LocalFileSystemDirectoryHandle,
+): Promise<LocalImageDirectorySnapshot> => {
+  const active = await readLocalImagesFromDirectory(rootHandle);
+  const trashHandle = await getLocalImageTrashDirectory(rootHandle, false);
+  const trash = trashHandle
+    ? await readLocalImagesFromDirectory(trashHandle)
+    : [];
+
+  return { active, trash };
+};
+
+const splitLocalFileName = (name: string): { base: string; extension: string } => {
+  const dotIndex = name.lastIndexOf(".");
+
+  if (dotIndex <= 0 || dotIndex === name.length - 1) {
+    return { base: name, extension: "" };
+  }
+
+  return {
+    base: name.slice(0, dotIndex),
+    extension: name.slice(dotIndex),
+  };
+};
+
+const localDirectoryHasFile = async (
+  directoryHandle: LocalFileSystemDirectoryHandle,
+  name: string,
+): Promise<boolean> => {
+  try {
+    await directoryHandle.getFileHandle(name);
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+const createAvailableLocalImageName = async (
+  directoryHandle: LocalFileSystemDirectoryHandle,
+  preferredName: string,
+): Promise<string> => {
+  if (!(await localDirectoryHasFile(directoryHandle, preferredName))) {
+    return preferredName;
+  }
+
+  const { base, extension } = splitLocalFileName(preferredName);
+
+  for (let index = 1; index <= 10_000; index += 1) {
+    const candidate = `${base} (${index})${extension}`;
+
+    if (!(await localDirectoryHasFile(directoryHandle, candidate))) {
+      return candidate;
+    }
+  }
+
+  throw new Error("Không thể tạo tên file không trùng");
+};
+
+const copyLocalImageThenRemoveSource = async (
+  sourceDirectory: LocalFileSystemDirectoryHandle,
+  targetDirectory: LocalFileSystemDirectoryHandle,
+  sourceName: string,
+): Promise<string> => {
+  const sourceHandle = await sourceDirectory.getFileHandle(sourceName);
+  const sourceFile = await sourceHandle.getFile();
+  const targetName = await createAvailableLocalImageName(
+    targetDirectory,
+    sourceName,
+  );
+  const targetHandle = await targetDirectory.getFileHandle(targetName, {
+    create: true,
+  });
+  const writable = await targetHandle.createWritable();
+
+  try {
+    await writable.write(sourceFile);
+    await writable.close();
+  } catch (error) {
+    try {
+      await writable.close();
+    } catch {
+      // Giữ lỗi ghi file ban đầu.
+    }
+    await targetDirectory.removeEntry(targetName).catch(() => undefined);
+    throw error;
+  }
+
+  const copiedFile = await targetHandle.getFile();
+
+  if (copiedFile.size !== sourceFile.size) {
+    await targetDirectory.removeEntry(targetName).catch(() => undefined);
+    throw new Error(`Không thể xác minh bản sao của ${sourceName}`);
+  }
+
+  await sourceDirectory.removeEntry(sourceName);
+  return targetName;
+};
+
+const moveLocalImagesToTrash = async (
+  rootHandle: LocalFileSystemDirectoryHandle,
+  names: string[],
+): Promise<LocalImageMoveResult> => {
+  const trashHandle = await getLocalImageTrashDirectory(rootHandle, true);
+
+  if (!trashHandle) return { moved: 0, failed: names.length };
+
+  let moved = 0;
+  let failed = 0;
+
+  for (const name of names) {
+    try {
+      await copyLocalImageThenRemoveSource(rootHandle, trashHandle, name);
+      moved += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { moved, failed };
+};
+
+const restoreLocalImagesFromTrash = async (
+  rootHandle: LocalFileSystemDirectoryHandle,
+  names: string[],
+): Promise<LocalImageMoveResult> => {
+  const trashHandle = await getLocalImageTrashDirectory(rootHandle, false);
+
+  if (!trashHandle) return { moved: 0, failed: names.length };
+
+  let moved = 0;
+  let failed = 0;
+
+  for (const name of names) {
+    try {
+      await copyLocalImageThenRemoveSource(trashHandle, rootHandle, name);
+      moved += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { moved, failed };
+};
+
+const permanentlyDeleteLocalTrashImages = async (
+  rootHandle: LocalFileSystemDirectoryHandle,
+  names: string[],
+): Promise<LocalImageMoveResult> => {
+  const trashHandle = await getLocalImageTrashDirectory(rootHandle, false);
+
+  if (!trashHandle) return { moved: 0, failed: names.length };
+
+  let moved = 0;
+  let failed = 0;
+
+  for (const name of names) {
+    try {
+      await trashHandle.removeEntry(name);
+      moved += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { moved, failed };
+};
+
+const saveImagesToDirectory = async (
+  request: DownloadRequest,
+  directoryHandle: LocalFileSystemDirectoryHandle,
+): Promise<void> => {
   for (let index = 0; index < request.images.length; index += 1) {
     const image = request.images[index];
 
     if (!image) continue;
 
     const blob = await dataUrlToBlob(image.dataUrl);
-    const fileHandle = await directoryHandle.getFileHandle(
-      createSystemImageFilename(
-        request.startIndex + index,
-        image.id,
-        normalizeImageExtension(image),
-      ),
-      { create: true },
+    const preferredName = createSystemImageFilename(
+      request.startIndex + index,
+      image.id,
+      normalizeImageExtension(image),
     );
+    const fileName = await createAvailableLocalImageName(
+      directoryHandle,
+      preferredName,
+    );
+    const fileHandle = await directoryHandle.getFileHandle(fileName, {
+      create: true,
+    });
     const writable = await fileHandle.createWritable();
 
     await writable.write(blob);
@@ -3632,6 +4065,21 @@ export default function LocalProductsPage() {
   const prefersReducedMotion = useReducedMotion();
   const [imageDownloadCategory, setImageDownloadCategory] =
     useState<CategoryTab>("all");
+  const [localImageDirectoryHandle, setLocalImageDirectoryHandle] =
+    useState<LocalFileSystemDirectoryHandle | null>(null);
+  const [localImageDirectoryPermission, setLocalImageDirectoryPermission] =
+    useState<LocalFileSystemPermissionState>("prompt");
+  const [localImageFiles, setLocalImageFiles] = useState<LocalManagedImage[]>([]);
+  const [localTrashImageFiles, setLocalTrashImageFiles] =
+    useState<LocalManagedImage[]>([]);
+  const [localImageView, setLocalImageView] =
+    useState<"active" | "trash">("active");
+  const [localImageQuery, setLocalImageQuery] = useState<string>("");
+  const [selectedLocalImageNames, setSelectedLocalImageNames] = useState<
+    Set<string>
+  >(() => new Set<string>());
+  const [isLocalImageManagerBusy, setIsLocalImageManagerBusy] =
+    useState<boolean>(false);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [scheduleQuery, setScheduleQuery] = useState<string>("");
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(
@@ -3704,6 +4152,62 @@ export default function LocalProductsPage() {
     useState<HourlyNotificationConfig>(() => loadHourlyNotificationConfig());
   const hourlyNotificationTimeoutRef = useRef<number | null>(null);
   const hourlyAudioContextRef = useRef<AudioContext | null>(null);
+
+  const currentLocalImageFiles =
+    localImageView === "trash" ? localTrashImageFiles : localImageFiles;
+  const filteredLocalImageFiles = useMemo(() => {
+    const normalizedQuery = normalizeTextKey(localImageQuery);
+
+    if (!normalizedQuery) return currentLocalImageFiles;
+
+    return currentLocalImageFiles.filter((file) =>
+      normalizeTextKey(file.name).includes(normalizedQuery),
+    );
+  }, [currentLocalImageFiles, localImageQuery]);
+  const localImageTotalSize = useMemo(
+    () => localImageFiles.reduce((total, file) => total + file.size, 0),
+    [localImageFiles],
+  );
+  const localTrashImageTotalSize = useMemo(
+    () => localTrashImageFiles.reduce((total, file) => total + file.size, 0),
+    [localTrashImageFiles],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const storedHandle = await readStoredLocalImageDirectoryHandle();
+
+        if (!storedHandle || cancelled) return;
+
+        const permission = await queryLocalImageDirectoryPermission(storedHandle);
+
+        if (cancelled) return;
+
+        setLocalImageDirectoryHandle(storedHandle);
+        setLocalImageDirectoryPermission(permission);
+
+        if (permission !== "granted") return;
+
+        const snapshot = await readLocalImageDirectorySnapshot(storedHandle);
+
+        if (cancelled) return;
+
+        setLocalImageFiles(snapshot.active);
+        setLocalTrashImageFiles(snapshot.trash);
+      } catch {
+        if (!cancelled) {
+          setLocalImageDirectoryPermission("prompt");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const applyPreferences = (preferences: DevicePreferences): void => {
@@ -4300,10 +4804,7 @@ export default function LocalProductsPage() {
     }
 
     try {
-      const nextWindow = await pictureInPictureApi.requestWindow({
-        width: 520,
-        height: 760,
-      });
+      const nextWindow = await pictureInPictureApi.requestWindow();
 
       nextWindow.document.title = "Local Product Manager";
       nextWindow.document.body.replaceChildren();
@@ -6140,16 +6641,31 @@ export default function LocalProductsPage() {
     }
   };
 
-  const openFacebookUrl = (url: string, popupId: string): void => {
-    const facebookWindow = openFacebookPopupWindow(url, popupId);
+  const openFacebookUrl = (
+    openerWindow: Window,
+    url: string,
+    popupId: string,
+  ): void => {
+    const openResult = openFacebookPopupWindow(
+      openerWindow,
+      url,
+      popupId,
+    );
 
-    if (!facebookWindow) {
-      Toastify("Trình duyệt đã chặn popup Facebook", 400);
+    if (!openResult.window) {
+      Toastify(
+        "Không thể mở Facebook bằng cửa sổ mới hoặc tab mới.",
+        400,
+      );
       return;
     }
 
-    facebookWindow.opener = null;
-    facebookWindow.focus();
+    if (openResult.usedPopupFallback) {
+      Toastify(
+        "Cửa sổ popup bị chặn, đã tự động chuyển sang tab mới.",
+        300,
+      );
+    }
   };
 
   const copyFacebookDuplicateUrl = async (
@@ -6163,6 +6679,7 @@ export default function LocalProductsPage() {
   };
 
   const openFacebookDuplicateUrl = (
+    openerWindow: Window,
     option: FacebookDuplicatePostOption,
   ): void => {
     if (!activeFacebookPage) {
@@ -6175,6 +6692,7 @@ export default function LocalProductsPage() {
     if (!url) return;
 
     openFacebookUrl(
+      openerWindow,
       url,
       `duplicate-${activeFacebookPage.id}-${option.id}`,
     );
@@ -6334,6 +6852,12 @@ export default function LocalProductsPage() {
         setImageDownloadCategory("all");
       }
 
+      if (closingModal === "localImageManager") {
+        setLocalImageQuery("");
+        setLocalImageView("active");
+        setSelectedLocalImageNames(new Set<string>());
+      }
+
       if (closingModal === "contact") {
         resetContactEditor();
       }
@@ -6363,6 +6887,9 @@ export default function LocalProductsPage() {
     setSelectedAlbumImageIds(new Set<string>());
     setAlbumSource(null);
     setImageDownloadCategory("all");
+    setLocalImageQuery("");
+    setLocalImageView("active");
+    setSelectedLocalImageNames(new Set<string>());
     setPendingConfirm(null);
     setPendingBackup(null);
     setPendingDownload(null);
@@ -7285,6 +7812,238 @@ export default function LocalProductsPage() {
     }
   };
 
+  const applyLocalImageDirectorySnapshot = async (
+    handle: LocalFileSystemDirectoryHandle,
+  ): Promise<void> => {
+    const snapshot = await readLocalImageDirectorySnapshot(handle);
+
+    setLocalImageFiles(snapshot.active);
+    setLocalTrashImageFiles(snapshot.trash);
+    setSelectedLocalImageNames(new Set<string>());
+  };
+
+  const handleChooseLocalImageDirectory = async (): Promise<LocalFileSystemDirectoryHandle | null> => {
+    if (!canUseDirectoryPicker()) {
+      Toastify("Chỉ hỗ trợ Chrome/Edge desktop trên HTTPS", 400);
+      return null;
+    }
+
+    setIsLocalImageManagerBusy(true);
+
+    try {
+      const handle = await chooseLocalImageDirectory();
+      const permission = await queryLocalImageDirectoryPermission(handle);
+
+      if (permission !== "granted") {
+        Toastify("Chưa được cấp quyền đọc và ghi thư mục", 400);
+        return null;
+      }
+
+      await storeLocalImageDirectoryHandle(handle);
+      setLocalImageDirectoryHandle(handle);
+      setLocalImageDirectoryPermission(permission);
+      await applyLocalImageDirectorySnapshot(handle);
+      Toastify(`Đã liên kết thư mục ${handle.name}`, 200);
+      return handle;
+    } catch (error) {
+      if (isAbortError(error)) return null;
+
+      const message =
+        error instanceof Error ? error.message : "Không thể chọn thư mục ảnh";
+      Toastify(message, 400);
+      return null;
+    } finally {
+      setIsLocalImageManagerBusy(false);
+    }
+  };
+
+  const getWritableLocalImageDirectory = async (): Promise<LocalFileSystemDirectoryHandle | null> => {
+    if (!localImageDirectoryHandle) {
+      return handleChooseLocalImageDirectory();
+    }
+
+    const permission = await requestLocalImageDirectoryPermission(
+      localImageDirectoryHandle,
+    );
+    setLocalImageDirectoryPermission(permission);
+
+    if (permission === "granted") {
+      return localImageDirectoryHandle;
+    }
+
+    Toastify("Chrome cần cấp lại quyền thư mục ảnh", 300);
+    return null;
+  };
+
+  const handleRefreshLocalImageDirectory = async (): Promise<void> => {
+    const handle = await getWritableLocalImageDirectory();
+
+    if (!handle) return;
+
+    setIsLocalImageManagerBusy(true);
+
+    try {
+      await applyLocalImageDirectorySnapshot(handle);
+      Toastify("Đã cập nhật danh sách ảnh trên máy", 200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Không thể đọc thư mục ảnh";
+      Toastify(message, 400);
+    } finally {
+      setIsLocalImageManagerBusy(false);
+    }
+  };
+
+  const handleForgetLocalImageDirectory = (): void => {
+    requestConfirm({
+      title: "Bỏ liên kết thư mục ảnh?",
+      description:
+        "Chỉ xóa quyền liên kết đã lưu trong IndexedDB. Không xóa bất kỳ file nào trên ổ đĩa.",
+      confirmLabel: "Bỏ liên kết",
+      tone: "warning",
+      onConfirm: async () => {
+        await clearStoredLocalImageDirectoryHandle();
+        setLocalImageDirectoryHandle(null);
+        setLocalImageDirectoryPermission("prompt");
+        setLocalImageFiles([]);
+        setLocalTrashImageFiles([]);
+        setSelectedLocalImageNames(new Set<string>());
+        Toastify("Đã bỏ liên kết thư mục ảnh", 200);
+      },
+    });
+  };
+
+  const toggleLocalImageSelection = (name: string): void => {
+    setSelectedLocalImageNames((current) => {
+      const next = new Set(current);
+
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+
+      return next;
+    });
+  };
+
+  const selectAllFilteredLocalImages = (): void => {
+    setSelectedLocalImageNames(
+      new Set<string>(filteredLocalImageFiles.map((file) => file.name)),
+    );
+  };
+
+  const handleMoveSelectedLocalImagesToTrash = (): void => {
+    const names = Array.from(selectedLocalImageNames);
+
+    if (names.length === 0) {
+      Toastify("Chưa chọn ảnh cần đưa vào _trash", 300);
+      return;
+    }
+
+    requestConfirm({
+      title: `Đưa ${names.length} ảnh vào _trash?`,
+      description:
+        "Ảnh sẽ được copy sang thư mục con _trash, xác minh dung lượng bản sao rồi mới xóa file gốc. Đây không phải Thùng rác Windows.",
+      confirmLabel: "Đưa vào _trash",
+      tone: "warning",
+      onConfirm: async () => {
+        const handle = await getWritableLocalImageDirectory();
+
+        if (!handle) return;
+
+        setIsLocalImageManagerBusy(true);
+
+        try {
+          const result = await moveLocalImagesToTrash(handle, names);
+          await applyLocalImageDirectorySnapshot(handle);
+          Toastify(
+            result.failed > 0
+              ? `Đã chuyển ${result.moved} ảnh, ${result.failed} ảnh lỗi`
+              : `Đã chuyển ${result.moved} ảnh vào _trash`,
+            result.failed > 0 ? 300 : 200,
+          );
+        } finally {
+          setIsLocalImageManagerBusy(false);
+        }
+      },
+    });
+  };
+
+  const handleRestoreSelectedLocalImages = (): void => {
+    const names = Array.from(selectedLocalImageNames);
+
+    if (names.length === 0) {
+      Toastify("Chưa chọn ảnh cần khôi phục", 300);
+      return;
+    }
+
+    requestConfirm({
+      title: `Khôi phục ${names.length} ảnh?`,
+      description:
+        "Ảnh sẽ được copy từ _trash về thư mục chính, xác minh dung lượng rồi mới xóa bản trong _trash.",
+      confirmLabel: "Khôi phục",
+      tone: "default",
+      onConfirm: async () => {
+        const handle = await getWritableLocalImageDirectory();
+
+        if (!handle) return;
+
+        setIsLocalImageManagerBusy(true);
+
+        try {
+          const result = await restoreLocalImagesFromTrash(handle, names);
+          await applyLocalImageDirectorySnapshot(handle);
+          Toastify(
+            result.failed > 0
+              ? `Đã khôi phục ${result.moved} ảnh, ${result.failed} ảnh lỗi`
+              : `Đã khôi phục ${result.moved} ảnh`,
+            result.failed > 0 ? 300 : 200,
+          );
+        } finally {
+          setIsLocalImageManagerBusy(false);
+        }
+      },
+    });
+  };
+
+  const handlePermanentlyDeleteSelectedLocalImages = (): void => {
+    const names = Array.from(selectedLocalImageNames);
+
+    if (names.length === 0) {
+      Toastify("Chưa chọn ảnh cần xóa vĩnh viễn", 300);
+      return;
+    }
+
+    requestConfirm({
+      title: `Xóa vĩnh viễn ${names.length} ảnh?`,
+      description:
+        "Các file trong _trash sẽ bị xóa trực tiếp bằng File System Access API và không đảm bảo xuất hiện trong Thùng rác Windows.",
+      confirmLabel: "Xóa vĩnh viễn",
+      tone: "danger",
+      onConfirm: async () => {
+        const handle = await getWritableLocalImageDirectory();
+
+        if (!handle) return;
+
+        setIsLocalImageManagerBusy(true);
+
+        try {
+          const result = await permanentlyDeleteLocalTrashImages(handle, names);
+          await applyLocalImageDirectorySnapshot(handle);
+          Toastify(
+            result.failed > 0
+              ? `Đã xóa ${result.moved} ảnh, ${result.failed} ảnh lỗi`
+              : `Đã xóa vĩnh viễn ${result.moved} ảnh`,
+            result.failed > 0 ? 300 : 200,
+          );
+        } finally {
+          setIsLocalImageManagerBusy(false);
+        }
+      },
+    });
+  };
+
   const requestDownload = (request: DownloadRequest): void => {
     setSkipInternalDownloadImages(false);
     setPendingDownload(request);
@@ -7391,17 +8150,26 @@ export default function LocalProductsPage() {
     }
 
     try {
+      const directoryHandle = await getWritableLocalImageDirectory();
+
+      if (!directoryHandle) return;
+
       await copyDownloadTextIfNeeded(request);
-      await saveImagesToChosenFolder({ ...request, images });
+      await saveImagesToDirectory({ ...request, images }, directoryHandle);
+      await applyLocalImageDirectorySnapshot(directoryHandle).catch(() => undefined);
       markProductImagesDownloaded(getDownloadedProductIds(request));
-      Toastify(`Đã lưu ${images.length} ảnh vào thư mục đã chọn`, 200);
+      Toastify(
+        `Đã lưu ${images.length} ảnh vào ${directoryHandle.name}`,
+        200,
+      );
       setPendingDownload(null);
       setSkipInternalDownloadImages(false);
-    } catch {
-      Toastify(
-        "Trình duyệt chưa cho phép chọn thư mục hoặc thao tác đã bị hủy",
-        400,
-      );
+    } catch (error) {
+      if (isAbortError(error)) return;
+
+      const message =
+        error instanceof Error ? error.message : "Không thể lưu ảnh vào thư mục";
+      Toastify(message, 400);
     }
   };
 
@@ -7659,6 +8427,7 @@ export default function LocalProductsPage() {
   };
 
   const executeOpenMetaBusinessComposer = async (
+    openerWindow: Window,
     request: ShareRequest,
     page: FacebookPageOption,
     mode: Exclude<ShareContentMode, "imagesOnly">,
@@ -7671,10 +8440,19 @@ export default function LocalProductsPage() {
       return;
     }
 
-    const composerWindow = openFacebookPopupWindow(
+    const composerOpenResult = openFacebookPopupWindow(
+      openerWindow,
       composerUrl,
       `composer-${page.id}`,
     );
+    const composerWindow = composerOpenResult.window;
+
+    if (composerOpenResult.usedPopupFallback && composerWindow) {
+      Toastify(
+        "Cửa sổ Meta Business bị chặn, đã tự động chuyển sang tab mới.",
+        300,
+      );
+    }
 
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
@@ -7695,16 +8473,13 @@ export default function LocalProductsPage() {
 
       Toastify(
         copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}; trình duyệt đã chặn cửa sổ Meta Business`
-          : `${imageDownloadLabel}; trình duyệt đã chặn cửa sổ Meta Business`,
+          ? `Đã copy nội dung, ${imageDownloadLabel}; không thể mở Meta Business bằng cửa sổ mới hoặc tab mới`
+          : `${imageDownloadLabel}; không thể mở Meta Business bằng cửa sổ mới hoặc tab mới`,
         copiedToClipboard ? 300 : 400,
       );
       setIsShareExecuting(false);
       return;
     }
-
-    composerWindow.opener = null;
-    composerWindow.focus();
 
     const copiedToClipboard = await copyPromise;
     const contentLabel = mode === "post" ? "Post" : "Cmt";
@@ -7729,6 +8504,7 @@ export default function LocalProductsPage() {
   };
 
   const handleOpenMetaBusinessComposer = (
+    openerWindow: Window,
     page: FacebookPageOption,
     mode: Exclude<ShareContentMode, "imagesOnly">,
   ): void => {
@@ -7738,6 +8514,7 @@ export default function LocalProductsPage() {
 
     requestMetaImageDownloadDecision(request, (shouldDownload) =>
       executeOpenMetaBusinessComposer(
+        openerWindow,
         request,
         page,
         mode,
@@ -7747,13 +8524,26 @@ export default function LocalProductsPage() {
   };
 
   const executeOpenFacebookGroup = async (
+    openerWindow: Window,
     request: ShareRequest,
     group: FacebookGroupOption,
     groupIndex: number,
     mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
-    const groupWindow = openFacebookPopupWindow(group.url, group.id);
+    const groupOpenResult = openFacebookPopupWindow(
+      openerWindow,
+      group.url,
+      `group-${group.id}`,
+    );
+    const groupWindow = groupOpenResult.window;
+
+    if (groupOpenResult.usedPopupFallback && groupWindow) {
+      Toastify(
+        "Cửa sổ Group bị chặn, đã tự động chuyển sang tab mới.",
+        300,
+      );
+    }
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
       ? copyText(textValue).then(
@@ -7773,16 +8563,13 @@ export default function LocalProductsPage() {
 
       Toastify(
         copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}; trình duyệt đã chặn popup Group`
-          : `${imageDownloadLabel}; trình duyệt đã chặn popup Group`,
+          ? `Đã copy nội dung, ${imageDownloadLabel}; không thể mở Group bằng cửa sổ mới hoặc tab mới`
+          : `${imageDownloadLabel}; không thể mở Group bằng cửa sổ mới hoặc tab mới`,
         copiedToClipboard ? 300 : 400,
       );
       setIsShareExecuting(false);
       return;
     }
-
-    groupWindow.opener = null;
-    groupWindow.focus();
 
     const copiedToClipboard = await copyPromise;
     const contentLabel = mode === "post" ? "Post" : "Cmt";
@@ -7805,6 +8592,7 @@ export default function LocalProductsPage() {
   };
 
   const handleOpenFacebookGroup = (
+    openerWindow: Window,
     groupIndex: number,
     mode: Exclude<ShareContentMode, "imagesOnly">,
   ): void => {
@@ -7822,6 +8610,7 @@ export default function LocalProductsPage() {
     setFacebookGroupActiveIndex(groupIndex);
     requestMetaImageDownloadDecision(request, (shouldDownload) =>
       executeOpenFacebookGroup(
+        openerWindow,
         request,
         group,
         groupIndex,
@@ -10453,6 +11242,18 @@ export default function LocalProductsPage() {
 
               <button
                 type="button"
+                data-luxury-accent="emerald"
+                title="Quản lý ảnh trong thư mục đã chọn"
+                aria-label="Quản lý ảnh trên máy"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => openModal("localImageManager")}
+              >
+                <FiArchive aria-hidden="true" className={iconClassName} />
+                Ảnh máy
+              </button>
+
+              <button
+                type="button"
                 data-luxury-accent="rose"
                 title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải trong phiên hiện tại`}
                 aria-label="Xóa trạng thái ảnh đã tải trong sessionStorage"
@@ -11397,6 +12198,9 @@ export default function LocalProductsPage() {
                   {activeModal === "imageDownload" ? (
                     <FiDownload aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "localImageManager" ? (
+                    <FiArchive aria-hidden="true" className={iconClassName} />
+                  ) : null}
                 </div>
 
                 <div className="min-w-0">
@@ -11432,6 +12236,9 @@ export default function LocalProductsPage() {
                     {activeModal === "slotDetail" ? "Chi tiết bài đăng" : null}
                     {activeModal === "imageAlbum" ? "Album ảnh" : null}
                     {activeModal === "imageDownload" ? "Tải ảnh" : null}
+                    {activeModal === "localImageManager"
+                      ? "Quản lý ảnh trên máy"
+                      : null}
                   </h2>
                 </div>
               </div>
@@ -11448,6 +12255,222 @@ export default function LocalProductsPage() {
             <div
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
+              {activeModal === "localImageManager" ? (
+                <section className="mx-auto flex w-full max-w-5xl flex-col gap-3">
+                  <article className="border border-white/10 bg-slate-900 p-3">
+                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                          Thư mục được cấp quyền
+                        </p>
+                        <h3 className={`${fullCardItemNameClassName} mt-1 text-sm font-black text-white`}>
+                          {localImageDirectoryHandle?.name || "Chưa chọn thư mục ảnh"}
+                        </h3>
+                        <p className="mt-1 text-[10px] leading-4 text-slate-400">
+                          Chỉ quản lý file JPG, JPEG, PNG, WebP, HEIC và HEIF ở ngay thư mục này. Không quét toàn ổ D và không quét thư mục con. Thư mục _trash là vùng an toàn của app, không phải Thùng rác Windows.
+                        </p>
+                        <p className="mt-1 text-[10px] font-black text-amber-100">
+                          Quyền: {localImageDirectoryPermission === "granted"
+                            ? "Đã cấp"
+                            : localImageDirectoryPermission === "denied"
+                              ? "Đã từ chối"
+                              : "Cần xác nhận lại"}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5 xl:w-[300px]">
+                        <button
+                          type="button"
+                          disabled={isLocalImageManagerBusy || !canUseDirectoryPicker()}
+                          className="border border-cyan-300/35 bg-cyan-300/10 px-3 py-2 text-[10px] font-black text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => void handleChooseLocalImageDirectory()}
+                        >
+                          Chọn thư mục ảnh
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isLocalImageManagerBusy || !localImageDirectoryHandle}
+                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => void handleRefreshLocalImageDirectory()}
+                        >
+                          Làm mới
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!localImageDirectoryHandle}
+                          className="col-span-2 border border-rose-300/25 bg-rose-300/[0.05] px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={handleForgetLocalImageDirectory}
+                        >
+                          Bỏ liên kết, không xóa file
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+
+                  {!canUseDirectoryPicker() ? (
+                    <div className="border border-rose-300/30 bg-rose-300/[0.06] p-3 text-xs leading-5 text-rose-100">
+                      File System Access API không khả dụng. Hãy dùng Chrome/Edge desktop và mở app bằng HTTPS.
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                    <div className="border border-white/10 bg-slate-900 p-2.5">
+                      <p className="text-[9px] font-black uppercase text-slate-500">Ảnh chính</p>
+                      <p className="mt-1 text-sm font-black text-white">{localImageFiles.length}</p>
+                    </div>
+                    <div className="border border-white/10 bg-slate-900 p-2.5">
+                      <p className="text-[9px] font-black uppercase text-slate-500">Dung lượng</p>
+                      <p className="mt-1 text-sm font-black text-white">{formatFileSize(localImageTotalSize)}</p>
+                    </div>
+                    <div className="border border-amber-300/20 bg-amber-300/[0.05] p-2.5">
+                      <p className="text-[9px] font-black uppercase text-amber-100/70">Trong _trash</p>
+                      <p className="mt-1 text-sm font-black text-amber-100">{localTrashImageFiles.length}</p>
+                    </div>
+                    <div className="border border-amber-300/20 bg-amber-300/[0.05] p-2.5">
+                      <p className="text-[9px] font-black uppercase text-amber-100/70">Dung lượng _trash</p>
+                      <p className="mt-1 text-sm font-black text-amber-100">{formatFileSize(localTrashImageTotalSize)}</p>
+                    </div>
+                  </div>
+
+                  <article className="min-w-0 border border-white/10 bg-slate-900 p-3">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        aria-pressed={localImageView === "active"}
+                        className={`border px-3 py-2 text-[10px] font-black transition ${localImageView === "active"
+                          ? "border-cyan-300/50 bg-cyan-300/15 text-cyan-100"
+                          : "border-white/10 bg-slate-800 text-slate-300"}`}
+                        onClick={() => {
+                          setLocalImageView("active");
+                          setSelectedLocalImageNames(new Set<string>());
+                        }}
+                      >
+                        Ảnh đang dùng
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={localImageView === "trash"}
+                        className={`border px-3 py-2 text-[10px] font-black transition ${localImageView === "trash"
+                          ? "border-amber-300/50 bg-amber-300/15 text-amber-100"
+                          : "border-white/10 bg-slate-800 text-slate-300"}`}
+                        onClick={() => {
+                          setLocalImageView("trash");
+                          setSelectedLocalImageNames(new Set<string>());
+                        }}
+                      >
+                        _trash
+                      </button>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
+                      <input
+                        type="search"
+                        value={localImageQuery}
+                        onChange={(event) => {
+                          setLocalImageQuery(event.target.value);
+                          setSelectedLocalImageNames(new Set<string>());
+                        }}
+                        placeholder="Lọc theo tên file..."
+                        className="min-h-9 min-w-0 border border-white/10 bg-slate-950 px-2 text-xs text-white outline-none transition focus:border-cyan-300/50"
+                      />
+                      <div className="grid grid-cols-2 gap-1.5 xl:flex">
+                        <button
+                          type="button"
+                          disabled={filteredLocalImageFiles.length === 0}
+                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:opacity-40"
+                          onClick={selectAllFilteredLocalImages}
+                        >
+                          Chọn tất cả lọc
+                        </button>
+                        <button
+                          type="button"
+                          disabled={selectedLocalImageNames.size === 0}
+                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:opacity-40"
+                          onClick={() => setSelectedLocalImageNames(new Set<string>())}
+                        >
+                          Bỏ chọn
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                      {localImageView === "active" ? (
+                        <button
+                          type="button"
+                          disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
+                          className="border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[10px] font-black text-amber-100 transition hover:bg-amber-300/20 disabled:opacity-40"
+                          onClick={handleMoveSelectedLocalImagesToTrash}
+                        >
+                          Đưa {selectedLocalImageNames.size || "ảnh"} vào _trash
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
+                            className="border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/20 disabled:opacity-40"
+                            onClick={handleRestoreSelectedLocalImages}
+                          >
+                            Khôi phục {selectedLocalImageNames.size || "ảnh"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
+                            className="border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/20 disabled:opacity-40"
+                            onClick={handlePermanentlyDeleteSelectedLocalImages}
+                          >
+                            Xóa vĩnh viễn
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="mt-3 max-h-[52dvh] min-w-0 overflow-y-auto border border-white/10 bg-slate-950/60">
+                      {filteredLocalImageFiles.length === 0 ? (
+                        <div className="p-5 text-center text-xs text-slate-500">
+                          {localImageDirectoryHandle
+                            ? "Không có ảnh phù hợp"
+                            : "Chọn thư mục ảnh để bắt đầu quản lý"}
+                        </div>
+                      ) : (
+                        filteredLocalImageFiles
+                          .slice(0, LOCAL_IMAGE_RENDER_LIMIT)
+                          .map((file) => (
+                            <label
+                              key={`${localImageView}-${file.name}`}
+                              className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.06] p-2.5 last:border-b-0 hover:bg-white/[0.025]"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedLocalImageNames.has(file.name)}
+                                onChange={() => toggleLocalImageSelection(file.name)}
+                                className="h-4 w-4"
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate text-[11px] font-black text-slate-100" title={file.name}>
+                                  {file.name}
+                                </span>
+                                <span className="mt-0.5 block text-[9px] text-slate-500">
+                                  {new Date(file.lastModified).toLocaleString("vi-VN")}
+                                </span>
+                              </span>
+                              <span className="text-[10px] font-black text-slate-400">
+                                {formatFileSize(file.size)}
+                              </span>
+                            </label>
+                          ))
+                      )}
+                    </div>
+
+                    {filteredLocalImageFiles.length > LOCAL_IMAGE_RENDER_LIMIT ? (
+                      <p className="mt-2 text-[10px] text-slate-500">
+                        Đang hiển thị {LOCAL_IMAGE_RENDER_LIMIT}/{filteredLocalImageFiles.length} file để giữ UI nhẹ. Nút Chọn tất cả lọc vẫn áp dụng cho toàn bộ kết quả.
+                      </p>
+                    ) : null}
+                  </article>
+                </section>
+              ) : null}
+
               {activeModal === "imageDownload" ? (
                 <section className="grid w-full grid-cols-1 gap-3 xl:grid-cols-2">
                   <article className="flex flex-col rounded-md border border-white/10 bg-slate-900 p-3">
@@ -13924,12 +14947,17 @@ export default function LocalProductsPage() {
                                       <button
                                         type="button"
                                         className={`min-h-9 min-w-0 overflow-hidden whitespace-nowrap border px-2 py-2 text-[9px] font-black transition active:opacity-80 ${tool.openButtonClassName}`}
-                                        onClick={() =>
+                                        onClick={(event) => {
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
                                           openFacebookUrl(
+                                            openerWindow,
                                             toolUrl,
                                             `${tool.popupNamePrefix}-${activeFacebookPage.id}`,
-                                          )
-                                        }
+                                          );
+                                        }}
                                       >
                                         {tool.openLabel}
                                       </button>
@@ -14123,9 +15151,16 @@ export default function LocalProductsPage() {
                                         type="button"
                                         disabled={!activeFacebookPage}
                                         className="min-h-8 border border-amber-300/35 bg-amber-300/10 px-2 py-1.5 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
-                                        onClick={() =>
-                                          openFacebookDuplicateUrl(option)
-                                        }
+                                        onClick={(event) => {
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
+                                          openFacebookDuplicateUrl(
+                                            openerWindow,
+                                            option,
+                                          );
+                                        }}
                                       >
                                         Mở
                                       </button>
@@ -15189,12 +16224,17 @@ export default function LocalProductsPage() {
                               type="button"
                               disabled={isShareExecuting}
                               className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                              onClick={() =>
-                                void handleOpenMetaBusinessComposer(
+                              onClick={(event) => {
+                                const openerWindow =
+                                  event.currentTarget.ownerDocument.defaultView ??
+                                  window;
+
+                                handleOpenMetaBusinessComposer(
+                                  openerWindow,
                                   option,
                                   "post",
-                                )
-                              }
+                                );
+                              }}
                             >
                               Meta Post
                             </button>
@@ -15203,12 +16243,17 @@ export default function LocalProductsPage() {
                               type="button"
                               disabled={isShareExecuting}
                               className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                              onClick={() =>
-                                void handleOpenMetaBusinessComposer(
+                              onClick={(event) => {
+                                const openerWindow =
+                                  event.currentTarget.ownerDocument.defaultView ??
+                                  window;
+
+                                handleOpenMetaBusinessComposer(
+                                  openerWindow,
                                   option,
                                   "comment",
-                                )
-                              }
+                                );
+                              }}
                             >
                               Meta Cmt
                             </button>
@@ -15324,12 +16369,17 @@ export default function LocalProductsPage() {
                                         title={`Mở ${group.name}, copy Post và tải ảnh chính`}
                                         aria-label={`Mở ${group.name}, copy Post và tải ảnh chính`}
                                         className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={() =>
-                                          void handleOpenFacebookGroup(
+                                        onClick={(event) => {
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
+                                          handleOpenFacebookGroup(
+                                            openerWindow,
                                             groupIndex,
                                             "post",
-                                          )
-                                        }
+                                          );
+                                        }}
                                       >
                                         Meta Post
                                       </button>
@@ -15340,12 +16390,17 @@ export default function LocalProductsPage() {
                                         title={`Mở ${group.name}, copy Cmt và tải ảnh chính`}
                                         aria-label={`Mở ${group.name}, copy Cmt và tải ảnh chính`}
                                         className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] px-2 py-1.5 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={() =>
-                                          void handleOpenFacebookGroup(
+                                        onClick={(event) => {
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
+                                          handleOpenFacebookGroup(
+                                            openerWindow,
                                             groupIndex,
                                             "comment",
-                                          )
-                                        }
+                                          );
+                                        }}
                                       >
                                         Meta Cmt
                                       </button>
@@ -15509,7 +16564,9 @@ export default function LocalProductsPage() {
                     className="rounded-md bg-cyan-300 p-2 text-xs font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => void executeDownloadToFolder()}
                   >
-                    Chọn thư mục & lưu ảnh
+                    {localImageDirectoryHandle
+                      ? `Lưu vào ${localImageDirectoryHandle.name}`
+                      : "Chọn thư mục & lưu ảnh"}
                   </button>
                 ) : null}
 
