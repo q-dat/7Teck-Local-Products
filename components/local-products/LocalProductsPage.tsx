@@ -66,6 +66,12 @@ type ProductImage = {
   resourceType: "image";
 };
 
+type ImageBlobCacheRecord = {
+  blob: Blob;
+  cachedAt: number;
+  sourceUrl: string;
+};
+
 type ProductContentType = "technology" | "realEstate";
 
 type LocalProduct = {
@@ -101,6 +107,25 @@ type ProductDraft = {
 };
 
 type ProductImageField = "images" | "internalImages";
+
+type PendingImageUploadRecord = {
+  id: string;
+  productId: string;
+  product: LocalProduct;
+  imageField: ProductImageField;
+  position: number;
+  image: ProductImage;
+  file: Blob;
+  fileName: string;
+  lastModified: number;
+  queuedAt: string;
+  uploadedImage?: ProductImage;
+};
+
+type DraftPendingImage = {
+  file: File;
+  objectUrl: string;
+};
 
 const DRAFT_IMAGE_ID_DATA_TYPE =
   "application/x-local-product-draft-image-id";
@@ -1217,8 +1242,10 @@ type BootstrapCacheRecord = {
 };
 
 const BOOTSTRAP_CACHE_DATABASE_NAME = "local-products-cloud-cache";
-const BOOTSTRAP_CACHE_DATABASE_VERSION = 1;
+const BOOTSTRAP_CACHE_DATABASE_VERSION = 2;
 const BOOTSTRAP_CACHE_STORE_NAME = "snapshots";
+const IMAGE_BLOB_CACHE_STORE_NAME = "image-blobs";
+const PENDING_IMAGE_UPLOAD_STORE_NAME = "pending-image-uploads";
 const BOOTSTRAP_CACHE_RECORD_KEY = "latest-bootstrap";
 const BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v1";
 const BOOTSTRAP_HOT_CACHE_MAX_CHARACTERS = 2_750_000;
@@ -1276,6 +1303,14 @@ const openBootstrapCacheDatabase = async (): Promise<IDBDatabase> => {
 
       if (!database.objectStoreNames.contains(BOOTSTRAP_CACHE_STORE_NAME)) {
         database.createObjectStore(BOOTSTRAP_CACHE_STORE_NAME);
+      }
+
+      if (!database.objectStoreNames.contains(IMAGE_BLOB_CACHE_STORE_NAME)) {
+        database.createObjectStore(IMAGE_BLOB_CACHE_STORE_NAME);
+      }
+
+      if (!database.objectStoreNames.contains(PENDING_IMAGE_UPLOAD_STORE_NAME)) {
+        database.createObjectStore(PENDING_IMAGE_UPLOAD_STORE_NAME);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -1440,8 +1475,10 @@ const clearBootstrapCache = async (): Promise<void> => {
       database.close();
     }
   } catch {
-    return;
+    // Vẫn thử xóa cache ảnh để một lượt reset không giữ Blob cũ trên máy.
   }
+
+  await clearImageCaches().catch(() => undefined);
 };
 
 type CloudinaryCleanupPayload = {
@@ -1458,6 +1495,318 @@ const emptyCloudinaryCleanup = (): CloudinaryCleanupPayload => ({
   failed: [],
 });
 
+const imageBlobRequests = new Map<string, Promise<Blob>>();
+const pendingImageBlobPrefetches = new Map<string, ProductImage>();
+let activeImageBlobPrefetches = 0;
+let imageBlobPrefetchTimer: number | null = null;
+
+const createImageBlobCacheKey = (image: ProductImage): string => {
+  const identity = image.publicId.trim() || `draft-${image.id}`;
+  const revision = String(image.version || image.etag || image.sha256 || "");
+  return `${identity}::${revision}`;
+};
+
+const isUploadedProductImage = (image: ProductImage): boolean => {
+  return Boolean(
+    image.publicId.trim() &&
+    image.dataUrl.trim() &&
+    !image.dataUrl.startsWith("blob:"),
+  );
+};
+
+const toPersistedProduct = (product: LocalProduct): LocalProduct => ({
+  ...product,
+  images: product.images.filter(isUploadedProductImage),
+  internalImages: product.internalImages.filter(isUploadedProductImage),
+});
+
+const createLocalDraftImage = (file: File): ProductImage => {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    originalName: file.name,
+    dataUrl: URL.createObjectURL(file),
+    size: file.size,
+    type: file.type || "image/jpeg",
+    createdAt: now,
+    publicId: "",
+    assetId: "",
+    version: 0,
+    format: file.type.split("/").at(-1) || "",
+    width: 0,
+    height: 0,
+    bytes: file.size,
+    etag: "",
+    sha256: "",
+    resourceType: "image",
+  };
+};
+
+const createPendingImageUploadRecord = (
+  product: LocalProduct,
+  imageField: ProductImageField,
+  position: number,
+  image: ProductImage,
+  file: File,
+): PendingImageUploadRecord => ({
+  id: image.id,
+  productId: product.id,
+  product: toPersistedProduct(product),
+  imageField,
+  position,
+  image: { ...image, dataUrl: "" },
+  file,
+  fileName: file.name,
+  lastModified: file.lastModified,
+  queuedAt: new Date().toISOString(),
+});
+
+const readImageBlobCache = async (
+  key: string,
+): Promise<ImageBlobCacheRecord | null> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        IMAGE_BLOB_CACHE_STORE_NAME,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(IMAGE_BLOB_CACHE_STORE_NAME)
+        .get(key);
+
+      request.onsuccess = () => {
+        const value = request.result as unknown;
+
+        if (!value || typeof value !== "object") {
+          resolve(null);
+          return;
+        }
+
+        const record = value as Partial<ImageBlobCacheRecord>;
+
+        resolve(record.blob instanceof Blob ? {
+          blob: record.blob,
+          cachedAt: typeof record.cachedAt === "number" ? record.cachedAt : 0,
+          sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : "",
+        } : null);
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Không thể đọc cache ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Đọc cache ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const writeImageBlobCache = async (
+  key: string,
+  blob: Blob,
+  sourceUrl: string,
+): Promise<void> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        IMAGE_BLOB_CACHE_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction
+        .objectStore(IMAGE_BLOB_CACHE_STORE_NAME)
+        .put({ blob, cachedAt: Date.now(), sourceUrl }, key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể lưu cache ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Lưu cache ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const removeImageBlobCache = async (key: string): Promise<void> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        IMAGE_BLOB_CACHE_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction.objectStore(IMAGE_BLOB_CACHE_STORE_NAME).delete(key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể xóa cache ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Xóa cache ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const readPendingImageUploadRecords = async (): Promise<
+  PendingImageUploadRecord[]
+> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        PENDING_IMAGE_UPLOAD_STORE_NAME,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(PENDING_IMAGE_UPLOAD_STORE_NAME)
+        .getAll();
+
+      request.onsuccess = () => {
+        const values = Array.isArray(request.result) ? request.result : [];
+        const records = values.filter((value): value is PendingImageUploadRecord => {
+          if (!value || typeof value !== "object") return false;
+
+          const record = value as Partial<PendingImageUploadRecord>;
+          return (
+            typeof record.id === "string" &&
+            typeof record.productId === "string" &&
+            Boolean(record.product && typeof record.product === "object") &&
+            (record.imageField === "images" || record.imageField === "internalImages") &&
+            typeof record.position === "number" &&
+            Boolean(record.image && typeof record.image === "object") &&
+            record.file instanceof Blob &&
+            typeof record.fileName === "string" &&
+            typeof record.lastModified === "number" &&
+            typeof record.queuedAt === "string"
+          );
+        });
+
+        resolve(records);
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Không thể đọc hàng đợi ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Đọc hàng đợi ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const writePendingImageUploadRecords = async (
+  records: PendingImageUploadRecord[],
+): Promise<void> => {
+  if (records.length === 0) return;
+
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        PENDING_IMAGE_UPLOAD_STORE_NAME,
+        "readwrite",
+      );
+      const store = transaction.objectStore(PENDING_IMAGE_UPLOAD_STORE_NAME);
+
+      records.forEach((record) => store.put(record, record.id));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể lưu hàng đợi ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Lưu hàng đợi ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const removePendingImageUploadRecord = async (id: string): Promise<void> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        PENDING_IMAGE_UPLOAD_STORE_NAME,
+        "readwrite",
+      );
+
+      transaction
+        .objectStore(PENDING_IMAGE_UPLOAD_STORE_NAME)
+        .delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể xóa ảnh chờ tải"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Xóa ảnh chờ tải bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const removePendingImageUploadsForProduct = async (
+  productId: string,
+): Promise<void> => {
+  const records = await readPendingImageUploadRecords();
+  const ids = records
+    .filter((record) => record.productId === productId)
+    .map((record) => record.id);
+
+  if (ids.length === 0) return;
+
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        PENDING_IMAGE_UPLOAD_STORE_NAME,
+        "readwrite",
+      );
+      const store = transaction.objectStore(PENDING_IMAGE_UPLOAD_STORE_NAME);
+
+      ids.forEach((id) => store.delete(id));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể hủy ảnh chờ tải"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Hủy ảnh chờ tải bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const clearImageCaches = async (): Promise<void> => {
+  const database = await openBootstrapCacheDatabase();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [IMAGE_BLOB_CACHE_STORE_NAME, PENDING_IMAGE_UPLOAD_STORE_NAME],
+        "readwrite",
+      );
+
+      transaction.objectStore(IMAGE_BLOB_CACHE_STORE_NAME).clear();
+      transaction.objectStore(PENDING_IMAGE_UPLOAD_STORE_NAME).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Không thể xóa cache ảnh"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Xóa cache ảnh bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
 const getBootstrapData = async (): Promise<BootstrapPayload> => {
   return apiRequest<BootstrapPayload>("/bootstrap");
 };
@@ -1469,7 +1818,7 @@ const saveProductToDb = async (
     `/products/${encodeURIComponent(product.id)}`,
     {
       method: "PUT",
-      body: JSON.stringify(product),
+      body: JSON.stringify(toPersistedProduct(product)),
     },
   );
 
@@ -2151,7 +2500,10 @@ const deleteUnattachedCloudinaryImages = async (publicIds: string[]): Promise<vo
   });
 };
 
-const uploadOriginalImageToCloudinary = async (file: File): Promise<ProductImage> => {
+const uploadOriginalImageToCloudinary = async (
+  file: File,
+  sourceImage?: ProductImage,
+): Promise<ProductImage> => {
   const maxBytes = Number(process.env.NEXT_PUBLIC_MAX_IMAGE_BYTES || 0);
   if (Number.isFinite(maxBytes) && maxBytes > 0 && file.size > maxBytes) {
     throw new Error(`Ảnh ${file.name} vượt giới hạn ${formatFileSize(maxBytes)}`);
@@ -2181,15 +2533,14 @@ const uploadOriginalImageToCloudinary = async (file: File): Promise<ProductImage
     throw new Error(result.error?.message || `Không thể upload ảnh ${file.name}`);
   }
 
-  const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID(),
-    name: file.name,
-    originalName: file.name,
+    id: sourceImage?.id || crypto.randomUUID(),
+    name: sourceImage?.name || file.name,
+    originalName: sourceImage?.originalName || file.name,
     dataUrl: result.secure_url,
     size: file.size,
     type: file.type || `image/${result.format}`,
-    createdAt: now,
+    createdAt: sourceImage?.createdAt || new Date().toISOString(),
     publicId: result.public_id,
     assetId: result.asset_id,
     version: result.version,
@@ -2201,21 +2552,6 @@ const uploadOriginalImageToCloudinary = async (file: File): Promise<ProductImage
     sha256,
     resourceType: "image",
   };
-};
-
-const convertFilesToImages = async (files: File[]): Promise<ProductImage[]> => {
-  const validFiles = files.filter((file) => file.type.startsWith("image/"));
-  const uploaded: ProductImage[] = [];
-
-  try {
-    for (const file of validFiles) {
-      uploaded.push(await uploadOriginalImageToCloudinary(file));
-    }
-    return uploaded;
-  } catch (error) {
-    await deleteUnattachedCloudinaryImages(uploaded.map((image) => image.publicId)).catch(() => undefined);
-    throw error;
-  }
 };
 
 const normalizeImages = (value: unknown): ProductImage[] => {
@@ -2748,9 +3084,9 @@ const renameDraftImagesByField = (
     : renameImagesByOrder(images);
 };
 
-const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
-  const response = await fetch(dataUrl, {
-    cache: "no-store",
+const fetchImageBlob = async (sourceUrl: string): Promise<Blob> => {
+  const response = await fetch(sourceUrl, {
+    cache: "force-cache",
     credentials: "omit",
     mode: "cors",
   });
@@ -2772,20 +3108,96 @@ const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
   return blob;
 };
 
+const getProductImageBlob = async (image: ProductImage): Promise<Blob> => {
+  const cacheKey = createImageBlobCacheKey(image);
+
+  try {
+    const cached = await readImageBlobCache(cacheKey);
+    if (cached?.blob.size) return cached.blob;
+  } catch {
+    // Cache Blob là lớp tăng tốc; khi IndexedDB lỗi vẫn tải ảnh bình thường.
+  }
+
+  const activeRequest = imageBlobRequests.get(cacheKey);
+  if (activeRequest) return activeRequest;
+
+  const request = fetchImageBlob(image.dataUrl)
+    .then(async (blob) => {
+      await writeImageBlobCache(cacheKey, blob, image.dataUrl).catch(
+        () => undefined,
+      );
+      return blob;
+    })
+    .finally(() => {
+      imageBlobRequests.delete(cacheKey);
+    });
+
+  imageBlobRequests.set(cacheKey, request);
+  return request;
+};
+
+const cacheProductImageBlob = async (
+  image: ProductImage,
+  blob: Blob,
+): Promise<void> => {
+  await writeImageBlobCache(
+    createImageBlobCacheKey(image),
+    blob,
+    image.dataUrl,
+  );
+};
+
+const runImageBlobPrefetchQueue = (): void => {
+  while (
+    activeImageBlobPrefetches < 2 &&
+    pendingImageBlobPrefetches.size > 0
+  ) {
+    const nextEntry = pendingImageBlobPrefetches.entries().next().value as
+      | [string, ProductImage]
+      | undefined;
+
+    if (!nextEntry) return;
+
+    const [cacheKey, image] = nextEntry;
+    pendingImageBlobPrefetches.delete(cacheKey);
+    activeImageBlobPrefetches += 1;
+
+    void getProductImageBlob(image)
+      .catch(() => undefined)
+      .finally(() => {
+        activeImageBlobPrefetches -= 1;
+        runImageBlobPrefetchQueue();
+      });
+  }
+};
+
+const scheduleProductImageBlobCache = (images: ProductImage[]): void => {
+  if (typeof window === "undefined" || images.length === 0) return;
+
+  images.forEach((image) => {
+    pendingImageBlobPrefetches.set(createImageBlobCacheKey(image), image);
+  });
+
+  if (imageBlobPrefetchTimer !== null) return;
+
+  imageBlobPrefetchTimer = window.setTimeout(() => {
+    imageBlobPrefetchTimer = null;
+    runImageBlobPrefetchQueue();
+  }, 180);
+};
+
 const getNativeShareNavigator = (): NativeShareNavigator | null => {
   if (typeof navigator === "undefined") return null;
 
   return navigator as NativeShareNavigator;
 };
 
-const dataUrlToShareFile = async (
-  dataUrl: string,
+const imageToShareFile = async (
+  image: ProductImage,
   fileName: string,
 ): Promise<File> => {
-  const blob = await dataUrlToBlob(dataUrl);
-  const fallbackType = dataUrl.startsWith("data:image/png")
-    ? "image/png"
-    : "image/jpeg";
+  const blob = await getProductImageBlob(image);
+  const fallbackType = image.type || "image/jpeg";
 
   return new File([blob], fileName || "sanpham.jpg", {
     type: blob.type || fallbackType,
@@ -2846,11 +3258,11 @@ const imageBlobToPngBlob = async (
   }
 };
 
-const dataUrlToPngBlob = async (
-  dataUrl: string,
+const imageToPngBlob = async (
+  image: ProductImage,
   targetDocument: Document,
 ): Promise<Blob> => {
-  const sourceBlob = await dataUrlToBlob(dataUrl);
+  const sourceBlob = await getProductImageBlob(image);
   return imageBlobToPngBlob(sourceBlob, targetDocument);
 };
 
@@ -2937,10 +3349,7 @@ const copyImageToClipboard = async (image: ProductImage): Promise<void> => {
       ? (ClipboardItem as ClipboardItemConstructor)
       : undefined);
 
-  const pngBlobPromise = dataUrlToPngBlob(
-    image.dataUrl,
-    interactionWindow.document,
-  );
+  const pngBlobPromise = imageToPngBlob(image, interactionWindow.document);
   let clipboardError: unknown;
 
   if (clipboard?.write && ClipboardItemClass) {
@@ -2994,7 +3403,7 @@ const downloadOriginalImage = async (
   image: ProductImage,
   index: number,
 ): Promise<void> => {
-  const blob = await dataUrlToBlob(image.dataUrl);
+  const blob = await getProductImageBlob(image);
   downloadBlob(
     blob,
     createSystemImageFilename(index, image.id, normalizeImageExtension(image)),
@@ -3683,7 +4092,7 @@ const saveImagesToDirectory = async (
 
     if (!image) continue;
 
-    const blob = await dataUrlToBlob(image.dataUrl);
+    const blob = await getProductImageBlob(image);
     const preferredName = createSystemImageFilename(
       request.startIndex + index,
       image.id,
@@ -3983,6 +4392,25 @@ const buildRandomSchedule = (
 export default function LocalProductsPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
+  const productsRef = useRef<LocalProduct[]>([]);
+  const draftPendingImagesRef = useRef<Map<string, DraftPendingImage>>(
+    new Map<string, DraftPendingImage>(),
+  );
+  const pendingImageUploadsRef = useRef<Map<string, PendingImageUploadRecord>>(
+    new Map<string, PendingImageUploadRecord>(),
+  );
+  const pendingImageObjectUrlsRef = useRef<Map<string, string>>(
+    new Map<string, string>(),
+  );
+  const pendingImageUploadPumpRef = useRef<boolean>(false);
+  const pendingImageQueueHydratedRef = useRef<boolean>(false);
+  const pendingImageQueueWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const cancelledPendingImageUploadIdsRef = useRef<Set<string>>(
+    new Set<string>(),
+  );
+  const failedPendingImageUploadIdsRef = useRef<Set<string>>(
+    new Set<string>(),
+  );
   const contactSelectionPromptedRef = useRef<boolean>(false);
   const previousContactOptionCountRef = useRef<number>(0);
   const persistedAppStateSignaturesRef = useRef<{
@@ -4128,7 +4556,8 @@ export default function LocalProductsPage() {
   const [dragOverImageField, setDragOverImageField] = useState<
     ProductImageField | ""
   >("");
-  const [isProcessingImages, setIsProcessingImages] = useState<boolean>(false);
+  const [pendingImageUploadCount, setPendingImageUploadCount] =
+    useState<number>(0);
   const [isSettingsReady, setIsSettingsReady] = useState<boolean>(false);
   const [pageLoadingText, setPageLoadingText] = useState<string>("");
   const [modalStack, setModalStack] = useState<ModalName[]>([]);
@@ -4156,6 +4585,10 @@ export default function LocalProductsPage() {
     useState<HourlyNotificationConfig>(() => loadHourlyNotificationConfig());
   const hourlyNotificationTimeoutRef = useRef<number | null>(null);
   const hourlyAudioContextRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
 
   const currentLocalImageFiles =
     localImageView === "trash" ? localTrashImageFiles : localImageFiles;
@@ -5770,7 +6203,10 @@ export default function LocalProductsPage() {
 
   const createCurrentBootstrapPayload = useCallback((): BootstrapPayload => {
     return {
-      products,
+      // Object URL chỉ sống trong phiên hiện tại. Ảnh chờ upload nằm ở IndexedDB
+      // riêng nên snapshot khởi động chỉ lưu metadata Cloudinary, không nhét Blob
+      // hay blob: URL vào JSON/localStorage.
+      products: products.map(toPersistedProduct),
       settings,
       scheduleConfig,
       scheduleAssignments,
@@ -5794,6 +6230,9 @@ export default function LocalProductsPage() {
 
       applyBootstrapPayload(payload);
       await writeBootstrapCache(payload);
+      failedPendingImageUploadIdsRef.current.clear();
+      pendingImageQueueHydratedRef.current = false;
+      await hydratePendingImageUploads();
       Toastify("Đã lấy dữ liệu mới từ MongoDB và cập nhật cache", 200);
     } catch (error) {
       Toastify(
@@ -5810,6 +6249,7 @@ export default function LocalProductsPage() {
     await waitForUiPaint();
 
     try {
+      await pendingImageQueueWriteRef.current;
       await writeBootstrapCache(createCurrentBootstrapPayload());
     } catch (error) {
       setPageLoadingText("");
@@ -6830,6 +7270,357 @@ export default function LocalProductsPage() {
     });
   };
 
+  const syncPendingImageUploadCount = (): void => {
+    setPendingImageUploadCount(pendingImageUploadsRef.current.size);
+  };
+
+  const releasePendingImageObjectUrl = (imageId: string): void => {
+    const objectUrl = pendingImageObjectUrlsRef.current.get(imageId);
+
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+      pendingImageObjectUrlsRef.current.delete(imageId);
+    }
+
+    draftPendingImagesRef.current.delete(imageId);
+  };
+
+  const releaseUnsubmittedDraftImages = (): void => {
+    Array.from(draftPendingImagesRef.current.keys()).forEach(
+      releasePendingImageObjectUrl,
+    );
+  };
+
+  const getPendingImagePreview = (
+    record: PendingImageUploadRecord,
+  ): ProductImage => {
+    if (record.uploadedImage) return record.uploadedImage;
+
+    const knownObjectUrl = pendingImageObjectUrlsRef.current.get(record.id);
+    const objectUrl = knownObjectUrl || URL.createObjectURL(record.file);
+
+    if (!knownObjectUrl) {
+      pendingImageObjectUrlsRef.current.set(record.id, objectUrl);
+    }
+
+    return {
+      ...record.image,
+      dataUrl: objectUrl,
+      size: record.image.size || record.file.size,
+      bytes: record.image.bytes || record.file.size,
+      type: record.image.type || record.file.type || "image/jpeg",
+      originalName: record.image.originalName || record.fileName,
+      name: record.image.name || record.fileName,
+    };
+  };
+
+  const insertPendingImageIntoProduct = (
+    product: LocalProduct,
+    record: PendingImageUploadRecord,
+    image: ProductImage,
+  ): LocalProduct => {
+    const currentImages = product[record.imageField];
+    const currentIndex = currentImages.findIndex(
+      (candidate) => candidate.id === record.id,
+    );
+    const nextImages = [...currentImages];
+
+    if (currentIndex >= 0) {
+      nextImages.splice(currentIndex, 1, image);
+    } else {
+      const insertionIndex = Math.min(
+        Math.max(record.position, 0),
+        nextImages.length,
+      );
+      nextImages.splice(insertionIndex, 0, image);
+    }
+
+    return {
+      ...product,
+      [record.imageField]: renameDraftImagesByField(
+        nextImages,
+        record.imageField,
+      ),
+    };
+  };
+
+  const commitLocalProduct = (nextProduct: LocalProduct): LocalProduct => {
+    const nextProducts = sortProductsByUpdatedAt([
+      nextProduct,
+      ...productsRef.current.filter((product) => product.id !== nextProduct.id),
+    ]);
+
+    productsRef.current = nextProducts;
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+    return nextProduct;
+  };
+
+  const removeQueuedImageUpload = async (
+    record: PendingImageUploadRecord,
+    clearBlobCache = false,
+  ): Promise<void> => {
+    pendingImageUploadsRef.current.delete(record.id);
+    failedPendingImageUploadIdsRef.current.delete(record.id);
+    await removePendingImageUploadRecord(record.id).catch(() => undefined);
+    if (clearBlobCache) {
+      await removeImageBlobCache(
+        createImageBlobCacheKey(record.uploadedImage ?? record.image),
+      ).catch(() => undefined);
+    }
+    releasePendingImageObjectUrl(record.id);
+    syncPendingImageUploadCount();
+  };
+
+  const processPendingImageUpload = async (
+    record: PendingImageUploadRecord,
+  ): Promise<void> => {
+    if (cancelledPendingImageUploadIdsRef.current.has(record.id)) {
+      await removeQueuedImageUpload(record, true);
+      return;
+    }
+
+    const snapshotProduct = normalizeProduct(record.product);
+    const currentProduct =
+      productsRef.current.find((product) => product.id === record.productId) ??
+      snapshotProduct;
+
+    if (!currentProduct) {
+      await removeQueuedImageUpload(record, true);
+      return;
+    }
+
+    // Lưu phần dữ liệu/ảnh Cloudinary đã có trước. Upload file mới luôn chạy nền
+    // sau bước này nên bấm Lưu không còn phải chờ từng ảnh xử lý xong.
+    await saveProductToDb(currentProduct);
+
+    if (cancelledPendingImageUploadIdsRef.current.has(record.id)) {
+      await removeQueuedImageUpload(record, true);
+      return;
+    }
+
+    let uploadedImage = record.uploadedImage;
+
+    if (!uploadedImage) {
+      const file = new File([record.file], record.fileName || record.image.name, {
+        type: record.file.type || record.image.type || "image/jpeg",
+        lastModified: record.lastModified || Date.now(),
+      });
+
+      uploadedImage = await uploadOriginalImageToCloudinary(file, record.image);
+      const uploadedRecord: PendingImageUploadRecord = {
+        ...record,
+        uploadedImage,
+      };
+
+      pendingImageUploadsRef.current.set(record.id, uploadedRecord);
+      await writePendingImageUploadRecords([uploadedRecord]).catch(
+        () => undefined,
+      );
+      await cacheProductImageBlob(uploadedImage, record.file).catch(
+        () => undefined,
+      );
+      await removeImageBlobCache(createImageBlobCacheKey(record.image)).catch(
+        () => undefined,
+      );
+      record = uploadedRecord;
+    }
+
+    if (cancelledPendingImageUploadIdsRef.current.has(record.id)) {
+      await deleteUnattachedCloudinaryImages([uploadedImage.publicId]).catch(
+        () => undefined,
+      );
+      await removeQueuedImageUpload(record, true);
+      return;
+    }
+
+    const latestProduct =
+      productsRef.current.find((product) => product.id === record.productId) ??
+      currentProduct;
+    const nextProduct = insertPendingImageIntoProduct(
+      latestProduct,
+      record,
+      uploadedImage,
+    );
+
+    const committedProduct = commitLocalProduct({
+      ...nextProduct,
+      updatedAt: new Date().toISOString(),
+    });
+    await saveProductToDb(committedProduct);
+    await removeQueuedImageUpload(record);
+  };
+
+  const runPendingImageUploadQueue = (): void => {
+    if (pendingImageUploadPumpRef.current) return;
+
+    pendingImageUploadPumpRef.current = true;
+
+    void (async () => {
+      while (true) {
+        const record = Array.from(
+          pendingImageUploadsRef.current.values(),
+        ).find(
+          (candidate) =>
+            !cancelledPendingImageUploadIdsRef.current.has(candidate.id) &&
+            !failedPendingImageUploadIdsRef.current.has(candidate.id),
+        );
+
+        if (!record) return;
+
+        try {
+          await processPendingImageUpload(record);
+        } catch (error) {
+          failedPendingImageUploadIdsRef.current.add(record.id);
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Không thể đồng bộ ảnh lên Cloudinary";
+          Toastify(`${message}. Ảnh vẫn được giữ trong hàng đợi trên thiết bị.`, 400);
+        }
+      }
+    })().finally(() => {
+      pendingImageUploadPumpRef.current = false;
+
+      const hasRunnableRecord = Array.from(
+        pendingImageUploadsRef.current.values(),
+      ).some(
+        (record) =>
+          !cancelledPendingImageUploadIdsRef.current.has(record.id) &&
+          !failedPendingImageUploadIdsRef.current.has(record.id),
+      );
+
+      if (hasRunnableRecord) runPendingImageUploadQueue();
+    });
+  };
+
+  const enqueuePendingImageUploads = (
+    records: PendingImageUploadRecord[],
+  ): void => {
+    if (records.length === 0) return;
+
+    records.forEach((record) => {
+      pendingImageUploadsRef.current.set(record.id, record);
+      cancelledPendingImageUploadIdsRef.current.delete(record.id);
+      failedPendingImageUploadIdsRef.current.delete(record.id);
+    });
+    syncPendingImageUploadCount();
+
+    const persistQueue = writePendingImageUploadRecords(records)
+      .then(async () => {
+        const cancelledRecords = records.filter((record) =>
+          cancelledPendingImageUploadIdsRef.current.has(record.id),
+        );
+
+        await Promise.all(
+          cancelledRecords.map((record) =>
+            removePendingImageUploadRecord(record.id).catch(() => undefined),
+          ),
+        );
+      })
+      .catch(() => {
+        Toastify(
+          "Không thể lưu hàng đợi ảnh trên thiết bị; vẫn tiếp tục tải trong phiên này",
+          300,
+        );
+      });
+
+    pendingImageQueueWriteRef.current = persistQueue;
+
+    runPendingImageUploadQueue();
+  };
+
+  const cancelPendingImageUploadsForProduct = (productId: string): void => {
+    const records = Array.from(pendingImageUploadsRef.current.values()).filter(
+      (record) => record.productId === productId,
+    );
+
+    if (records.length === 0) return;
+
+    records.forEach((record) => {
+      cancelledPendingImageUploadIdsRef.current.add(record.id);
+      pendingImageUploadsRef.current.delete(record.id);
+      failedPendingImageUploadIdsRef.current.delete(record.id);
+      releasePendingImageObjectUrl(record.id);
+      void removeImageBlobCache(
+        createImageBlobCacheKey(record.uploadedImage ?? record.image),
+      ).catch(() => undefined);
+    });
+    syncPendingImageUploadCount();
+    void removePendingImageUploadsForProduct(productId).catch(() => undefined);
+  };
+
+  const cancelPendingImageUpload = (imageId: string): void => {
+    const record = pendingImageUploadsRef.current.get(imageId);
+    if (!record) return;
+
+    cancelledPendingImageUploadIdsRef.current.add(imageId);
+    pendingImageUploadsRef.current.delete(imageId);
+    failedPendingImageUploadIdsRef.current.delete(imageId);
+    releasePendingImageObjectUrl(imageId);
+    void removeImageBlobCache(
+      createImageBlobCacheKey(record.uploadedImage ?? record.image),
+    ).catch(() => undefined);
+    syncPendingImageUploadCount();
+    void removePendingImageUploadRecord(record.id).catch(() => undefined);
+  };
+
+  const hydratePendingImageUploads = async (): Promise<void> => {
+    if (pendingImageQueueHydratedRef.current) return;
+    pendingImageQueueHydratedRef.current = true;
+
+    const records = await readPendingImageUploadRecords().catch(() => []);
+
+    if (records.length === 0) return;
+
+    records.forEach((record) => {
+      pendingImageUploadsRef.current.set(record.id, record);
+    });
+    syncPendingImageUploadCount();
+
+    const nextProducts = records.reduce<LocalProduct[]>(
+      (currentProducts, record) => {
+        const snapshotProduct = normalizeProduct(record.product);
+        const product =
+          currentProducts.find((candidate) => candidate.id === record.productId) ??
+          snapshotProduct;
+
+        if (!product) return currentProducts;
+
+        const preview = getPendingImagePreview(record);
+        const nextProduct = insertPendingImageIntoProduct(
+          product,
+          record,
+          preview,
+        );
+
+        return [
+          nextProduct,
+          ...currentProducts.filter((candidate) => candidate.id !== nextProduct.id),
+        ];
+      },
+      productsRef.current,
+    );
+
+    productsRef.current = sortProductsByUpdatedAt(nextProducts);
+    setProducts(productsRef.current);
+    runPendingImageUploadQueue();
+  };
+
+  useEffect(() => {
+    if (!isSettingsReady) return;
+
+    void hydratePendingImageUploads();
+  }, [isSettingsReady]);
+
+  useEffect(() => {
+    return () => {
+      Array.from(pendingImageObjectUrlsRef.current.keys()).forEach(
+        releasePendingImageObjectUrl,
+      );
+    };
+  }, []);
+
   const cleanupUnattachedDraftImages = (): void => {
     const publicIds = [...draft.images, ...draft.internalImages]
       .map((image) => image.publicId)
@@ -6848,6 +7639,7 @@ export default function LocalProductsPage() {
 
       if (closingModal === "product") {
         cleanupUnattachedDraftImages();
+        releaseUnsubmittedDraftImages();
         setDraft(emptyDraft);
         setEditingId("");
         persistedDraftPublicIdsRef.current = new Set<string>();
@@ -6894,7 +7686,10 @@ export default function LocalProductsPage() {
   };
 
   const closeAllModals = (): void => {
-    if (modalStack.includes("product")) cleanupUnattachedDraftImages();
+    if (modalStack.includes("product")) {
+      cleanupUnattachedDraftImages();
+      releaseUnsubmittedDraftImages();
+    }
     persistedDraftPublicIdsRef.current = new Set<string>();
     setModalStack([]);
     setSelectedSlotId("");
@@ -6923,16 +7718,17 @@ export default function LocalProductsPage() {
   };
 
   const openProductModalForCreate = (): void => {
+    releaseUnsubmittedDraftImages();
     setEditingId("");
     setDraft(emptyDraft);
     persistedDraftPublicIdsRef.current = new Set<string>();
     openModal("product");
   };
 
-  const appendImagesToDraft = async (
+  const appendImagesToDraft = (
     files: File[],
     imageField: ProductImageField = "images",
-  ): Promise<void> => {
+  ): void => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
     if (imageFiles.length === 0) {
@@ -6940,71 +7736,75 @@ export default function LocalProductsPage() {
       return;
     }
 
-    setIsProcessingImages(true);
+    const images = imageFiles.map((file) => {
+      const image = createLocalDraftImage(file);
 
-    try {
-      const images = await convertFilesToImages(imageFiles);
+      draftPendingImagesRef.current.set(image.id, {
+        file,
+        objectUrl: image.dataUrl,
+      });
+      pendingImageObjectUrlsRef.current.set(image.id, image.dataUrl);
+      // File gốc được giữ thành Blob trong IndexedDB ngay từ lúc chọn, nhưng
+      // không chặn giao diện hay phải đợi Cloudinary mới thấy ảnh trong form.
+      void cacheProductImageBlob(image, file).catch(() => undefined);
+      return image;
+    });
 
-      setDraft((current) => ({
-        ...current,
-        [imageField]: renameDraftImagesByField(
-          [...images, ...current[imageField]],
-          imageField,
-        ),
-      }));
+    setDraft((current) => ({
+      ...current,
+      [imageField]: renameDraftImagesByField(
+        [...images, ...current[imageField]],
+        imageField,
+      ),
+    }));
 
-      Toastify(
-        `Đã thêm ${images.length} ${imageField === "internalImages" ? "ảnh nội bộ" : "ảnh chính"}`,
-        200,
-      );
-    } catch {
-      Toastify("Không thể xử lý ảnh", 400);
-    } finally {
-      setIsProcessingImages(false);
-    }
+    Toastify(
+      `Đã thêm ${images.length} ${imageField === "internalImages" ? "ảnh nội bộ" : "ảnh chính"}; sẽ tải nền sau khi lưu`,
+      200,
+    );
   };
 
-  const handleImageInput = async (
+  const handleImageInput = (
     event: ChangeEvent<HTMLInputElement>,
-  ): Promise<void> => {
+  ): void => {
     const files = Array.from(event.target.files ?? []) as File[];
 
-    await appendImagesToDraft(files);
+    appendImagesToDraft(files);
 
     event.target.value = "";
   };
 
-  const handleInternalImageInput = async (
+  const handleInternalImageInput = (
     event: ChangeEvent<HTMLInputElement>,
-  ): Promise<void> => {
+  ): void => {
     const files = Array.from(event.target.files ?? []) as File[];
 
-    await appendImagesToDraft(files, "internalImages");
+    appendImagesToDraft(files, "internalImages");
 
     event.target.value = "";
   };
 
-  const handlePaste = async (
+  const handlePaste = (
     event: ClipboardEvent<HTMLElement>,
-  ): Promise<void> => {
+  ): void => {
     const files = Array.from(event.clipboardData.files) as File[];
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
     if (imageFiles.length === 0) return;
 
-    await appendImagesToDraft(imageFiles);
+    appendImagesToDraft(imageFiles);
   };
 
-  const handleInternalImagePaste = async (
+  const handleInternalImagePaste = (
     event: ClipboardEvent<HTMLElement>,
-  ): Promise<void> => {
+  ): void => {
     const files = Array.from(event.clipboardData.files) as File[];
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
     if (imageFiles.length === 0) return;
 
     event.stopPropagation();
-    await appendImagesToDraft(imageFiles, "internalImages");
+    appendImagesToDraft(imageFiles, "internalImages");
   };
 
   const moveDraftImageBetweenFields = (
@@ -7125,6 +7925,15 @@ export default function LocalProductsPage() {
     imageField: ProductImageField = "images",
   ): void => {
     const removedImage = draft[imageField].find((image) => image.id === imageId);
+
+    if (draftPendingImagesRef.current.has(imageId)) {
+      releasePendingImageObjectUrl(imageId);
+    }
+
+    if (pendingImageUploadsRef.current.has(imageId)) {
+      cancelPendingImageUpload(imageId);
+    }
+
     if (
       removedImage?.publicId &&
       !persistedDraftPublicIdsRef.current.has(removedImage.publicId)
@@ -7132,6 +7941,12 @@ export default function LocalProductsPage() {
       void deleteUnattachedCloudinaryImages([removedImage.publicId]).catch((error) => {
         console.error("Không thể xóa ảnh Cloudinary khỏi bản nháp", error);
       });
+    }
+
+    if (removedImage?.publicId) {
+      void removeImageBlobCache(createImageBlobCacheKey(removedImage)).catch(
+        () => undefined,
+      );
     }
 
     setDraft((current) => ({
@@ -7176,14 +7991,85 @@ export default function LocalProductsPage() {
   };
 
   const resetForm = (): void => {
+    releaseUnsubmittedDraftImages();
     setDraft(emptyDraft);
     setEditingId("");
     persistedDraftPublicIdsRef.current = new Set<string>();
   };
 
-  const handleSubmit = async (
+  const synchronizePendingImageUploadsWithProduct = (
+    product: LocalProduct,
+  ): void => {
+    const updatedRecords: PendingImageUploadRecord[] = [];
+
+    Array.from(pendingImageUploadsRef.current.values())
+      .filter((record) => record.productId === product.id)
+      .forEach((record) => {
+        const matchedField = ([
+          "images",
+          "internalImages",
+        ] as ProductImageField[]).find((field) =>
+          product[field].some((image) => image.id === record.id),
+        );
+
+        if (!matchedField) {
+          cancelPendingImageUpload(record.id);
+          return;
+        }
+
+        const position = product[matchedField].findIndex(
+          (image) => image.id === record.id,
+        );
+        const image = product[matchedField][position];
+
+        if (!image) return;
+
+        const updatedRecord: PendingImageUploadRecord = {
+          ...record,
+          product: toPersistedProduct(product),
+          imageField: matchedField,
+          position,
+          image: { ...image, dataUrl: "" },
+        };
+
+        pendingImageUploadsRef.current.set(record.id, updatedRecord);
+        updatedRecords.push(updatedRecord);
+      });
+
+    void writePendingImageUploadRecords(updatedRecords).catch(() => undefined);
+  };
+
+  const collectDraftPendingImageUploads = (
+    product: LocalProduct,
+  ): PendingImageUploadRecord[] => {
+    const records: PendingImageUploadRecord[] = [];
+
+    (["images", "internalImages"] as ProductImageField[]).forEach(
+      (imageField) => {
+        product[imageField].forEach((image, position) => {
+          const pendingImage = draftPendingImagesRef.current.get(image.id);
+          if (!pendingImage) return;
+
+          draftPendingImagesRef.current.delete(image.id);
+          records.push(
+            createPendingImageUploadRecord(
+              product,
+              imageField,
+              position,
+              image,
+              pendingImage.file,
+            ),
+          );
+        });
+      },
+    );
+
+    return records;
+  };
+
+  const handleSubmit = (
     event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
+  ): void => {
     event.preventDefault();
 
     const now = new Date().toISOString();
@@ -7201,7 +8087,9 @@ export default function LocalProductsPage() {
       return;
     }
 
-    const currentProduct = products.find((product) => product.id === editingId);
+    const currentProduct = productsRef.current.find(
+      (product) => product.id === editingId,
+    );
     const name = normalizeDoneProductName(
       rawName,
       currentProduct?.isDone ?? false,
@@ -7226,35 +8114,53 @@ export default function LocalProductsPage() {
       updatedAt: now,
     };
 
-    setPageLoadingText(editingId ? "Đang cập nhật sản phẩm..." : "Đang thêm sản phẩm...");
+    const pendingRecords = collectDraftPendingImageUploads(product);
 
-    try {
-      const cleanup = await saveProductToDb(product);
-      persistedDraftPublicIdsRef.current = new Set(
-        [...product.images, ...product.internalImages].map((image) => image.publicId),
-      );
-      setProducts((current) =>
-        sortProductsByUpdatedAt([
-          product,
-          ...current.filter((item) => item.id !== product.id),
-        ]),
-      );
+    synchronizePendingImageUploadsWithProduct(product);
+    persistedDraftPublicIdsRef.current = new Set(
+      [...product.images, ...product.internalImages]
+        .map((image) => image.publicId)
+        .filter(Boolean),
+    );
+    commitLocalProduct(product);
+    closeAllModals();
+    resetForm();
 
-      closeAllModals();
-      resetForm();
-      Toastify(
-        cleanup.failed.length > 0
-          ? `Đã lưu sản phẩm nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`
-          : editingId
-            ? "Đã cập nhật sản phẩm"
-            : "Đã thêm sản phẩm",
-        cleanup.failed.length > 0 ? 300 : 200,
-      );
-    } catch {
-      Toastify(editingId ? "Không thể cập nhật sản phẩm" : "Không thể thêm sản phẩm", 400);
-    } finally {
-      setPageLoadingText("");
+    const existingPendingCount = Array.from(
+      pendingImageUploadsRef.current.values(),
+    ).filter((record) => record.productId === product.id).length;
+
+    if (pendingRecords.length > 0) {
+      enqueuePendingImageUploads(pendingRecords);
+    } else if (existingPendingCount === 0) {
+      void saveProductToDb(product)
+        .then((cleanup) => {
+          if (cleanup.failed.length > 0) {
+            Toastify(
+              `Đã lưu sản phẩm nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`,
+              300,
+            );
+          }
+        })
+        .catch(() => {
+          Toastify(
+            "Đã lưu trên thiết bị nhưng chưa thể đồng bộ MongoDB. Nhấn Đồng bộ để thử lại.",
+            400,
+          );
+        });
+    } else {
+      runPendingImageUploadQueue();
     }
+
+    const actionLabel = editingId ? "Đã cập nhật sản phẩm" : "Đã thêm sản phẩm";
+    const uploadCount = pendingRecords.length + existingPendingCount;
+
+    Toastify(
+      uploadCount > 0
+        ? `${actionLabel}; ${uploadCount} ảnh đang tải nền lên Cloudinary`
+        : actionLabel,
+      200,
+    );
   };
 
   const handleEdit = (product: LocalProduct): void => {
@@ -7289,6 +8195,7 @@ export default function LocalProductsPage() {
       tone: "danger",
       onConfirm: async () => {
         const cleanup = await deleteProductFromDb(id);
+        cancelPendingImageUploadsForProduct(id);
 
         setSelectedProductId((current) => (current === id ? "" : current));
         setExpandedProductIds((current) => {
@@ -7322,9 +8229,11 @@ export default function LocalProductsPage() {
           return nextRecords;
         });
 
-        setProducts((current) =>
-          current.filter((item) => item.id !== id),
+        const nextProducts = productsRef.current.filter(
+          (item) => item.id !== id,
         );
+        productsRef.current = nextProducts;
+        setProducts(nextProducts);
         Toastify(
           cleanup.failed.length > 0
             ? `Đã xóa sản phẩm khỏi MongoDB nhưng còn ${cleanup.failed.length} ảnh Cloudinary chưa xóa được`
@@ -7531,7 +8440,7 @@ export default function LocalProductsPage() {
     try {
       const payload = createExportPayload({
         settings,
-        products,
+        products: products.map(toPersistedProduct),
         scheduleConfig,
         scheduleAssignments,
         postedRecords,
@@ -7699,6 +8608,18 @@ export default function LocalProductsPage() {
       scheduleConfig: JSON.stringify(nextScheduleConfig),
       scheduleAssignments: JSON.stringify({}),
     };
+
+    Array.from(pendingImageUploadsRef.current.keys()).forEach((imageId) => {
+      cancelledPendingImageUploadIdsRef.current.add(imageId);
+    });
+    pendingImageUploadsRef.current.clear();
+    failedPendingImageUploadIdsRef.current.clear();
+    releaseUnsubmittedDraftImages();
+    Array.from(pendingImageObjectUrlsRef.current.keys()).forEach(
+      releasePendingImageObjectUrl,
+    );
+    setPendingImageUploadCount(0);
+    productsRef.current = [];
 
     setProducts([]);
     setSettings(nextSettings);
@@ -8237,6 +9158,7 @@ export default function LocalProductsPage() {
 
     const firstImageId = allImages[0]?.id ?? "";
 
+    scheduleProductImageBlobCache(allImages);
     setAlbumSource(source);
     setSelectedAlbumImageId(firstImageId);
     setSelectedAlbumImageIds(
@@ -8292,6 +9214,11 @@ export default function LocalProductsPage() {
     const descriptionText =
       product.description.trim() || settings.commonDescription.trim();
     const shareKey = `share-product-${product.id}`;
+
+    scheduleProductImageBlobCache([
+      ...product.images,
+      ...product.internalImages,
+    ]);
 
     setShareDialogStep("share");
     setIncludeInternalShareImages(true);
@@ -8705,8 +9632,8 @@ export default function LocalProductsPage() {
 
       const files = await Promise.all(
         shareImages.map((image, index) =>
-          dataUrlToShareFile(
-            image.dataUrl,
+          imageToShareFile(
+            image,
             image.name || createSystemImageFilename(index, image.id),
           ),
         ),
@@ -8797,8 +9724,8 @@ export default function LocalProductsPage() {
 
       const files = await Promise.all(
         shareImages.map((image, index) =>
-          dataUrlToShareFile(
-            image.dataUrl,
+          imageToShareFile(
+            image,
             image.name || createSystemImageFilename(index, image.id),
           ),
         ),
@@ -9936,7 +10863,11 @@ export default function LocalProductsPage() {
           <button
             type="button"
             className="flex shrink-0 items-center gap-2 rounded-md border border-white/10 bg-slate-800 p-2 text-xs font-bold text-slate-300 transition hover:bg-slate-700"
-            onClick={() => updateDraftField(imageField, [])}
+            onClick={() => {
+              images.forEach((image) => {
+                removeDraftImage(image.id, imageField);
+              });
+            }}
             title={`Xóa toàn bộ ${label}`}
           >
             <FiTrash2 aria-hidden="true" className={iconClassName} />
@@ -11698,13 +12629,26 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="blue"
-                title="Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
-                aria-label="Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                title={
+                  pendingImageUploadCount > 0
+                    ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary; nhấn để đồng bộ MongoDB và thử lại ảnh lỗi`
+                    : "Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                }
+                aria-label={
+                  pendingImageUploadCount > 0
+                    ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary`
+                    : "Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                }
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={() => void handleRefreshCloudData()}
               >
-                <FiRefreshCcw aria-hidden="true" className={iconClassName} />
-                Đồng bộ
+                <FiRefreshCcw
+                  aria-hidden="true"
+                  className={`${iconClassName} ${pendingImageUploadCount > 0 ? "animate-spin" : ""}`}
+                />
+                {pendingImageUploadCount > 0
+                  ? `Ảnh nền ${pendingImageUploadCount}`
+                  : "Đồng bộ"}
               </button>
 
             </div>
@@ -12077,6 +13021,10 @@ export default function LocalProductsPage() {
                   const statusText = product.status.trim();
                   const imagesDownloaded =
                     downloadedProductIds.has(product.id);
+                  const pendingImageCount = [
+                    ...product.images,
+                    ...product.internalImages,
+                  ].filter((image) => !isUploadedProductImage(image)).length;
 
                   return (
                     <article
@@ -12137,6 +13085,11 @@ export default function LocalProductsPage() {
                             height={1200}
                             loading={index < 4 ? "eager" : "lazy"}
                             decoding="async"
+                            onLoad={() =>
+                              scheduleProductImageBlobCache([
+                                product.images[0]!,
+                              ])
+                            }
                             className={`h-full w-full object-contain transition glass duration-500 group-hover:scale-105 ${productDone ? "blur-[2px] grayscale opacity-40" : ""
                               }`}
                           />
@@ -12158,6 +13111,15 @@ export default function LocalProductsPage() {
                             className="absolute left-2 top-9 z-10 border border-emerald-200/35 bg-emerald-300/15 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-emerald-100 backdrop-blur-md [clip-path:polygon(5px_0,100%_0,100%_calc(100%_-_5px),calc(100%_-_5px)_100%,0_100%,0_5px)]"
                           >
                             Ảnh đã tải
+                          </span>
+                        ) : null}
+
+                        {pendingImageCount > 0 ? (
+                          <span
+                            title={`${pendingImageCount} ảnh đang tải nền lên Cloudinary`}
+                            className={`absolute left-2 ${imagesDownloaded ? "top-[50px]" : "top-9"} z-10 border border-cyan-200/35 bg-cyan-300/15 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-cyan-50 backdrop-blur-md [clip-path:polygon(5px_0,100%_0,100%_calc(100%_-_5px),calc(100%_-_5px)_100%,0_100%,0_5px)]`}
+                          >
+                            Đang tải {pendingImageCount} ảnh
                           </span>
                         ) : null}
 
@@ -13456,9 +14418,7 @@ export default function LocalProductsPage() {
                             Ảnh chính
                           </div>
                           <div className="mt-1 break-words text-[11px] leading-5 text-slate-400">
-                            {isProcessingImages
-                              ? "Đang xử lý ảnh..."
-                              : "Chọn, kéo thả hoặc paste ảnh sản phẩm. Có thể kéo ảnh nội bộ lên đây để chuyển."}
+                            Ảnh hiện ngay sau khi chọn, kéo thả hoặc paste. Cloudinary chỉ tải nền sau khi bấm Lưu. Có thể kéo ảnh nội bộ lên đây để chuyển.
                           </div>
                           <input
                             type="file"
@@ -13496,9 +14456,7 @@ export default function LocalProductsPage() {
                             Ảnh nội bộ
                           </div>
                           <div className="mt-1 break-words text-[11px] leading-5 text-slate-400">
-                            {isProcessingImages
-                              ? "Đang xử lý ảnh..."
-                              : "Ảnh model, dung lượng pin hoặc thông tin kiểm tra máy. Có thể kéo ảnh chính xuống đây để chuyển."}
+                            Ảnh model, dung lượng pin hoặc thông tin kiểm tra máy sẽ lưu nháp tức thì. Có thể kéo ảnh chính xuống đây để chuyển.
                           </div>
                           <input
                             type="file"
