@@ -1225,6 +1225,26 @@ type BootstrapPayload = {
   postedRecords?: unknown;
 };
 
+type SyncVersionPayload = {
+  version: number;
+};
+
+type SyncStatePayload = {
+  settings?: unknown;
+  scheduleConfig?: unknown;
+  scheduleAssignments?: unknown;
+  postedRecords?: unknown;
+};
+
+type SyncChangesPayload = {
+  version: number;
+  mode: "snapshot" | "delta";
+  products: unknown[];
+  trashedProducts: unknown[];
+  deletedProductIds: string[];
+  state?: SyncStatePayload;
+};
+
 const sortProductsByUpdatedAt = (
   products: LocalProduct[],
 ): LocalProduct[] => {
@@ -1236,8 +1256,9 @@ const sortProductsByUpdatedAt = (
 };
 
 type BootstrapCacheRecord = {
-  version: 1;
+  version: 2;
   cachedAt: string;
+  syncVersion: number;
   payload: BootstrapPayload;
 };
 
@@ -1247,7 +1268,8 @@ const BOOTSTRAP_CACHE_STORE_NAME = "snapshots";
 const IMAGE_BLOB_CACHE_STORE_NAME = "image-blobs";
 const PENDING_IMAGE_UPLOAD_STORE_NAME = "pending-image-uploads";
 const BOOTSTRAP_CACHE_RECORD_KEY = "latest-bootstrap";
-const BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v1";
+const BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v2";
+const LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v1";
 const BOOTSTRAP_HOT_CACHE_MAX_CHARACTERS = 2_750_000;
 const INITIAL_PRODUCT_RENDER_LIMIT = 24;
 const PRODUCT_RENDER_BATCH_SIZE = 20;
@@ -1261,7 +1283,7 @@ const normalizeBootstrapCacheRecord = (
   const payload = record.payload;
 
   if (
-    record.version !== 1 ||
+    (record.version !== 1 && record.version !== 2) ||
     typeof record.cachedAt !== "string" ||
     !payload ||
     typeof payload !== "object"
@@ -1274,8 +1296,14 @@ const normalizeBootstrapCacheRecord = (
   if (!Array.isArray(payloadRecord.products)) return null;
 
   return {
-    version: 1,
+    version: 2,
     cachedAt: record.cachedAt,
+    syncVersion:
+      typeof record.syncVersion === "number" &&
+        Number.isSafeInteger(record.syncVersion) &&
+        record.syncVersion >= 0
+        ? record.syncVersion
+        : 0,
     payload: {
       products: payloadRecord.products,
       settings: payloadRecord.settings,
@@ -1376,12 +1404,15 @@ const readBootstrapHotCache = (): BootstrapCacheRecord | null => {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    const raw =
+      window.localStorage.getItem(BOOTSTRAP_CACHE_FALLBACK_KEY) ??
+      window.localStorage.getItem(LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY);
     return raw
       ? normalizeBootstrapCacheRecord(JSON.parse(raw) as unknown)
       : null;
   } catch {
     window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    window.localStorage.removeItem(LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY);
     return null;
   }
 };
@@ -1401,6 +1432,7 @@ const writeBootstrapHotCache = (record: BootstrapCacheRecord): boolean => {
       BOOTSTRAP_CACHE_FALLBACK_KEY,
       serializedRecord,
     );
+    window.localStorage.removeItem(LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY);
     return true;
   } catch {
     window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
@@ -1425,10 +1457,12 @@ const readBootstrapCache = async (): Promise<BootstrapCacheRecord | null> => {
 
 const writeBootstrapCache = async (
   payload: BootstrapPayload,
+  syncVersion: number,
 ): Promise<void> => {
   const record: BootstrapCacheRecord = {
-    version: 1,
+    version: 2,
     cachedAt: new Date().toISOString(),
+    syncVersion,
     payload,
   };
 
@@ -1450,6 +1484,7 @@ const writeBootstrapCache = async (
 const clearBootstrapCache = async (): Promise<void> => {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(BOOTSTRAP_CACHE_FALLBACK_KEY);
+    window.localStorage.removeItem(LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY);
   }
 
   try {
@@ -1496,14 +1531,80 @@ const emptyCloudinaryCleanup = (): CloudinaryCleanupPayload => ({
 });
 
 const imageBlobRequests = new Map<string, Promise<Blob>>();
+const imageClipboardPngRequests = new Map<string, Promise<Blob>>();
 const pendingImageBlobPrefetches = new Map<string, ProductImage>();
+type ImageBlobMemoryCacheRecord = {
+  blob: Blob;
+  size: number;
+};
+
+// IndexedDB giữ Blob qua các lần mở app; bộ nhớ nhỏ này chỉ giữ các ảnh vừa
+// dùng để thao tác Copy/Share lặp lại trong cùng phiên không phải đọc IndexedDB.
+const IMAGE_BLOB_MEMORY_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const IMAGE_BLOB_MEMORY_CACHE_MAX_ITEMS = 48;
+const imageBlobMemoryCache = new Map<string, ImageBlobMemoryCacheRecord>();
+let imageBlobMemoryCacheBytes = 0;
 let activeImageBlobPrefetches = 0;
 let imageBlobPrefetchTimer: number | null = null;
+
+const getImageBlobFromMemoryCache = (key: string): Blob | null => {
+  const record = imageBlobMemoryCache.get(key);
+  if (!record || record.blob.size === 0) return null;
+
+  // Map insertion order is used as a compact LRU queue.
+  imageBlobMemoryCache.delete(key);
+  imageBlobMemoryCache.set(key, record);
+  return record.blob;
+};
+
+const cacheImageBlobInMemory = (key: string, blob: Blob): void => {
+  if (blob.size === 0 || blob.size > IMAGE_BLOB_MEMORY_CACHE_MAX_BYTES) return;
+
+  const previous = imageBlobMemoryCache.get(key);
+  if (previous) {
+    imageBlobMemoryCacheBytes -= previous.size;
+    imageBlobMemoryCache.delete(key);
+  }
+
+  imageBlobMemoryCache.set(key, { blob, size: blob.size });
+  imageBlobMemoryCacheBytes += blob.size;
+
+  while (
+    imageBlobMemoryCache.size > IMAGE_BLOB_MEMORY_CACHE_MAX_ITEMS ||
+    imageBlobMemoryCacheBytes > IMAGE_BLOB_MEMORY_CACHE_MAX_BYTES
+  ) {
+    const oldestKey = imageBlobMemoryCache.keys().next().value as
+      | string
+      | undefined;
+    if (!oldestKey) break;
+
+    const oldest = imageBlobMemoryCache.get(oldestKey);
+    imageBlobMemoryCache.delete(oldestKey);
+    imageBlobMemoryCacheBytes -= oldest?.size ?? 0;
+  }
+};
+
+const removeImageBlobFromMemoryCache = (key: string): void => {
+  const record = imageBlobMemoryCache.get(key);
+  if (!record) return;
+
+  imageBlobMemoryCache.delete(key);
+  imageBlobMemoryCacheBytes -= record.size;
+};
+
+const clearImageBlobMemoryCache = (): void => {
+  imageBlobMemoryCache.clear();
+  imageBlobMemoryCacheBytes = 0;
+};
 
 const createImageBlobCacheKey = (image: ProductImage): string => {
   const identity = image.publicId.trim() || `draft-${image.id}`;
   const revision = String(image.version || image.etag || image.sha256 || "");
   return `${identity}::${revision}`;
+};
+
+const createImageClipboardPngCacheKey = (image: ProductImage): string => {
+  return `${createImageBlobCacheKey(image)}::clipboard-png`;
 };
 
 const isUploadedProductImage = (image: ProductImage): boolean => {
@@ -1654,6 +1755,27 @@ const removeImageBlobCache = async (key: string): Promise<void> => {
   }
 };
 
+// Ảnh gốc và PNG phục vụ Clipboard được lưu bằng hai key riêng. Khi người dùng
+// bỏ ảnh, phải dọn cả hai để cache không giữ lại file đã xóa và lần thêm lại
+// cùng ảnh luôn nhận đúng Blob mới.
+const removeProductImageBlobCaches = async (
+  image: ProductImage,
+): Promise<void> => {
+  const blobCacheKey = createImageBlobCacheKey(image);
+  const clipboardPngCacheKey = createImageClipboardPngCacheKey(image);
+
+  pendingImageBlobPrefetches.delete(blobCacheKey);
+  imageBlobRequests.delete(blobCacheKey);
+  imageClipboardPngRequests.delete(clipboardPngCacheKey);
+  removeImageBlobFromMemoryCache(blobCacheKey);
+  removeImageBlobFromMemoryCache(clipboardPngCacheKey);
+
+  await Promise.all([
+    removeImageBlobCache(blobCacheKey),
+    removeImageBlobCache(clipboardPngCacheKey),
+  ]);
+};
+
 const readPendingImageUploadRecords = async (): Promise<
   PendingImageUploadRecord[]
 > => {
@@ -1785,6 +1907,16 @@ const removePendingImageUploadsForProduct = async (
 };
 
 const clearImageCaches = async (): Promise<void> => {
+  clearImageBlobMemoryCache();
+  imageBlobRequests.clear();
+  imageClipboardPngRequests.clear();
+  pendingImageBlobPrefetches.clear();
+
+  if (imageBlobPrefetchTimer !== null && typeof window !== "undefined") {
+    window.clearTimeout(imageBlobPrefetchTimer);
+    imageBlobPrefetchTimer = null;
+  }
+
   const database = await openBootstrapCacheDatabase();
 
   try {
@@ -1807,8 +1939,15 @@ const clearImageCaches = async (): Promise<void> => {
   }
 };
 
-const getBootstrapData = async (): Promise<BootstrapPayload> => {
-  return apiRequest<BootstrapPayload>("/bootstrap");
+const getSyncVersion = async (): Promise<SyncVersionPayload> => {
+  return apiRequest<SyncVersionPayload>("/sync/version");
+};
+
+const getSyncChanges = async (
+  since: number,
+): Promise<SyncChangesPayload> => {
+  const params = new URLSearchParams({ since: String(Math.max(since, 0)) });
+  return apiRequest<SyncChangesPayload>(`/sync/changes?${params.toString()}`);
 };
 
 const saveProductToDb = async (
@@ -3110,10 +3249,16 @@ const fetchImageBlob = async (sourceUrl: string): Promise<Blob> => {
 
 const getProductImageBlob = async (image: ProductImage): Promise<Blob> => {
   const cacheKey = createImageBlobCacheKey(image);
+  const memoryCached = getImageBlobFromMemoryCache(cacheKey);
+
+  if (memoryCached) return memoryCached;
 
   try {
     const cached = await readImageBlobCache(cacheKey);
-    if (cached?.blob.size) return cached.blob;
+    if (cached?.blob.size) {
+      cacheImageBlobInMemory(cacheKey, cached.blob);
+      return cached.blob;
+    }
   } catch {
     // Cache Blob là lớp tăng tốc; khi IndexedDB lỗi vẫn tải ảnh bình thường.
   }
@@ -3123,6 +3268,7 @@ const getProductImageBlob = async (image: ProductImage): Promise<Blob> => {
 
   const request = fetchImageBlob(image.dataUrl)
     .then(async (blob) => {
+      cacheImageBlobInMemory(cacheKey, blob);
       await writeImageBlobCache(cacheKey, blob, image.dataUrl).catch(
         () => undefined,
       );
@@ -3140,11 +3286,9 @@ const cacheProductImageBlob = async (
   image: ProductImage,
   blob: Blob,
 ): Promise<void> => {
-  await writeImageBlobCache(
-    createImageBlobCacheKey(image),
-    blob,
-    image.dataUrl,
-  );
+  const cacheKey = createImageBlobCacheKey(image);
+  cacheImageBlobInMemory(cacheKey, blob);
+  await writeImageBlobCache(cacheKey, blob, image.dataUrl);
 };
 
 const runImageBlobPrefetchQueue = (): void => {
@@ -3183,7 +3327,7 @@ const scheduleProductImageBlobCache = (images: ProductImage[]): void => {
   imageBlobPrefetchTimer = window.setTimeout(() => {
     imageBlobPrefetchTimer = null;
     runImageBlobPrefetchQueue();
-  }, 180);
+  }, 48);
 };
 
 const getNativeShareNavigator = (): NativeShareNavigator | null => {
@@ -3262,8 +3406,68 @@ const imageToPngBlob = async (
   image: ProductImage,
   targetDocument: Document,
 ): Promise<Blob> => {
-  const sourceBlob = await getProductImageBlob(image);
-  return imageBlobToPngBlob(sourceBlob, targetDocument);
+  const cacheKey = createImageClipboardPngCacheKey(image);
+  const memoryCached = getImageBlobFromMemoryCache(cacheKey);
+
+  if (memoryCached) return memoryCached;
+
+  try {
+    const cached = await readImageBlobCache(cacheKey);
+    if (cached?.blob.size) {
+      cacheImageBlobInMemory(cacheKey, cached.blob);
+      return cached.blob;
+    }
+  } catch {
+    // Cache PNG không bắt buộc. Khi IndexedDB không khả dụng, vẫn tạo từ Blob gốc.
+  }
+
+  const activeRequest = imageClipboardPngRequests.get(cacheKey);
+  if (activeRequest) return activeRequest;
+
+  const request = getProductImageBlob(image)
+    .then((sourceBlob) => imageBlobToPngBlob(sourceBlob, targetDocument))
+    .then(async (pngBlob) => {
+      cacheImageBlobInMemory(cacheKey, pngBlob);
+      await writeImageBlobCache(cacheKey, pngBlob, image.dataUrl).catch(
+        () => undefined,
+      );
+      return pngBlob;
+    })
+    .finally(() => {
+      imageClipboardPngRequests.delete(cacheKey);
+    });
+
+  imageClipboardPngRequests.set(cacheKey, request);
+  return request;
+};
+
+const createShareFiles = async (
+  images: ProductImage[],
+): Promise<File[]> => {
+  const files = new Array<File>(images.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(3, images.length);
+
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < images.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const image = images[index];
+
+      if (!image) continue;
+
+      files[index] = await imageToShareFile(
+        image,
+        image.name || createSystemImageFilename(index, image.id),
+      );
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => runWorker()),
+  );
+
+  return files;
 };
 
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
@@ -4393,6 +4597,7 @@ export default function LocalProductsPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
   const productsRef = useRef<LocalProduct[]>([]);
+  const syncVersionRef = useRef<number>(0);
   const draftPendingImagesRef = useRef<Map<string, DraftPendingImage>>(
     new Map<string, DraftPendingImage>(),
   );
@@ -4433,6 +4638,7 @@ export default function LocalProductsPage() {
     [],
   );
   const [products, setProducts] = useState<LocalProduct[]>([]);
+  const [cacheSyncVersion, setCacheSyncVersion] = useState<number>(0);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [settings, setSettings] = useState<GlobalSettings>(defaultSettings);
   const [contactDraft, setContactDraft] = useState<string>("");
@@ -4506,7 +4712,6 @@ export default function LocalProductsPage() {
     useState<LocalManagedImage[]>([]);
   const [localImageView, setLocalImageView] =
     useState<"active" | "trash">("active");
-  const [localImageQuery, setLocalImageQuery] = useState<string>("");
   const [selectedLocalImageNames, setSelectedLocalImageNames] = useState<
     Set<string>
   >(() => new Set<string>());
@@ -4592,15 +4797,7 @@ export default function LocalProductsPage() {
 
   const currentLocalImageFiles =
     localImageView === "trash" ? localTrashImageFiles : localImageFiles;
-  const filteredLocalImageFiles = useMemo(() => {
-    const normalizedQuery = normalizeTextKey(localImageQuery);
-
-    if (!normalizedQuery) return currentLocalImageFiles;
-
-    return currentLocalImageFiles.filter((file) =>
-      normalizeTextKey(file.name).includes(normalizedQuery),
-    );
-  }, [currentLocalImageFiles, localImageQuery]);
+  const filteredLocalImageFiles = currentLocalImageFiles;
   const localImageTotalSize = useMemo(
     () => localImageFiles.reduce((total, file) => total + file.size, 0),
     [localImageFiles],
@@ -6174,6 +6371,14 @@ export default function LocalProductsPage() {
     return Math.max(totalTodayTaskCount - postedTodayCount, 0);
   }, [postedTodayCount, totalTodayTaskCount]);
 
+  const setLocalSyncVersion = useCallback((value: number): void => {
+    const nextVersion =
+      Number.isSafeInteger(value) && value >= 0 ? value : 0;
+
+    syncVersionRef.current = nextVersion;
+    setCacheSyncVersion(nextVersion);
+  }, []);
+
   const applyBootstrapPayload = useCallback((payload: BootstrapPayload): void => {
     const nextProducts = sortProductsByUpdatedAt(
       normalizeProductsArray(payload.products),
@@ -6194,12 +6399,85 @@ export default function LocalProductsPage() {
       scheduleAssignments: JSON.stringify(nextScheduleAssignments),
     };
 
+    productsRef.current = nextProducts;
     setProducts(nextProducts);
     setSettings(nextSettings);
     setScheduleConfig(nextScheduleConfig);
     setScheduleAssignments(nextScheduleAssignments);
     setPostedRecords(nextPostedRecords);
   }, []);
+
+  const applySyncChangesPayload = useCallback(
+    (payload: SyncChangesPayload): void => {
+      if (payload.mode === "snapshot") {
+        applyBootstrapPayload({
+          products: payload.products,
+          settings: payload.state?.settings,
+          scheduleConfig: payload.state?.scheduleConfig,
+          scheduleAssignments: payload.state?.scheduleAssignments,
+          postedRecords: payload.state?.postedRecords,
+        });
+        return;
+      }
+
+      const upsertedProducts = normalizeProductsArray(payload.products);
+      const hiddenProductIds = new Set<string>([
+        ...payload.deletedProductIds,
+        ...normalizeProductsArray(payload.trashedProducts).map(
+          (product) => product.id,
+        ),
+      ]);
+      const upsertedProductIds = new Set(
+        upsertedProducts.map((product) => product.id),
+      );
+      const nextProducts = sortProductsByUpdatedAt([
+        ...upsertedProducts,
+        ...productsRef.current.filter(
+          (product) =>
+            !upsertedProductIds.has(product.id) &&
+            !hiddenProductIds.has(product.id),
+        ),
+      ]);
+
+      productsRef.current = nextProducts;
+      setProducts(nextProducts);
+
+      const nextState = payload.state;
+      if (!nextState) return;
+
+      if (nextState.settings !== undefined) {
+        const nextSettings =
+          normalizeGlobalSettings(nextState.settings) ?? defaultSettings;
+        persistedAppStateSignaturesRef.current.settings =
+          JSON.stringify(nextSettings);
+        setSettings(nextSettings);
+      }
+
+      if (nextState.scheduleConfig !== undefined) {
+        const nextScheduleConfig =
+          normalizeScheduleConfig(nextState.scheduleConfig) ??
+          loadScheduleConfig();
+        persistedAppStateSignaturesRef.current.scheduleConfig =
+          JSON.stringify(nextScheduleConfig);
+        setScheduleConfig(nextScheduleConfig);
+      }
+
+      if (nextState.scheduleAssignments !== undefined) {
+        const nextScheduleAssignments =
+          normalizeScheduleAssignments(nextState.scheduleAssignments) ?? {};
+        persistedAppStateSignaturesRef.current.scheduleAssignments =
+          JSON.stringify(nextScheduleAssignments);
+        setScheduleAssignments(nextScheduleAssignments);
+      }
+
+      if (nextState.postedRecords !== undefined) {
+        setPostedRecords(
+          normalizePostedRecords(nextState.postedRecords) ?? [],
+        );
+      }
+    },
+    [applyBootstrapPayload],
+  );
 
   const createCurrentBootstrapPayload = useCallback((): BootstrapPayload => {
     return {
@@ -6221,19 +6499,34 @@ export default function LocalProductsPage() {
   ]);
 
   const handleRefreshCloudData = async (): Promise<void> => {
-    setPageLoadingText("Đang đồng bộ dữ liệu MongoDB...");
+    setPageLoadingText("Đang kiểm tra phiên bản dữ liệu...");
     await waitForUiPaint();
 
     try {
       await flushQueuedAppStatePatch();
-      const payload = await getBootstrapData();
+      const serverVersion = await getSyncVersion();
+      const currentVersion = syncVersionRef.current;
 
-      applyBootstrapPayload(payload);
-      await writeBootstrapCache(payload);
+      if (serverVersion.version <= currentVersion) {
+        Toastify("Cache trên thiết bị đã là dữ liệu mới nhất", 200);
+        return;
+      }
+
+      setPageLoadingText("Đang đồng bộ phần dữ liệu thay đổi...");
+      await waitForUiPaint();
+      const changes = await getSyncChanges(currentVersion);
+
+      applySyncChangesPayload(changes);
+      setLocalSyncVersion(changes.version);
       failedPendingImageUploadIdsRef.current.clear();
       pendingImageQueueHydratedRef.current = false;
       await hydratePendingImageUploads();
-      Toastify("Đã lấy dữ liệu mới từ MongoDB và cập nhật cache", 200);
+      Toastify(
+        changes.mode === "snapshot"
+          ? "Đã tạo cache dữ liệu ban đầu từ MongoDB"
+          : "Đã cập nhật phần dữ liệu thay đổi vào cache",
+        200,
+      );
     } catch (error) {
       Toastify(
         error instanceof Error ? error.message : "Không thể đồng bộ dữ liệu MongoDB",
@@ -6250,7 +6543,10 @@ export default function LocalProductsPage() {
 
     try {
       await pendingImageQueueWriteRef.current;
-      await writeBootstrapCache(createCurrentBootstrapPayload());
+      await writeBootstrapCache(
+        createCurrentBootstrapPayload(),
+        syncVersionRef.current,
+      );
     } catch (error) {
       setPageLoadingText("");
       Toastify(
@@ -6276,6 +6572,7 @@ export default function LocalProductsPage() {
 
         if (cacheRecord) {
           applyBootstrapPayload(cacheRecord.payload);
+          setLocalSyncVersion(cacheRecord.syncVersion);
           return;
         }
 
@@ -6297,13 +6594,16 @@ export default function LocalProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [applyBootstrapPayload]);
+  }, [applyBootstrapPayload, setLocalSyncVersion]);
 
   useEffect(() => {
     if (!isSettingsReady) return;
 
     const timeoutId = window.setTimeout(() => {
-      void writeBootstrapCache(createCurrentBootstrapPayload()).catch((error) => {
+      void writeBootstrapCache(
+        createCurrentBootstrapPayload(),
+        cacheSyncVersion,
+      ).catch((error) => {
         console.error("Không thể cập nhật cache thiết bị", error);
       });
     }, 900);
@@ -6311,7 +6611,7 @@ export default function LocalProductsPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [createCurrentBootstrapPayload, isSettingsReady]);
+  }, [cacheSyncVersion, createCurrentBootstrapPayload, isSettingsReady]);
 
   useEffect(() => {
     if (!isSettingsReady || !isDevicePreferencesReady) return;
@@ -7364,8 +7664,8 @@ export default function LocalProductsPage() {
     failedPendingImageUploadIdsRef.current.delete(record.id);
     await removePendingImageUploadRecord(record.id).catch(() => undefined);
     if (clearBlobCache) {
-      await removeImageBlobCache(
-        createImageBlobCacheKey(record.uploadedImage ?? record.image),
+      await removeProductImageBlobCaches(
+        record.uploadedImage ?? record.image,
       ).catch(() => undefined);
     }
     releasePendingImageObjectUrl(record.id);
@@ -7420,9 +7720,7 @@ export default function LocalProductsPage() {
       await cacheProductImageBlob(uploadedImage, record.file).catch(
         () => undefined,
       );
-      await removeImageBlobCache(createImageBlobCacheKey(record.image)).catch(
-        () => undefined,
-      );
+      await removeProductImageBlobCaches(record.image).catch(() => undefined);
       record = uploadedRecord;
     }
 
@@ -7542,8 +7840,8 @@ export default function LocalProductsPage() {
       pendingImageUploadsRef.current.delete(record.id);
       failedPendingImageUploadIdsRef.current.delete(record.id);
       releasePendingImageObjectUrl(record.id);
-      void removeImageBlobCache(
-        createImageBlobCacheKey(record.uploadedImage ?? record.image),
+      void removeProductImageBlobCaches(
+        record.uploadedImage ?? record.image,
       ).catch(() => undefined);
     });
     syncPendingImageUploadCount();
@@ -7558,8 +7856,8 @@ export default function LocalProductsPage() {
     pendingImageUploadsRef.current.delete(imageId);
     failedPendingImageUploadIdsRef.current.delete(imageId);
     releasePendingImageObjectUrl(imageId);
-    void removeImageBlobCache(
-      createImageBlobCacheKey(record.uploadedImage ?? record.image),
+    void removeProductImageBlobCaches(
+      record.uploadedImage ?? record.image,
     ).catch(() => undefined);
     syncPendingImageUploadCount();
     void removePendingImageUploadRecord(record.id).catch(() => undefined);
@@ -7660,7 +7958,6 @@ export default function LocalProductsPage() {
       }
 
       if (closingModal === "localImageManager") {
-        setLocalImageQuery("");
         setLocalImageView("active");
         setSelectedLocalImageNames(new Set<string>());
       }
@@ -7697,7 +7994,6 @@ export default function LocalProductsPage() {
     setSelectedAlbumImageIds(new Set<string>());
     setAlbumSource(null);
     setImageDownloadCategory("all");
-    setLocalImageQuery("");
     setLocalImageView("active");
     setSelectedLocalImageNames(new Set<string>());
     setPendingConfirm(null);
@@ -7944,9 +8240,7 @@ export default function LocalProductsPage() {
     }
 
     if (removedImage?.publicId) {
-      void removeImageBlobCache(createImageBlobCacheKey(removedImage)).catch(
-        () => undefined,
-      );
+      void removeProductImageBlobCaches(removedImage).catch(() => undefined);
     }
 
     setDraft((current) => ({
@@ -8750,12 +9044,19 @@ export default function LocalProductsPage() {
 
   const applyLocalImageDirectorySnapshot = async (
     handle: LocalFileSystemDirectoryHandle,
+    view: "active" | "trash" = localImageView,
   ): Promise<void> => {
     const snapshot = await readLocalImageDirectorySnapshot(handle);
 
     setLocalImageFiles(snapshot.active);
     setLocalTrashImageFiles(snapshot.trash);
-    setSelectedLocalImageNames(new Set<string>());
+    setSelectedLocalImageNames(
+      new Set<string>(
+        (view === "trash" ? snapshot.trash : snapshot.active).map(
+          (file) => file.name,
+        ),
+      ),
+    );
   };
 
   const handleChooseLocalImageDirectory = async (): Promise<LocalFileSystemDirectoryHandle | null> => {
@@ -8830,6 +9131,33 @@ export default function LocalProductsPage() {
     }
   };
 
+  const openLocalImageManager = (): void => {
+    setLocalImageView("active");
+    setSelectedLocalImageNames(
+      new Set<string>(localImageFiles.map((file) => file.name)),
+    );
+    openModal("localImageManager");
+
+    if (!localImageDirectoryHandle) return;
+
+    void (async () => {
+      const permission = await queryLocalImageDirectoryPermission(
+        localImageDirectoryHandle,
+      );
+
+      if (permission !== "granted") return;
+
+      try {
+        await applyLocalImageDirectorySnapshot(
+          localImageDirectoryHandle,
+          "active",
+        );
+      } catch {
+        // Danh sách đang có vẫn được giữ; người dùng có thể bấm Làm mới khi cần.
+      }
+    })();
+  };
+
   const handleForgetLocalImageDirectory = (): void => {
     requestConfirm({
       title: "Bỏ liên kết thư mục ảnh?",
@@ -8849,27 +9177,7 @@ export default function LocalProductsPage() {
     });
   };
 
-  const toggleLocalImageSelection = (name: string): void => {
-    setSelectedLocalImageNames((current) => {
-      const next = new Set(current);
-
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
-
-      return next;
-    });
-  };
-
-  const selectAllFilteredLocalImages = (): void => {
-    setSelectedLocalImageNames(
-      new Set<string>(filteredLocalImageFiles.map((file) => file.name)),
-    );
-  };
-
-  const handleMoveSelectedLocalImagesToTrash = (): void => {
+  const handleMoveSelectedLocalImagesToTrash = async (): Promise<void> => {
     const names = Array.from(selectedLocalImageNames);
 
     if (names.length === 0) {
@@ -8877,33 +9185,24 @@ export default function LocalProductsPage() {
       return;
     }
 
-    requestConfirm({
-      title: `Đưa ${names.length} ảnh vào _trash?`,
-      description:
-        "Ảnh sẽ được copy sang thư mục con _trash, xác minh dung lượng bản sao rồi mới xóa file gốc. Đây không phải Thùng rác Windows.",
-      confirmLabel: "Đưa vào _trash",
-      tone: "warning",
-      onConfirm: async () => {
-        const handle = await getWritableLocalImageDirectory();
+    const handle = await getWritableLocalImageDirectory();
 
-        if (!handle) return;
+    if (!handle) return;
 
-        setIsLocalImageManagerBusy(true);
+    setIsLocalImageManagerBusy(true);
 
-        try {
-          const result = await moveLocalImagesToTrash(handle, names);
-          await applyLocalImageDirectorySnapshot(handle);
-          Toastify(
-            result.failed > 0
-              ? `Đã chuyển ${result.moved} ảnh, ${result.failed} ảnh lỗi`
-              : `Đã chuyển ${result.moved} ảnh vào _trash`,
-            result.failed > 0 ? 300 : 200,
-          );
-        } finally {
-          setIsLocalImageManagerBusy(false);
-        }
-      },
-    });
+    try {
+      const result = await moveLocalImagesToTrash(handle, names);
+      await applyLocalImageDirectorySnapshot(handle);
+      Toastify(
+        result.failed > 0
+          ? `Đã chuyển ${result.moved} ảnh, ${result.failed} ảnh lỗi`
+          : `Đã chuyển ${result.moved} ảnh vào _trash`,
+        result.failed > 0 ? 300 : 200,
+      );
+    } finally {
+      setIsLocalImageManagerBusy(false);
+    }
   };
 
   const handleRestoreSelectedLocalImages = (): void => {
@@ -9630,14 +9929,7 @@ export default function LocalProductsPage() {
         }
       }
 
-      const files = await Promise.all(
-        shareImages.map((image, index) =>
-          imageToShareFile(
-            image,
-            image.name || createSystemImageFilename(index, image.id),
-          ),
-        ),
-      );
+      const files = await createShareFiles(shareImages);
       const shareData: NativeShareData = {
         title: request.title,
         text: textValue,
@@ -9722,14 +10014,7 @@ export default function LocalProductsPage() {
         }
       }
 
-      const files = await Promise.all(
-        shareImages.map((image, index) =>
-          imageToShareFile(
-            image,
-            image.name || createSystemImageFilename(index, image.id),
-          ),
-        ),
-      );
+      const files = await createShareFiles(shareImages);
 
       if (shareImagesOnly && files.length === 0) {
         Toastify("Chưa có ảnh để chia sẻ", 300);
@@ -12512,7 +12797,7 @@ export default function LocalProductsPage() {
                 title="Quản lý ảnh trong thư mục đã chọn"
                 aria-label="Quản lý ảnh trên máy"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
-                onClick={() => openModal("localImageManager")}
+                onClick={openLocalImageManager}
               >
                 <FiArchive aria-hidden="true" className={iconClassName} />
                 Ảnh máy
@@ -12632,12 +12917,12 @@ export default function LocalProductsPage() {
                 title={
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary; nhấn để đồng bộ MongoDB và thử lại ảnh lỗi`
-                    : "Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                    : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
                 aria-label={
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary`
-                    : "Lấy dữ liệu mới từ MongoDB và cập nhật cache thiết bị"
+                    : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={() => void handleRefreshCloudData()}
@@ -13648,7 +13933,11 @@ export default function LocalProductsPage() {
                           : "border-white/10 bg-slate-800 text-slate-300"}`}
                         onClick={() => {
                           setLocalImageView("active");
-                          setSelectedLocalImageNames(new Set<string>());
+                          setSelectedLocalImageNames(
+                            new Set<string>(
+                              localImageFiles.map((file) => file.name),
+                            ),
+                          );
                         }}
                       >
                         Ảnh đang dùng
@@ -13661,56 +13950,34 @@ export default function LocalProductsPage() {
                           : "border-white/10 bg-slate-800 text-slate-300"}`}
                         onClick={() => {
                           setLocalImageView("trash");
-                          setSelectedLocalImageNames(new Set<string>());
+                          setSelectedLocalImageNames(
+                            new Set<string>(
+                              localTrashImageFiles.map((file) => file.name),
+                            ),
+                          );
                         }}
                       >
                         _trash
                       </button>
                     </div>
 
-                    <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
-                      <input
-                        type="search"
-                        value={localImageQuery}
-                        onChange={(event) => {
-                          setLocalImageQuery(event.target.value);
-                          setSelectedLocalImageNames(new Set<string>());
-                        }}
-                        placeholder="Lọc theo tên file..."
-                        className="min-h-9 min-w-0 border border-white/10 bg-slate-950 px-2 text-xs text-white outline-none transition focus:border-cyan-300/50"
-                      />
-                      <div className="grid grid-cols-2 gap-1.5 xl:flex">
-                        <button
-                          type="button"
-                          disabled={filteredLocalImageFiles.length === 0}
-                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:opacity-40"
-                          onClick={selectAllFilteredLocalImages}
-                        >
-                          Chọn tất cả lọc
-                        </button>
-                        <button
-                          type="button"
-                          disabled={selectedLocalImageNames.size === 0}
-                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:opacity-40"
-                          onClick={() => setSelectedLocalImageNames(new Set<string>())}
-                        >
-                          Bỏ chọn
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-2 grid grid-cols-1 gap-1.5 xl:grid-cols-2">
+                    <div className="mt-2 grid grid-cols-1 gap-1.5">
                       {localImageView === "active" ? (
-                        <button
-                          type="button"
-                          disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
-                          className="border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[10px] font-black text-amber-100 transition hover:bg-amber-300/20 disabled:opacity-40"
-                          onClick={handleMoveSelectedLocalImagesToTrash}
-                        >
-                          Đưa {selectedLocalImageNames.size || "ảnh"} vào _trash
-                        </button>
+                        <div className="grid grid-cols-1 gap-1.5 border border-amber-300/20 bg-amber-300/[0.045] p-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                          <p className="text-[10px] leading-4 text-amber-50/80">
+                            Đã chọn tự động toàn bộ {selectedLocalImageNames.size} ảnh đang dùng. Bấm Đồng ý để chuyển an toàn vào _trash.
+                          </p>
+                          <button
+                            type="button"
+                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
+                            className="border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[10px] font-black text-amber-100 transition hover:bg-amber-300/20 disabled:opacity-40"
+                            onClick={handleMoveSelectedLocalImagesToTrash}
+                          >
+                            Đồng ý, chuyển vào _trash
+                          </button>
+                        </div>
                       ) : (
-                        <>
+                        <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
                           <button
                             type="button"
                             disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
@@ -13727,7 +13994,7 @@ export default function LocalProductsPage() {
                           >
                             Xóa vĩnh viễn
                           </button>
-                        </>
+                        </div>
                       )}
                     </div>
 
@@ -13742,16 +14009,10 @@ export default function LocalProductsPage() {
                         filteredLocalImageFiles
                           .slice(0, LOCAL_IMAGE_RENDER_LIMIT)
                           .map((file) => (
-                            <label
+                            <div
                               key={`${localImageView}-${file.name}`}
-                              className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.06] p-2.5 last:border-b-0 hover:bg-white/[0.025]"
+                              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.06] p-2.5 last:border-b-0"
                             >
-                              <input
-                                type="checkbox"
-                                checked={selectedLocalImageNames.has(file.name)}
-                                onChange={() => toggleLocalImageSelection(file.name)}
-                                className="h-4 w-4"
-                              />
                               <span className="min-w-0">
                                 <span className="block truncate text-[11px] font-black text-slate-100" title={file.name}>
                                   {file.name}
@@ -13763,14 +14024,14 @@ export default function LocalProductsPage() {
                               <span className="text-[10px] font-black text-slate-400">
                                 {formatFileSize(file.size)}
                               </span>
-                            </label>
+                            </div>
                           ))
                       )}
                     </div>
 
                     {filteredLocalImageFiles.length > LOCAL_IMAGE_RENDER_LIMIT ? (
                       <p className="mt-2 text-[10px] text-slate-500">
-                        Đang hiển thị {LOCAL_IMAGE_RENDER_LIMIT}/{filteredLocalImageFiles.length} file để giữ UI nhẹ. Nút Chọn tất cả lọc vẫn áp dụng cho toàn bộ kết quả.
+                        Đang hiển thị {LOCAL_IMAGE_RENDER_LIMIT}/{filteredLocalImageFiles.length} file để giữ UI nhẹ. Toàn bộ file trong vùng đang mở vẫn được chọn tự động.
                       </p>
                     ) : null}
                   </article>
@@ -16629,7 +16890,7 @@ export default function LocalProductsPage() {
                         type="button"
                         className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[11px] font-black text-emerald-100 transition hover:bg-emerald-300/20 active:opacity-80 xl:mt-auto"
                         onClick={() => void handleRefreshCloudData()}
-                        title="Đồng bộ dữ liệu mới nhất từ MongoDB"
+                        title="Kiểm tra phiên bản và chỉ đồng bộ phần dữ liệu thay đổi"
                       >
                         <FiRefreshCcw
                           aria-hidden="true"
