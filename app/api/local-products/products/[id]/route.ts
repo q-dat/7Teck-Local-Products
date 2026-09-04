@@ -14,7 +14,6 @@ export async function PUT(request: Request, context: RouteContext) {
     const product = validateProductInput(await request.json());
     if (product.id !== id) return apiError(new Error("ID sản phẩm không khớp"), 400);
 
-    const activeProduct = { ...product, trashedAt: "" };
     const { value: previous, syncVersion } = await runWithSyncChange(
       { entity: "product", entityId: id, operation: "upsert" },
       async (session) => {
@@ -24,17 +23,8 @@ export async function PUT(request: Request, context: RouteContext) {
         )
           .session(session)
           .lean();
-        const previousRecord = previousProduct as unknown as Record<string, unknown> | null;
 
-        if (
-          previousRecord &&
-          typeof previousRecord.trashedAt === "string" &&
-          previousRecord.trashedAt
-        ) {
-          throw new Error("Hãy khôi phục sản phẩm khỏi Thùng rác trước khi chỉnh sửa");
-        }
-
-        await ProductModel.replaceOne({ id }, activeProduct, {
+        await ProductModel.replaceOne({ id }, product, {
           upsert: true,
           runValidators: true,
           session,
@@ -44,13 +34,13 @@ export async function PUT(request: Request, context: RouteContext) {
       },
     );
 
-    const nextPublicIds = new Set(getProductPublicIds(activeProduct));
+    const nextPublicIds = new Set(getProductPublicIds(product));
     const removedPublicIds = getProductPublicIds(previous).filter(
       (publicId) => !nextPublicIds.has(publicId),
     );
     const cleanup = await destroyCloudinaryImages(removedPublicIds);
 
-    return jsonNoStore({ ok: true, product: activeProduct, cleanup, syncVersion });
+    return jsonNoStore({ ok: true, product, cleanup, syncVersion });
   } catch (error) {
     return apiError(error, 400);
   }
@@ -63,20 +53,12 @@ export async function DELETE(_request: Request, context: RouteContext) {
       { entity: "product", entityId: id, operation: "delete" },
       async (session) => {
         const deletedProduct = await ProductModel.findOneAndDelete(
-          { id, trashedAt: { $exists: true, $ne: "" } },
+          { id },
           { projection: { _id: 0 }, session },
         ).lean();
 
         if (deletedProduct) return deletedProduct;
-
-        const activeProductExists = await ProductModel.exists({ id }).session(
-          session,
-        );
-        throw new Error(
-          activeProductExists
-            ? "Phải chuyển sản phẩm vào Thùng rác trước khi xóa vĩnh viễn"
-            : "Không tìm thấy sản phẩm",
-        );
+        throw new Error("Không tìm thấy sản phẩm");
       },
     );
 

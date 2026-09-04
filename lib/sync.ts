@@ -5,7 +5,7 @@ import AppStateModel from "@/models/AppState";
 import SyncChangeModel from "@/models/SyncChange";
 
 export type SyncChangeEntity = "product" | "state" | "catalog";
-export type SyncChangeOperation = "upsert" | "trash" | "delete" | "reset";
+export type SyncChangeOperation = "upsert" | "delete" | "reset";
 
 export type SyncChangeInput = {
   entity: SyncChangeEntity;

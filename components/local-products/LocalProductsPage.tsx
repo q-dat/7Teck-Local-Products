@@ -1229,6 +1229,76 @@ type SyncVersionPayload = {
   version: number;
 };
 
+type SyncMutationPayload = {
+  syncVersion?: unknown;
+};
+
+type SyncVersionEventDetail = {
+  version: number;
+};
+
+const LOCAL_SYNC_VERSION_EVENT = "local-products:sync-version-saved";
+const SESSION_SYNC_VERSION_CHECK_KEY = "local-products:sync-version-checked";
+
+const normalizeSyncVersion = (value: unknown): number => {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : 0;
+};
+
+const getSyncVersionFromMessage = (value: unknown): number => {
+  if (!value || typeof value !== "object") return 0;
+
+  return normalizeSyncVersion(
+    (value as SyncVersionEventDetail).version,
+  );
+};
+
+const readSessionSyncVersionCheck = (): number | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const value = window.sessionStorage.getItem(SESSION_SYNC_VERSION_CHECK_KEY);
+    if (value === null) return null;
+
+    const version = Number(value);
+    return Number.isSafeInteger(version) && version >= 0 ? version : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveSessionSyncVersionCheck = (value: unknown): void => {
+  if (typeof window === "undefined") return;
+
+  const version = normalizeSyncVersion(value);
+
+  try {
+    window.sessionStorage.setItem(
+      SESSION_SYNC_VERSION_CHECK_KEY,
+      String(version),
+    );
+  } catch {
+    return;
+  }
+};
+
+const publishLocalSyncVersion = (value: unknown): void => {
+  const version = normalizeSyncVersion(value);
+
+  if (version === 0 || typeof window === "undefined") return;
+
+  saveSessionSyncVersionCheck(version);
+
+  window.dispatchEvent(
+    new CustomEvent<SyncVersionEventDetail>(LOCAL_SYNC_VERSION_EVENT, {
+      detail: { version },
+    }),
+  );
+};
+
 type SyncStatePayload = {
   settings?: unknown;
   scheduleConfig?: unknown;
@@ -1240,7 +1310,6 @@ type SyncChangesPayload = {
   version: number;
   mode: "snapshot" | "delta";
   products: unknown[];
-  trashedProducts: unknown[];
   deletedProductIds: string[];
   state?: SyncStatePayload;
 };
@@ -1300,8 +1369,8 @@ const normalizeBootstrapCacheRecord = (
     cachedAt: record.cachedAt,
     syncVersion:
       typeof record.syncVersion === "number" &&
-        Number.isSafeInteger(record.syncVersion) &&
-        record.syncVersion >= 0
+      Number.isSafeInteger(record.syncVersion) &&
+      record.syncVersion >= 0
         ? record.syncVersion
         : 0,
     payload: {
@@ -1521,7 +1590,7 @@ type CloudinaryCleanupPayload = {
   failed: Array<{ publicId: string; message: string }>;
 };
 
-type ProductMutationPayload = {
+type ProductMutationPayload = SyncMutationPayload & {
   cleanup?: CloudinaryCleanupPayload;
 };
 
@@ -1610,8 +1679,8 @@ const createImageClipboardPngCacheKey = (image: ProductImage): string => {
 const isUploadedProductImage = (image: ProductImage): boolean => {
   return Boolean(
     image.publicId.trim() &&
-    image.dataUrl.trim() &&
-    !image.dataUrl.startsWith("blob:"),
+      image.dataUrl.trim() &&
+      !image.dataUrl.startsWith("blob:"),
   );
 };
 
@@ -1961,6 +2030,7 @@ const saveProductToDb = async (
     },
   );
 
+  publishLocalSyncVersion(payload.syncVersion);
   return payload.cleanup ?? emptyCloudinaryCleanup();
 };
 
@@ -1972,18 +2042,26 @@ const deleteProductFromDb = async (
     { method: "DELETE" },
   );
 
+  publishLocalSyncVersion(payload.syncVersion);
   return payload.cleanup ?? emptyCloudinaryCleanup();
 };
 
 const replaceAllProductsInDb = async (products: LocalProduct[]): Promise<void> => {
-  await apiRequest("/products", {
+  const payload = await apiRequest<SyncMutationPayload>("/products", {
     method: "PUT",
     body: JSON.stringify({ products }),
   });
+
+  publishLocalSyncVersion(payload.syncVersion);
 };
 
 const saveAppStatePatch = async (patch: Record<string, unknown>): Promise<void> => {
-  await apiRequest("/state", { method: "PATCH", body: JSON.stringify(patch) });
+  const payload = await apiRequest<SyncMutationPayload>("/state", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+  publishLocalSyncVersion(payload.syncVersion);
 };
 
 let pendingStatePatch: Record<string, unknown> = {};
@@ -2019,7 +2097,11 @@ const clearAllLocalProductData = async (): Promise<void> => {
   if (statePatchTimer) clearTimeout(statePatchTimer);
   statePatchTimer = null;
   pendingStatePatch = {};
-  await apiRequest("/reset", { method: "DELETE" });
+  const payload = await apiRequest<SyncMutationPayload>("/reset", {
+    method: "DELETE",
+  });
+
+  publishLocalSyncVersion(payload.syncVersion);
 };
 
 const normalizeContactOptions = (value: unknown): ContactOption[] => {
@@ -4598,6 +4680,9 @@ export default function LocalProductsPage() {
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
   const productsRef = useRef<LocalProduct[]>([]);
   const syncVersionRef = useRef<number>(0);
+  const remoteSyncCheckInFlightRef = useRef<boolean>(false);
+  const remoteSyncPromptedVersionRef = useRef<number>(0);
+  const remoteSyncDismissedVersionRef = useRef<number>(0);
   const draftPendingImagesRef = useRef<Map<string, DraftPendingImage>>(
     new Map<string, DraftPendingImage>(),
   );
@@ -4639,6 +4724,8 @@ export default function LocalProductsPage() {
   );
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [cacheSyncVersion, setCacheSyncVersion] = useState<number>(0);
+  const [availableRemoteSyncVersion, setAvailableRemoteSyncVersion] =
+    useState<number | null>(null);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft);
   const [settings, setSettings] = useState<GlobalSettings>(defaultSettings);
   const [contactDraft, setContactDraft] = useState<string>("");
@@ -6372,11 +6459,20 @@ export default function LocalProductsPage() {
   }, [postedTodayCount, totalTodayTaskCount]);
 
   const setLocalSyncVersion = useCallback((value: number): void => {
-    const nextVersion =
-      Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    const nextVersion = normalizeSyncVersion(value);
 
     syncVersionRef.current = nextVersion;
     setCacheSyncVersion(nextVersion);
+  }, []);
+
+  const registerRemoteSyncVersion = useCallback((value: unknown): void => {
+    const version = normalizeSyncVersion(value);
+
+    if (version === 0 || version <= syncVersionRef.current) return;
+
+    setAvailableRemoteSyncVersion((current) =>
+      Math.max(current ?? 0, version),
+    );
   }, []);
 
   const applyBootstrapPayload = useCallback((payload: BootstrapPayload): void => {
@@ -6421,12 +6517,7 @@ export default function LocalProductsPage() {
       }
 
       const upsertedProducts = normalizeProductsArray(payload.products);
-      const hiddenProductIds = new Set<string>([
-        ...payload.deletedProductIds,
-        ...normalizeProductsArray(payload.trashedProducts).map(
-          (product) => product.id,
-        ),
-      ]);
+      const deletedProductIds = new Set<string>(payload.deletedProductIds);
       const upsertedProductIds = new Set(
         upsertedProducts.map((product) => product.id),
       );
@@ -6435,7 +6526,7 @@ export default function LocalProductsPage() {
         ...productsRef.current.filter(
           (product) =>
             !upsertedProductIds.has(product.id) &&
-            !hiddenProductIds.has(product.id),
+            !deletedProductIds.has(product.id),
         ),
       ]);
 
@@ -6498,7 +6589,12 @@ export default function LocalProductsPage() {
     settings,
   ]);
 
-  const handleRefreshCloudData = async (): Promise<void> => {
+  const handleRefreshCloudData = async (
+    options: {
+      notifyWhenCurrent?: boolean;
+      notifyOnError?: boolean;
+    } = {},
+  ): Promise<boolean> => {
     setPageLoadingText("Đang kiểm tra phiên bản dữ liệu...");
     await waitForUiPaint();
 
@@ -6506,10 +6602,17 @@ export default function LocalProductsPage() {
       await flushQueuedAppStatePatch();
       const serverVersion = await getSyncVersion();
       const currentVersion = syncVersionRef.current;
+      saveSessionSyncVersionCheck(serverVersion.version);
 
       if (serverVersion.version <= currentVersion) {
-        Toastify("Cache trên thiết bị đã là dữ liệu mới nhất", 200);
-        return;
+        setAvailableRemoteSyncVersion((current) =>
+          current !== null && current <= currentVersion ? null : current,
+        );
+
+        if (options.notifyWhenCurrent !== false) {
+          Toastify("Cache trên thiết bị đã là dữ liệu mới nhất", 200);
+        }
+        return true;
       }
 
       setPageLoadingText("Đang đồng bộ phần dữ liệu thay đổi...");
@@ -6518,6 +6621,16 @@ export default function LocalProductsPage() {
 
       applySyncChangesPayload(changes);
       setLocalSyncVersion(changes.version);
+      saveSessionSyncVersionCheck(changes.version);
+      setAvailableRemoteSyncVersion((current) =>
+        current !== null && current <= changes.version ? null : current,
+      );
+      if (remoteSyncDismissedVersionRef.current <= changes.version) {
+        remoteSyncDismissedVersionRef.current = 0;
+      }
+      if (remoteSyncPromptedVersionRef.current <= changes.version) {
+        remoteSyncPromptedVersionRef.current = 0;
+      }
       failedPendingImageUploadIdsRef.current.clear();
       pendingImageQueueHydratedRef.current = false;
       await hydratePendingImageUploads();
@@ -6527,15 +6640,50 @@ export default function LocalProductsPage() {
           : "Đã cập nhật phần dữ liệu thay đổi vào cache",
         200,
       );
+      return true;
     } catch (error) {
-      Toastify(
-        error instanceof Error ? error.message : "Không thể đồng bộ dữ liệu MongoDB",
-        400,
-      );
+      if (options.notifyOnError !== false) {
+        Toastify(
+          error instanceof Error
+            ? error.message
+            : "Không thể đồng bộ dữ liệu MongoDB",
+          400,
+        );
+      }
+      return false;
     } finally {
       setPageLoadingText("");
     }
   };
+
+  const checkForRemoteSyncUpdate = useCallback(async (): Promise<void> => {
+    if (
+      !isSettingsReady ||
+      typeof window === "undefined" ||
+      remoteSyncCheckInFlightRef.current
+    ) {
+      return;
+    }
+
+    const checkedVersion = readSessionSyncVersionCheck();
+
+    if (checkedVersion !== null) {
+      registerRemoteSyncVersion(checkedVersion);
+      return;
+    }
+
+    remoteSyncCheckInFlightRef.current = true;
+
+    try {
+      const serverVersion = await getSyncVersion();
+      saveSessionSyncVersionCheck(serverVersion.version);
+      registerRemoteSyncVersion(serverVersion.version);
+    } catch {
+      return;
+    } finally {
+      remoteSyncCheckInFlightRef.current = false;
+    }
+  }, [isSettingsReady, registerRemoteSyncVersion]);
 
   const handleReloadPage = async (): Promise<void> => {
     setPageLoadingText("Đang lưu cache và làm mới trang...");
@@ -6595,6 +6743,114 @@ export default function LocalProductsPage() {
       cancelled = true;
     };
   }, [applyBootstrapPayload, setLocalSyncVersion]);
+
+  useEffect(() => {
+    if (!isSettingsReady || typeof window === "undefined") return;
+
+    const handleLocalSyncVersion = (event: Event): void => {
+      const version = getSyncVersionFromMessage(
+        (event as CustomEvent<unknown>).detail,
+      );
+      const currentVersion = syncVersionRef.current;
+
+      // Chỉ nhận ngay phiên bản kế tiếp do chính tab này lưu. Nếu có khoảng
+      // trống, một thiết bị khác đã cập nhật trước đó và cần lấy delta đầy đủ.
+      if (version === currentVersion + 1) {
+        setLocalSyncVersion(version);
+        return;
+      }
+
+      registerRemoteSyncVersion(version);
+    };
+
+    window.addEventListener(LOCAL_SYNC_VERSION_EVENT, handleLocalSyncVersion);
+
+    return () => {
+      window.removeEventListener(
+        LOCAL_SYNC_VERSION_EVENT,
+        handleLocalSyncVersion,
+      );
+    };
+  }, [isSettingsReady, registerRemoteSyncVersion, setLocalSyncVersion]);
+
+  useEffect(() => {
+    if (!isSettingsReady || typeof window === "undefined") return;
+
+    void checkForRemoteSyncUpdate();
+  }, [checkForRemoteSyncUpdate, isSettingsReady]);
+
+  useEffect(() => {
+    if (
+      availableRemoteSyncVersion === null ||
+      availableRemoteSyncVersion > cacheSyncVersion
+    ) {
+      return;
+    }
+
+    setAvailableRemoteSyncVersion(null);
+    remoteSyncPromptedVersionRef.current = 0;
+    remoteSyncDismissedVersionRef.current = 0;
+  }, [availableRemoteSyncVersion, cacheSyncVersion]);
+
+  useEffect(() => {
+    const remoteVersion = availableRemoteSyncVersion;
+
+    if (
+      !isSettingsReady ||
+      remoteVersion === null ||
+      remoteVersion <= syncVersionRef.current ||
+      remoteSyncPromptedVersionRef.current === remoteVersion ||
+      remoteSyncDismissedVersionRef.current === remoteVersion ||
+      activeModal ||
+      pendingConfirm ||
+      pendingDownload ||
+      pendingShare ||
+      pendingBackup ||
+      isShareExecuting ||
+      isConfirmExecuting ||
+      isBackupSaving ||
+      isFacebookSearchDialogOpen
+    ) {
+      return;
+    }
+
+    remoteSyncPromptedVersionRef.current = remoteVersion;
+    setPendingConfirm({
+      title: "Có dữ liệu mới",
+      description:
+        "Dữ liệu đã được cập nhật ở thiết bị khác. Đồng bộ chỉ lấy phần thay đổi, không xóa Blob cache ảnh đang có trên thiết bị này.",
+      confirmLabel: "Đồng bộ ngay",
+      cancelLabel: "Để sau",
+      tone: "default",
+      onCancel: () => {
+        remoteSyncDismissedVersionRef.current = remoteVersion;
+      },
+      onConfirm: async () => {
+        const synchronized = await handleRefreshCloudData({
+          notifyWhenCurrent: false,
+          notifyOnError: false,
+        });
+
+        if (!synchronized && remoteVersion > syncVersionRef.current) {
+          remoteSyncPromptedVersionRef.current = 0;
+          throw new Error("Không thể đồng bộ dữ liệu mới. Vui lòng thử lại.");
+        }
+      },
+    });
+  }, [
+    activeModal,
+    availableRemoteSyncVersion,
+    handleRefreshCloudData,
+    isBackupSaving,
+    isConfirmExecuting,
+    isFacebookSearchDialogOpen,
+    isSettingsReady,
+    isShareExecuting,
+    pendingBackup,
+    pendingConfirm,
+    pendingDownload,
+    pendingShare,
+  ]);
 
   useEffect(() => {
     if (!isSettingsReady) return;
@@ -9035,10 +9291,14 @@ export default function LocalProductsPage() {
       window.sessionStorage.removeItem(
         DOWNLOADED_PRODUCT_IDS_SESSION_KEY,
       );
+      window.sessionStorage.removeItem(SESSION_SYNC_VERSION_CHECK_KEY);
       setDownloadedProductIds(new Set<string>());
-      Toastify("Đã xóa trạng thái ảnh đã tải trong phiên hiện tại", 200);
+      setAvailableRemoteSyncVersion(null);
+      remoteSyncPromptedVersionRef.current = 0;
+      remoteSyncDismissedVersionRef.current = 0;
+      Toastify("Đã xóa trạng thái phiên hiện tại", 200);
     } catch {
-      Toastify("Không thể xóa trạng thái ảnh đã tải", 400);
+      Toastify("Không thể xóa trạng thái phiên", 400);
     }
   };
 
@@ -12806,9 +13066,8 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="rose"
-                title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải trong phiên hiện tại`}
-                aria-label="Xóa trạng thái ảnh đã tải trong sessionStorage"
-                disabled={downloadedProductIds.size === 0}
+                title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải và phiên kiểm tra đồng bộ của tab này`}
+                aria-label="Xóa trạng thái phiên của tab hiện tại"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName} disabled:cursor-not-allowed disabled:opacity-40`}
                 onClick={clearDownloadedProductSession}
               >
@@ -12913,18 +13172,31 @@ export default function LocalProductsPage() {
 
               <button
                 type="button"
-                data-luxury-accent="blue"
+                data-luxury-accent={
+                  availableRemoteSyncVersion !== null &&
+                  availableRemoteSyncVersion > cacheSyncVersion
+                    ? "amber"
+                    : "blue"
+                }
                 title={
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary; nhấn để đồng bộ MongoDB và thử lại ảnh lỗi`
+                    : availableRemoteSyncVersion !== null &&
+                        availableRemoteSyncVersion > cacheSyncVersion
+                      ? "Có dữ liệu mới từ thiết bị khác; nhấn để đồng bộ phần thay đổi"
                     : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
                 aria-label={
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary`
+                    : availableRemoteSyncVersion !== null &&
+                        availableRemoteSyncVersion > cacheSyncVersion
+                      ? "Có dữ liệu mới từ thiết bị khác; đồng bộ phần thay đổi"
                     : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
-                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                className={`${headerActionButtonBaseClassName} ${availableRemoteSyncVersion !== null && availableRemoteSyncVersion > cacheSyncVersion
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName}`}
                 onClick={() => void handleRefreshCloudData()}
               >
                 <FiRefreshCcw
@@ -12933,6 +13205,9 @@ export default function LocalProductsPage() {
                 />
                 {pendingImageUploadCount > 0
                   ? `Ảnh nền ${pendingImageUploadCount}`
+                  : availableRemoteSyncVersion !== null &&
+                      availableRemoteSyncVersion > cacheSyncVersion
+                    ? "Dữ liệu mới"
                   : "Đồng bộ"}
               </button>
 

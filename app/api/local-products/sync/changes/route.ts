@@ -12,7 +12,7 @@ type SyncChangeRecord = {
   revision: number;
   entity: "product" | "state" | "catalog";
   entityId: string;
-  operation: "upsert" | "trash" | "delete" | "reset";
+  operation: "upsert" | "delete" | "reset";
 };
 
 const parseSince = (value: string | null): number | null => {
@@ -38,22 +38,14 @@ const readAppState = async (): Promise<Record<string, unknown>> => {
     : {};
 };
 
-const isTrashedProduct = (product: unknown): boolean => {
-  if (!product || typeof product !== "object") return false;
-
-  const trashedAt = (product as Record<string, unknown>).trashedAt;
-  return typeof trashedAt === "string" && trashedAt.trim().length > 0;
-};
-
 const readCatalogSnapshot = async () => {
-  const [allProducts, state] = await Promise.all([
+  const [products, state] = await Promise.all([
     ProductModel.find({}, { _id: 0 }).sort({ updatedAt: -1 }).lean(),
     readAppState(),
   ]);
 
   return {
-    products: allProducts.filter((product) => !isTrashedProduct(product)),
-    trashedProducts: allProducts.filter(isTrashedProduct),
+    products,
     state,
   };
 };
@@ -76,7 +68,6 @@ export async function GET(request: Request) {
         version,
         mode: "delta",
         products: [],
-        trashedProducts: [],
         deletedProductIds: [],
       });
     }
@@ -104,7 +95,6 @@ export async function GET(request: Request) {
         version,
         mode: "snapshot",
         products: snapshot.products,
-        trashedProducts: snapshot.trashedProducts,
         deletedProductIds: [],
         state: snapshot.state,
       });
@@ -137,8 +127,7 @@ export async function GET(request: Request) {
       ok: true,
       version,
       mode: "delta",
-      products: changedProducts.filter((product) => !isTrashedProduct(product)),
-      trashedProducts: changedProducts.filter(isTrashedProduct),
+      products: changedProducts,
       deletedProductIds: productIdsToDelete,
       ...(state ? { state } : {}),
     });

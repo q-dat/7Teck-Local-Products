@@ -8,14 +8,10 @@ import ProductModel from "@/models/Product";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const activeProductFilter = {
-  $or: [{ trashedAt: "" }, { trashedAt: { $exists: false } }],
-};
-
 export async function GET() {
   try {
     await connectMongo();
-    const products = await ProductModel.find(activeProductFilter, { _id: 0 })
+    const products = await ProductModel.find({}, { _id: 0 })
       .sort({ updatedAt: -1 })
       .lean();
     return jsonNoStore({ ok: true, products });
@@ -28,34 +24,13 @@ export async function PUT(request: Request) {
   try {
     const body = (await request.json()) as {
       products?: unknown;
-      trashedProducts?: unknown;
     };
     if (!Array.isArray(body.products)) {
       return apiError(new Error("Dữ liệu import thiếu products"), 400);
     }
 
-    if (
-      body.trashedProducts !== undefined &&
-      !Array.isArray(body.trashedProducts)
-    ) {
-      return apiError(new Error("Dữ liệu import có trashedProducts không hợp lệ"), 400);
-    }
-
-    const importedAt = new Date().toISOString();
-    const products = body.products.map((value) => ({
-      ...validateProductInput(value),
-      trashedAt: "",
-    }));
-    const trashedProducts = (body.trashedProducts ?? []).map((value) => {
-      const product = validateProductInput(value);
-
-      return {
-        ...product,
-        trashedAt: product.trashedAt || importedAt,
-      };
-    });
-    const allProducts = [...products, ...trashedProducts];
-    const ids = allProducts.map((product) => product.id);
+    const products = body.products.map(validateProductInput);
+    const ids = products.map((product) => product.id);
     if (new Set(ids).size !== ids.length) {
       return apiError(new Error("Dữ liệu import có ID sản phẩm bị trùng"), 400);
     }
@@ -71,9 +46,9 @@ export async function PUT(request: Request) {
           .session(session)
           .lean();
 
-        if (allProducts.length > 0) {
+        if (products.length > 0) {
           await ProductModel.bulkWrite(
-            allProducts.map((product) => ({
+            products.map((product) => ({
               replaceOne: {
                 filter: { id: product.id },
                 replacement: product,
@@ -91,7 +66,7 @@ export async function PUT(request: Request) {
       },
     );
 
-    const currentPublicIds = new Set(allProducts.flatMap(getProductPublicIds));
+    const currentPublicIds = new Set(products.flatMap(getProductPublicIds));
     const obsoletePublicIds = previousProducts
       .flatMap(getProductPublicIds)
       .filter((publicId) => !currentPublicIds.has(publicId));
@@ -100,7 +75,6 @@ export async function PUT(request: Request) {
     return jsonNoStore({
       ok: true,
       count: products.length,
-      trashCount: trashedProducts.length,
       cleanup,
       syncVersion,
     });

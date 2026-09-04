@@ -11,7 +11,7 @@ const syncChangeSchema = new Schema(
     entityId: { type: String, required: true },
     operation: {
       type: String,
-      enum: ["upsert", "trash", "delete", "reset"],
+      enum: ["upsert", "delete", "reset"],
       required: true,
     },
     createdAt: { type: Date, default: Date.now },

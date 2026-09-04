@@ -1,4 +1,4 @@
-import { jsonNoStore, apiError } from "@/lib/http";
+import { apiError, jsonNoStore } from "@/lib/http";
 import { connectMongo } from "@/lib/mongodb";
 import AppStateModel from "@/models/AppState";
 import ProductModel from "@/models/Product";
@@ -11,7 +11,10 @@ export async function GET() {
     await connectMongo();
     const [products, rawState] = await Promise.all([
       ProductModel.find({}, { _id: 0 }).sort({ updatedAt: -1 }).lean(),
-      AppStateModel.findOne({ key: "main" }, { _id: 0, key: 0, updatedAt: 0 }).lean(),
+      AppStateModel.findOne(
+        { key: "main" },
+        { _id: 0, key: 0, updatedAt: 0, syncVersion: 0 },
+      ).lean(),
     ]);
     const state = rawState as
       | {
