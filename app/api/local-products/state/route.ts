@@ -1,5 +1,5 @@
 import { apiError, jsonNoStore } from "@/lib/http";
-import { connectMongo } from "@/lib/mongodb";
+import { runWithSyncChange } from "@/lib/sync";
 import AppStateModel from "@/models/AppState";
 
 export const runtime = "nodejs";
@@ -24,14 +24,18 @@ export async function PATCH(request: Request) {
       return apiError(new Error("Không có trạng thái hợp lệ để lưu"), 400);
     }
 
-    await connectMongo();
-    await AppStateModel.updateOne(
-      { key: "main" },
-      { $set: update, $setOnInsert: { key: "main" } },
-      { upsert: true, runValidators: true },
+    const { syncVersion } = await runWithSyncChange(
+      { entity: "state", entityId: "main", operation: "upsert" },
+      async (session) => {
+        await AppStateModel.updateOne(
+          { key: "main" },
+          { $set: update, $setOnInsert: { key: "main" } },
+          { upsert: true, runValidators: true, session },
+        );
+      },
     );
 
-    return jsonNoStore({ ok: true });
+    return jsonNoStore({ ok: true, syncVersion });
   } catch (error) {
     return apiError(error, 400);
   }

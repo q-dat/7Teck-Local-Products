@@ -7,6 +7,7 @@ const appStateSchema = new Schema(
     scheduleConfig: { type: Schema.Types.Mixed, default: null },
     scheduleAssignments: { type: Schema.Types.Mixed, default: {} },
     postedRecords: { type: [Schema.Types.Mixed], default: [] },
+    syncVersion: { type: Number, default: 0, index: true },
     updatedAt: { type: Date, default: Date.now },
   },
   { collection: "app_state", versionKey: false },
