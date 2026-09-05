@@ -430,6 +430,32 @@ const saveDevicePreferences = (preferences: DevicePreferences): void => {
   }
 };
 
+const ACTIVE_CATEGORY_STORAGE_KEY = "local-products-active-category-v1";
+
+const loadActiveCategoryTab = (): CategoryTab => {
+  if (typeof window === "undefined") return "all";
+
+  try {
+    const storedCategory = window.localStorage
+      .getItem(ACTIVE_CATEGORY_STORAGE_KEY)
+      ?.trim();
+
+    return storedCategory || "all";
+  } catch {
+    return "all";
+  }
+};
+
+const saveActiveCategoryTab = (category: CategoryTab): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(ACTIVE_CATEGORY_STORAGE_KEY, category);
+  } catch {
+    return;
+  }
+};
+
 const DOWNLOADED_PRODUCT_IDS_SESSION_KEY =
   "local_product_meta_downloaded_product_ids_v1";
 const FACEBOOK_SEARCH_BASE_URL = "https://www.facebook.com/search/top";
@@ -1280,6 +1306,16 @@ const saveSessionSyncVersionCheck = (value: unknown): void => {
       SESSION_SYNC_VERSION_CHECK_KEY,
       String(version),
     );
+  } catch {
+    return;
+  }
+};
+
+const clearSessionSyncVersionCheck = (): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.removeItem(SESSION_SYNC_VERSION_CHECK_KEY);
   } catch {
     return;
   }
@@ -3993,6 +4029,40 @@ const LOCAL_IMAGE_TRASH_DIRECTORY_NAME = "_trash";
 const LOCAL_IMAGE_RENDER_LIMIT = 250;
 const LOCAL_IMAGE_EXTENSION_PATTERN = /\.(?:jpe?g|png|webp|heic|heif)$/iu;
 
+const deleteIndexedDbDatabase = (databaseName: string): Promise<void> => {
+  if (typeof window === "undefined" || !window.indexedDB) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.deleteDatabase(databaseName);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () =>
+      reject(
+        request.error ??
+        new Error(`Không thể xóa IndexedDB ${databaseName}`),
+      );
+    request.onblocked = () =>
+      reject(
+        new Error(
+          `IndexedDB ${databaseName} đang được tab khác sử dụng. Hãy đóng các tab khác của ứng dụng rồi thử lại.`,
+        ),
+      );
+  });
+};
+
+const clearAllBrowserLocalData = async (): Promise<void> => {
+  if (typeof window === "undefined") return;
+
+  await Promise.all([
+    deleteIndexedDbDatabase(BOOTSTRAP_CACHE_DATABASE_NAME),
+    deleteIndexedDbDatabase(LOCAL_IMAGE_DIRECTORY_DATABASE_NAME),
+  ]);
+
+  window.localStorage.clear();
+};
+
 const canUseDirectoryPicker = (): boolean => {
   if (typeof window === "undefined" || !window.isSecureContext) return false;
 
@@ -4768,6 +4838,8 @@ export default function LocalProductsPage() {
   }>({ key: "", limit: INITIAL_PRODUCT_RENDER_LIMIT });
   const [activeCategoryTab, setActiveCategoryTab] =
     useState<CategoryTab>("all");
+  const [isActiveCategoryReady, setIsActiveCategoryReady] =
+    useState<boolean>(false);
   const [draggingCategoryKey, setDraggingCategoryKey] =
     useState<string>("");
   const [categoryDropTarget, setCategoryDropTarget] = useState<{
@@ -4975,6 +5047,17 @@ export default function LocalProductsPage() {
     isDevicePreferencesReady,
     selectedContactId,
   ]);
+
+  useEffect(() => {
+    setActiveCategoryTab(loadActiveCategoryTab());
+    setIsActiveCategoryReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isActiveCategoryReady) return;
+
+    saveActiveCategoryTab(activeCategoryTab);
+  }, [activeCategoryTab, isActiveCategoryReady]);
 
   const copyText = useCallback(
     async (value: string): Promise<void> => {
@@ -6707,6 +6790,10 @@ export default function LocalProductsPage() {
     }
 
     await flushQueuedAppStatePatch().catch(() => undefined);
+
+    // Làm mới phải buộc phiên mới kiểm tra /sync/version đúng một lần.
+    // Chỉ xóa key check sync, không đụng trạng thái ảnh đã tải của "Xóa phiên".
+    clearSessionSyncVersionCheck();
     window.location.reload();
   };
 
@@ -7212,7 +7299,7 @@ export default function LocalProductsPage() {
   }, [selectedFacebookPageId, settings.facebookPages]);
 
   useEffect(() => {
-    if (activeCategoryTab === "all") return;
+    if (!isSettingsReady || activeCategoryTab === "all") return;
 
     const categoryKeys = new Set(
       categories.map((category) => normalizeTextKey(category)),
@@ -7221,7 +7308,7 @@ export default function LocalProductsPage() {
     if (categoryKeys.has(normalizeTextKey(activeCategoryTab))) return;
 
     setActiveCategoryTab("all");
-  }, [activeCategoryTab, categories]);
+  }, [activeCategoryTab, categories, isSettingsReady]);
 
   useEffect(() => {
     if (categories.length === 0) return;
@@ -9133,6 +9220,34 @@ export default function LocalProductsPage() {
           closeAllModals();
           Toastify("Đã xóa toàn bộ dữ liệu MongoDB và Cloudinary", 200);
         } finally {
+          setPageLoadingText("");
+        }
+      },
+    });
+  };
+
+  const handleClearAllBrowserLocalData = (): void => {
+    requestConfirm({
+      title: "Xóa toàn bộ dữ liệu Local trên thiết bị?",
+      description:
+        "Chỉ xóa toàn bộ localStorage và IndexedDB của ứng dụng trên thiết bị này. MongoDB và Cloudinary không bị thay đổi. Trạng thái ảnh đã tải trong sessionStorage chỉ được xóa bằng nút Xóa phiên.",
+      confirmLabel: "Xóa dữ liệu Local",
+      tone: "danger",
+      onConfirm: async () => {
+        setPageLoadingText("Đang xóa localStorage và IndexedDB...");
+        await waitForUiPaint();
+
+        try {
+          await pendingImageQueueWriteRef.current.catch(() => undefined);
+          await clearAllBrowserLocalData();
+          window.location.reload();
+        } catch (error) {
+          Toastify(
+            error instanceof Error
+              ? error.message
+              : "Không thể xóa dữ liệu Local trên thiết bị",
+            400,
+          );
           setPageLoadingText("");
         }
       },
@@ -13160,8 +13275,8 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="cyan"
-                title="Làm mới trang bằng dữ liệu cache trên thiết bị"
-                aria-label="Làm mới trang bằng dữ liệu cache trên thiết bị"
+                title="Làm mới trang và kiểm tra lại phiên bản dữ liệu Cloud"
+                aria-label="Làm mới trang và kiểm tra lại phiên bản dữ liệu Cloud"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={() => void handleReloadPage()}
               >
@@ -17098,7 +17213,7 @@ export default function LocalProductsPage() {
                     </div>
                   </article>
 
-                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(0,0.85fr)]">
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr_0.85fr_0.85fr]">
                     <article className="flex min-w-0 flex-col rounded-md border border-cyan-300/20 bg-cyan-300/[0.07] p-3">
                       <div className="flex items-center gap-2">
                         <FiDownload
@@ -17171,6 +17286,36 @@ export default function LocalProductsPage() {
                           className={iconClassName}
                         />
                         <span>Đồng bộ Cloud</span>
+                      </button>
+                    </article>
+
+                    <article className="flex min-w-0 flex-col rounded-md border border-amber-300/20 bg-amber-300/[0.05] p-3">
+                      <div className="flex items-center gap-2">
+                        <FiDatabase
+                          aria-hidden="true"
+                          className="h-4 w-4 shrink-0 text-amber-200"
+                        />
+                        <div className="min-w-0">
+                          <h3 className="text-xs font-black text-white">
+                            Xóa dữ liệu Local
+                          </h3>
+                          <p className="mt-0.5 text-[10px] text-slate-400">
+                            localStorage + IndexedDB, không xóa Cloud
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[11px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 xl:mt-auto"
+                        onClick={handleClearAllBrowserLocalData}
+                        title="Chỉ xóa localStorage và IndexedDB trên thiết bị này"
+                      >
+                        <FiDatabase
+                          aria-hidden="true"
+                          className={iconClassName}
+                        />
+                        <span>Xóa Local</span>
                       </button>
                     </article>
 
