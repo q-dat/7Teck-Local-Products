@@ -194,6 +194,7 @@ type DevicePreferences = {
   includeSocialTags: boolean;
   isCopyNfkcEnabled: boolean;
   selectedContactId: string;
+  isHeaderVisible: boolean;
 };
 
 type ExportPayload = {
@@ -387,6 +388,7 @@ const defaultDevicePreferences: DevicePreferences = {
   includeSocialTags: false,
   isCopyNfkcEnabled: false,
   selectedContactId: "",
+  isHeaderVisible: false,
 };
 
 const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
@@ -401,6 +403,7 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
       typeof record.selectedContactId === "string"
         ? record.selectedContactId.trim()
         : "",
+    isHeaderVisible: record.isHeaderVisible === true,
   };
 };
 
@@ -4041,7 +4044,7 @@ const deleteIndexedDbDatabase = (databaseName: string): Promise<void> => {
     request.onerror = () =>
       reject(
         request.error ??
-          new Error(`Không thể xóa IndexedDB ${databaseName}`),
+        new Error(`Không thể xóa IndexedDB ${databaseName}`),
       );
     request.onblocked = () =>
       reject(
@@ -4850,6 +4853,7 @@ export default function LocalProductsPage() {
     useState<boolean>(false);
   const [isHeaderActionsMenuOpen, setIsHeaderActionsMenuOpen] =
     useState<boolean>(false);
+  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(false);
   const [isScrollTopVisible, setIsScrollTopVisible] =
     useState<boolean>(false);
   const [isCopyNfkcEnabled, setIsCopyNfkcEnabled] =
@@ -5007,6 +5011,7 @@ export default function LocalProductsPage() {
       setIncludeSocialTags(preferences.includeSocialTags);
       setIsCopyNfkcEnabled(preferences.isCopyNfkcEnabled);
       setSelectedContactId(preferences.selectedContactId);
+      setIsHeaderVisible(preferences.isHeaderVisible);
     };
 
     applyPreferences(loadDevicePreferences());
@@ -5040,11 +5045,13 @@ export default function LocalProductsPage() {
       includeSocialTags,
       isCopyNfkcEnabled,
       selectedContactId,
+      isHeaderVisible,
     });
   }, [
     includeSocialTags,
     isCopyNfkcEnabled,
     isDevicePreferencesReady,
+    isHeaderVisible,
     selectedContactId,
   ]);
 
@@ -12254,9 +12261,27 @@ export default function LocalProductsPage() {
         }
 
         .luxury-search {
-          border-color: rgba(230, 207, 139, 0.34) !important;
-          background: linear-gradient(135deg, rgba(9, 19, 30, 0.99), rgba(18, 34, 49, 0.96)) !important;
-          box-shadow: inset 3px 0 0 rgba(230, 207, 139, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 13px 34px rgba(0, 0, 0, 0.24);
+          border-color: rgba(253, 230, 138, 0.62) !important;
+          background:
+            linear-gradient(135deg, rgba(255, 251, 235, 0.2), transparent 38%),
+            linear-gradient(155deg, rgba(82, 82, 64, 0.985), rgba(30, 43, 49, 0.99)) !important;
+          box-shadow:
+            inset 3px 0 0 rgba(253, 230, 138, 0.58),
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            0 0 22px rgba(251, 191, 36, 0.1),
+            0 16px 38px rgba(0, 0, 0, 0.3);
+        }
+
+        .luxury-search:focus-within {
+          border-color: rgba(254, 240, 138, 0.9) !important;
+          background:
+            linear-gradient(135deg, rgba(255, 251, 235, 0.27), transparent 40%),
+            linear-gradient(155deg, rgba(105, 91, 55, 0.99), rgba(34, 47, 52, 0.995)) !important;
+          box-shadow:
+            inset 3px 0 0 rgba(254, 240, 138, 0.76),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2),
+            0 0 30px rgba(251, 191, 36, 0.16),
+            0 20px 44px rgba(0, 0, 0, 0.34);
         }
 
         .luxury-product-card {
@@ -12880,6 +12905,58 @@ export default function LocalProductsPage() {
           background: linear-gradient(90deg, #8f763d, #e6cf8b, #f5e9c7);
         }
 
+        .local-products-workspace .luxury-header[data-header-visible="true"]:not([data-actions-open="true"]) {
+          max-height: 1200px;
+          opacity: 1;
+          transform: translateY(0);
+          transition:
+            max-height 360ms cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 220ms ease,
+            transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+            border-color 260ms ease,
+            box-shadow 260ms ease;
+        }
+
+        .local-products-workspace .luxury-header[data-header-visible="false"]:not([data-actions-open="true"]) {
+          max-height: 0;
+          opacity: 0;
+          transform: translateY(-12px);
+          overflow: hidden !important;
+          pointer-events: none;
+          border-color: transparent !important;
+          background: transparent !important;
+          box-shadow: none !important;
+          transition:
+            max-height 320ms cubic-bezier(0.4, 0, 0.2, 1),
+            opacity 180ms ease,
+            transform 260ms cubic-bezier(0.4, 0, 0.2, 1),
+            border-color 220ms ease,
+            box-shadow 220ms ease;
+        }
+
+        .local-products-workspace .luxury-header[data-actions-open="true"] {
+          max-height: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+          overflow: visible !important;
+        }
+
+        .local-products-workspace .luxury-content-panel[data-header-hidden="true"] {
+          padding-top: calc(0.75rem + env(safe-area-inset-top, 0px)) !important;
+        }
+
+        .local-products-workspace .floating-workspace-actions {
+          left: 0.75rem;
+          bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+        }
+
+        @media (min-width: 1280px) {
+          .local-products-workspace .floating-workspace-actions {
+            left: 1rem;
+            bottom: 72px;
+          }
+        }
+
         @keyframes headerActionsMenuDrop {
           from {
             opacity: 0;
@@ -12987,6 +13064,7 @@ export default function LocalProductsPage() {
       <section className="flex w-full flex-col xl:min-h-[calc(100dvh-4rem)]">
         <header
           data-actions-open={isHeaderActionsMenuOpen ? "true" : undefined}
+          data-header-visible={isHeaderVisible ? "true" : "false"}
           style={isHeaderActionsMenuOpen ? { clipPath: "none" } : undefined}
           className={`luxury-header overflow-visible ${isHeaderActionsMenuOpen
             ? "pointer-events-none fixed inset-0 z-[1200] border-0 bg-transparent shadow-none backdrop-blur-none"
@@ -13033,12 +13111,37 @@ export default function LocalProductsPage() {
                 ? "header-actions-menu-open pointer-events-auto fixed left-1/2 top-1/2 z-[1201] grid max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-3rem)] xl:max-w-5xl xl:grid-cols-4 xl:gap-3 xl:p-4"
                 : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] xl:grid-cols-[repeat(18,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
                 }`}
-              onClickCapture={() => {
+              onClick={() => {
                 if (isHeaderActionsMenuOpen) {
                   setIsHeaderActionsMenuOpen(false);
                 }
               }}
             >
+              {isHeaderActionsMenuOpen ? (
+                <button
+                  type="button"
+                  data-luxury-accent="amber"
+                  title={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
+                  aria-label={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
+                  aria-pressed={isHeaderVisible}
+                  className={`${headerActionButtonBaseClassName} ${isHeaderVisible
+                    ? headerActiveButtonClassName
+                    : headerNeutralButtonClassName
+                    }`}
+                  onClick={() => {
+                    const nextVisible = !isHeaderVisible;
+                    setIsHeaderVisible(nextVisible);
+                    Toastify(
+                      `Đã ${nextVisible ? "hiện" : "ẩn"} header trên thiết bị này`,
+                      200,
+                    );
+                  }}
+                >
+                  <FiMonitor aria-hidden="true" className={iconClassName} />
+                  {isHeaderVisible ? "Ẩn Header" : "Hiện Header"}
+                </button>
+              ) : null}
+
               <button
                 type="button"
                 data-luxury-accent="gold"
@@ -13395,12 +13498,16 @@ export default function LocalProductsPage() {
           </div>
         </header>
 
-        <section className="luxury-content-panel border p-3">
+        <section
+          data-header-hidden={!isHeaderVisible ? "true" : undefined}
+          className="luxury-content-panel border py-1 px-3"
+        >
           <div className="mb-3">
-            <label className="luxury-search flex items-center gap-2 border px-3 py-2 text-slate-400 transition focus-within:text-[#eadfbe]">
+            <label className="luxury-search flex min-h-[72px] items-center border  text-[#f8edc8] transition focus-within:text-[#fff6d8] xl:min-h-14">
               <FiSearch
+                size='30'
                 aria-hidden="true"
-                className={`${iconClassName} shrink-0`}
+                className=""
               />
               <input
                 ref={searchInputRef}
@@ -13410,7 +13517,7 @@ export default function LocalProductsPage() {
                 onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="w-full bg-transparent text-xs font-semibold text-white outline-none placeholder:text-slate-500"
+                className="h-12 w-full bg-transparent text-lg font-semibold px-2 leading-6 text-white outline-none placeholder:text-[#d5c9a4]/70 xl:h-10 xl:text-base xl:leading-5"
                 placeholder="Tìm tất cả sản phẩm"
               />
             </label>
@@ -13552,7 +13659,7 @@ export default function LocalProductsPage() {
           </div>
 
           <div
-            className={`fixed bottom-3 left-2 flex-row items-center gap-2 md:bottom-[72px] md:gap-1.5 ${isScrollTopVisible ? "flex" : "hidden"} ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+            className={`floating-workspace-actions fixed flex flex-row items-center gap-2.5 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
           >
             <motion.button
               type="button"
@@ -13569,7 +13676,7 @@ export default function LocalProductsPage() {
                   : "Mở menu chức năng"
               }
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition md:h-9 md:w-9 ${isHeaderActionsMenuOpen
+              className={`flex h-14 w-14 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:h-12 xl:w-12 ${isHeaderActionsMenuOpen
                 ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                 : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                 }`}
@@ -13579,9 +13686,9 @@ export default function LocalProductsPage() {
               }}
             >
               {isHeaderActionsMenuOpen ? (
-                <FiX aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
+                <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               ) : (
-                <FiMenu aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
+                <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               )}
             </motion.button>
 
@@ -13597,10 +13704,10 @@ export default function LocalProductsPage() {
                   }}
                   aria-label="Cuộn lên đầu trang"
                   title="Lên đầu trang"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95 md:h-9 md:w-9"
+                  className="flex h-14 w-14 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95 xl:h-12 xl:w-12"
                   onClick={handleScrollToTop}
                 >
-                  <FiArrowUp aria-hidden="true" className="h-5 w-5 md:h-4 md:w-4" />
+                  <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
                 </motion.button>
               ) : null}
             </AnimatePresence>
