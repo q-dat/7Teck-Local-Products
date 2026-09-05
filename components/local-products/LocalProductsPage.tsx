@@ -1005,7 +1005,7 @@ const Toastify = (
   statusCode: number,
 ): void => {
   const toastOptions: ToastOptions = {
-    position: "top-right",
+    position: "bottom-right",
     autoClose: 2000,
     hideProgressBar: false,
     closeOnClick: true,
@@ -4041,7 +4041,7 @@ const deleteIndexedDbDatabase = (databaseName: string): Promise<void> => {
     request.onerror = () =>
       reject(
         request.error ??
-        new Error(`Không thể xóa IndexedDB ${databaseName}`),
+          new Error(`Không thể xóa IndexedDB ${databaseName}`),
       );
     request.onblocked = () =>
       reject(
@@ -12883,16 +12883,81 @@ export default function LocalProductsPage() {
         @keyframes headerActionsMenuDrop {
           from {
             opacity: 0;
-            transform: translateY(-14px) scale(0.985);
+            filter: blur(5px);
           }
           to {
             opacity: 1;
-            transform: translateY(0) scale(1);
+            filter: blur(0);
           }
         }
 
         .local-products-workspace .header-actions-menu-open {
-          animation: headerActionsMenuDrop 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+          animation: headerActionsMenuDrop 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .local-products-workspace #header-action-menu[data-expanded="true"] {
+          border-color: rgba(216, 201, 159, 0.28);
+          background:
+            radial-gradient(circle at 50% -8%, rgba(230, 207, 139, 0.12), transparent 34%),
+            linear-gradient(145deg, rgba(11, 18, 29, 0.99), rgba(4, 9, 16, 0.99));
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.055),
+            0 30px 90px rgba(0, 0, 0, 0.72),
+            0 0 0 1px rgba(255, 255, 255, 0.018);
+        }
+
+        .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] {
+          min-height: 68px;
+          flex-direction: column;
+          justify-content: center;
+          gap: 7px;
+          padding: 10px 8px;
+          border-width: 1px;
+          font-size: 11px;
+          line-height: 1.15;
+          letter-spacing: 0.055em;
+          clip-path: polygon(
+            11px 0,
+            calc(100% - 11px) 0,
+            100% 11px,
+            100% calc(100% - 11px),
+            calc(100% - 11px) 100%,
+            11px 100%,
+            0 calc(100% - 11px),
+            0 11px
+          );
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.11),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+            0 10px 24px rgba(0, 0, 0, 0.26) !important;
+        }
+
+        .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] > svg {
+          width: 20px;
+          height: 20px;
+        }
+
+        .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent]:hover {
+          transform: translateY(-2px) scale(1.015);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.24),
+            0 16px 32px rgba(0, 0, 0, 0.34),
+            0 0 18px rgba(230, 207, 139, 0.1) !important;
+        }
+
+        @media (min-width: 1280px) {
+          .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] {
+            min-height: 82px;
+            gap: 9px;
+            padding: 13px 10px;
+            font-size: 12px;
+          }
+
+          .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] > svg {
+            width: 22px;
+            height: 22px;
+          }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -12923,9 +12988,9 @@ export default function LocalProductsPage() {
         <header
           data-actions-open={isHeaderActionsMenuOpen ? "true" : undefined}
           style={isHeaderActionsMenuOpen ? { clipPath: "none" } : undefined}
-          className={`luxury-header overflow-visible border border-white/[0.08] bg-[#090b10]/95 shadow-[0_16px_46px_rgba(0,0,0,0.34)] backdrop-blur-xl ${isHeaderActionsMenuOpen
-            ? "fixed inset-x-0 top-0 z-[1200]"
-            : "relative z-30"
+          className={`luxury-header overflow-visible ${isHeaderActionsMenuOpen
+            ? "pointer-events-none fixed inset-0 z-[1200] border-0 bg-transparent shadow-none backdrop-blur-none"
+            : "relative z-30 border border-white/[0.08] bg-[#090b10]/95 shadow-[0_16px_46px_rgba(0,0,0,0.34)] backdrop-blur-xl"
             }`}
         >
           <div
@@ -12934,7 +12999,7 @@ export default function LocalProductsPage() {
           />
 
           <div className="relative grid w-full grid-cols-1 gap-2 xl:flex xl:flex-col xl:items-stretch xl:gap-1.5 xl:p-2">
-            <div className="grid min-w-0 grid-cols-4 divide-x divide-[#d8c99f]/10 overflow-hidden border border-[#d8c99f]/[0.15] bg-[linear-gradient(135deg,rgba(216,201,159,0.055),rgba(255,255,255,0.012))] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] xl:hidden">
+            <div className={`${isHeaderActionsMenuOpen ? "hidden" : "grid"} min-w-0 grid-cols-4 divide-x divide-[#d8c99f]/10 overflow-hidden border border-[#d8c99f]/[0.15] bg-[linear-gradient(135deg,rgba(216,201,159,0.055),rgba(255,255,255,0.012))] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] xl:hidden`}>
               <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 xl:min-h-8 xl:justify-between xl:border-l xl:border-[#d8c99f]/20 xl:bg-black/20 xl:px-3 xl:py-2 xl:text-[8px] xl:font-bold xl:uppercase xl:tracking-[0.08em] xl:text-slate-400">
                 <span className="font-bold tabular-nums text-[#d8c99f] xl:text-xs xl:font-black">
                   {activeProductCount}
@@ -12963,10 +13028,11 @@ export default function LocalProductsPage() {
 
             <div
               id="header-action-menu"
+              data-expanded={isHeaderActionsMenuOpen ? "true" : undefined}
               className={`${isHeaderActionsMenuOpen
-                ? "header-actions-menu-open fixed inset-x-2 top-2 z-[1201] grid max-h-[calc(100dvh-1rem)] origin-top overflow-x-hidden overflow-y-auto overscroll-contain shadow-[0_24px_70px_rgba(0,0,0,0.68)]"
-                : "grid"
-                } grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] md:grid-cols-6 xl:inset-x-4 xl:grid-cols-[repeat(18,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]`}
+                ? "header-actions-menu-open pointer-events-auto fixed left-1/2 top-1/2 z-[1201] grid max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-3rem)] xl:max-w-5xl xl:grid-cols-4 xl:gap-3 xl:p-4"
+                : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] xl:grid-cols-[repeat(18,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
+                }`}
               onClickCapture={() => {
                 if (isHeaderActionsMenuOpen) {
                   setIsHeaderActionsMenuOpen(false);
@@ -18131,7 +18197,7 @@ export default function LocalProductsPage() {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     disabled={isShareExecuting}
@@ -18155,14 +18221,6 @@ export default function LocalProductsPage() {
                     onClick={() => void executeShareRequest("imagesOnly")}
                   >
                     Chỉ hình ảnh
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isShareExecuting}
-                    className="min-h-11 border border-violet-300/30 bg-violet-300/10 p-3 text-[9px] font-black text-violet-100 transition hover:bg-violet-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
-                    onClick={() => setShareDialogStep("facebookGroup")}
-                  >
-                    Gruop FB(Dành cho iPhone)
                   </button>
                 </div>
               )}
