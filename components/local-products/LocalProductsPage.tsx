@@ -1369,8 +1369,8 @@ const normalizeBootstrapCacheRecord = (
     cachedAt: record.cachedAt,
     syncVersion:
       typeof record.syncVersion === "number" &&
-      Number.isSafeInteger(record.syncVersion) &&
-      record.syncVersion >= 0
+        Number.isSafeInteger(record.syncVersion) &&
+        record.syncVersion >= 0
         ? record.syncVersion
         : 0,
     payload: {
@@ -1679,8 +1679,8 @@ const createImageClipboardPngCacheKey = (image: ProductImage): string => {
 const isUploadedProductImage = (image: ProductImage): boolean => {
   return Boolean(
     image.publicId.trim() &&
-      image.dataUrl.trim() &&
-      !image.dataUrl.startsWith("blob:"),
+    image.dataUrl.trim() &&
+    !image.dataUrl.startsWith("blob:"),
   );
 };
 
@@ -9291,14 +9291,10 @@ export default function LocalProductsPage() {
       window.sessionStorage.removeItem(
         DOWNLOADED_PRODUCT_IDS_SESSION_KEY,
       );
-      window.sessionStorage.removeItem(SESSION_SYNC_VERSION_CHECK_KEY);
       setDownloadedProductIds(new Set<string>());
-      setAvailableRemoteSyncVersion(null);
-      remoteSyncPromptedVersionRef.current = 0;
-      remoteSyncDismissedVersionRef.current = 0;
-      Toastify("Đã xóa trạng thái phiên hiện tại", 200);
+      Toastify("Đã xóa trạng thái ảnh đã tải trong phiên hiện tại", 200);
     } catch {
-      Toastify("Không thể xóa trạng thái phiên", 400);
+      Toastify("Không thể xóa trạng thái ảnh đã tải", 400);
     }
   };
 
@@ -13066,9 +13062,12 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent="rose"
-                title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải và phiên kiểm tra đồng bộ của tab này`}
-                aria-label="Xóa trạng thái phiên của tab hiện tại"
-                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName} disabled:cursor-not-allowed disabled:opacity-40`}
+                title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải trong phiên hiện tại`}
+                aria-label="Xóa trạng thái ảnh đã tải trong sessionStorage"
+                disabled={downloadedProductIds.size === 0}
+                className={`${headerActionButtonBaseClassName} ${downloadedProductIds.size > 0
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName} disabled:cursor-not-allowed disabled:opacity-40`}
                 onClick={clearDownloadedProductSession}
               >
                 <FiTrash2 aria-hidden="true" className={iconClassName} />
@@ -13174,7 +13173,7 @@ export default function LocalProductsPage() {
                 type="button"
                 data-luxury-accent={
                   availableRemoteSyncVersion !== null &&
-                  availableRemoteSyncVersion > cacheSyncVersion
+                    availableRemoteSyncVersion > cacheSyncVersion
                     ? "amber"
                     : "blue"
                 }
@@ -13182,17 +13181,17 @@ export default function LocalProductsPage() {
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary; nhấn để đồng bộ MongoDB và thử lại ảnh lỗi`
                     : availableRemoteSyncVersion !== null &&
-                        availableRemoteSyncVersion > cacheSyncVersion
+                      availableRemoteSyncVersion > cacheSyncVersion
                       ? "Có dữ liệu mới từ thiết bị khác; nhấn để đồng bộ phần thay đổi"
-                    : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
+                      : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
                 aria-label={
                   pendingImageUploadCount > 0
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary`
                     : availableRemoteSyncVersion !== null &&
-                        availableRemoteSyncVersion > cacheSyncVersion
+                      availableRemoteSyncVersion > cacheSyncVersion
                       ? "Có dữ liệu mới từ thiết bị khác; đồng bộ phần thay đổi"
-                    : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
+                      : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
                 }
                 className={`${headerActionButtonBaseClassName} ${availableRemoteSyncVersion !== null && availableRemoteSyncVersion > cacheSyncVersion
                   ? headerActiveButtonClassName
@@ -13206,9 +13205,9 @@ export default function LocalProductsPage() {
                 {pendingImageUploadCount > 0
                   ? `Ảnh nền ${pendingImageUploadCount}`
                   : availableRemoteSyncVersion !== null &&
-                      availableRemoteSyncVersion > cacheSyncVersion
+                    availableRemoteSyncVersion > cacheSyncVersion
                     ? "Dữ liệu mới"
-                  : "Đồng bộ"}
+                    : "Đồng bộ"}
               </button>
 
             </div>
@@ -13794,8 +13793,8 @@ export default function LocalProductsPage() {
                           }}
                         >
                           <div
-                            className={`${expanded ? "line-clamp-none" : "line-clamp-2"
-                              } w-full min-w-0 whitespace-pre-wrap p-1 text-[11px] leading-[18px] text-slate-300 [overflow-wrap:anywhere]`}
+                            className={`${expanded ? "line-clamp-none" : "line-clamp-1"
+                              } w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[10px] text-slate-300 [overflow-wrap:anywhere]`}
                           >
                             {renderDescriptionText(
                               product.id,
