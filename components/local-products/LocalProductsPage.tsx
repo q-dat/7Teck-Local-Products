@@ -13500,25 +13500,53 @@ export default function LocalProductsPage() {
 
         <section
           data-header-hidden={!isHeaderVisible ? "true" : undefined}
-          className="luxury-content-panel border py-1 px-3"
+          className="luxury-content-panel border py-1 px-2"
         >
           <div className="mb-3">
-            <label className="luxury-search flex min-h-[72px] items-center border  text-[#f8edc8] transition focus-within:text-[#fff6d8] xl:min-h-14">
+            <label
+              className="
+      luxury-search group relative flex min-h-[72px] w-full items-center
+      text-[#f8edc8]
+      px-2
+      transition-all duration-300
+      focus-within:text-[#fff6d8]
+      xl:min-h-12
+    "
+            >
               <FiSearch
-                size='30'
+                size={22}
                 aria-hidden="true"
-                className=""
+                className="
+        pointer-events-none absolute left-4 z-10
+        text-[#cbbd91]/80
+        transition-all duration-300
+        group-focus-within:text-[#fff6d8]
+      "
               />
+
               <input
                 ref={searchInputRef}
-                // autoFocus
                 type="text"
                 value={query}
                 onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
-                className="h-12 w-full bg-transparent text-lg font-semibold px-2 leading-6 text-white outline-none placeholder:text-[#d5c9a4]/70 xl:h-10 xl:text-base xl:leading-5"
+                className="
+        h-12 w-full min-w-0
+        appearance-none
+        bg-transparent
+        pl-12 pr-4
+        text-[16px] font-medium
+        leading-6 text-white
+        outline-none
+        placeholder:text-[#d5c9a4]/65
+        xl:h-10
+        xl:pl-11
+        xl:text-base
+        xl:leading-5
+      "
                 placeholder="Tìm tất cả sản phẩm"
+                aria-label="Tìm tất cả sản phẩm"
               />
             </label>
           </div>
@@ -13841,7 +13869,7 @@ export default function LocalProductsPage() {
           <div
             data-category-scene={activeCategorySceneColor ? "true" : undefined}
             style={activeCategorySceneStyle}
-            className="category-product-stage"
+            className="category-product-stage  min-h-screen"
             onTouchStart={handleProductsTouchStart}
             onTouchEnd={handleProductsTouchEnd}
           >
@@ -13856,7 +13884,7 @@ export default function LocalProductsPage() {
                 Chưa có sản phẩm phù hợp.
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 xl:gap-4 xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
                 {visibleProducts.map((product, index) => {
                   const descriptionPreview =
                     product.description.trim() ||
