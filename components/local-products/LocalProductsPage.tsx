@@ -15,7 +15,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Geist } from "next/font/google";
 import {
   FiArrowUp,
   FiArchive,
@@ -14156,7 +14155,7 @@ export default function LocalProductsPage() {
                         >
                           <div
                             className={`${expanded ? "line-clamp-none" : "line-clamp-1"
-                              } w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[10px] text-slate-300 [overflow-wrap:anywhere]`}
+                              } w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[16px] text-slate-300 [overflow-wrap:anywhere]`}
                           >
                             {renderDescriptionText(
                               product.id,
