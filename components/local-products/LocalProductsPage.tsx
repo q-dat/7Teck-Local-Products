@@ -13750,7 +13750,7 @@ export default function LocalProductsPage() {
                   : "Mở menu chức năng"
               }
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-14 w-14 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:h-12 xl:w-12 ${isHeaderActionsMenuOpen
+              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition ${isHeaderActionsMenuOpen
                 ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                 : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                 }`}
@@ -13778,7 +13778,7 @@ export default function LocalProductsPage() {
                   }}
                   aria-label="Cuộn lên đầu trang"
                   title="Lên đầu trang"
-                  className="flex h-14 w-14 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95 xl:h-12 xl:w-12"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
                   onClick={handleScrollToTop}
                 >
                   <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
