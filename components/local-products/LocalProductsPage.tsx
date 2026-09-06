@@ -13505,22 +13505,64 @@ export default function LocalProductsPage() {
           <div className="mb-3">
             <label
               className="
-      luxury-search group relative flex min-h-[72px] w-full items-center
-      text-[#f8edc8]
-      px-2
+      luxury-search group relative flex w-full items-center
+      border border-[#fff6d8]
+      bg-[#17140d]
+      px-1 py-1
+      text-[#fff6d8]
+      shadow-[0_0_8px_rgba(255,246,216,0.32)]
       transition-all duration-300
-      focus-within:text-[#fff6d8]
-      xl:min-h-12
+      focus-within:border-[#fff6d8]
+      focus-within:text-[#fffbeF]
+      focus-within:shadow-[0_0_10px_rgba(255,246,216,0.55),0_0_24px_rgba(232,200,117,0.28)]
+      xl:px-2
     "
             >
+              {/* Left luxury game border */}
+              <span
+                aria-hidden="true"
+                className="
+        pointer-events-none absolute inset-y-[-1px] left-[-1px] z-20
+        w-[5px]
+        bg-gradient-to-b
+        from-[#fffbeF]
+        via-[#f9e7b2]
+        to-[#c9a45c]
+        shadow-[0_0_7px_rgba(249,231,178,0.95),0_0_16px_rgba(232,200,117,0.7)]
+        transition-all duration-300
+        group-focus-within:w-[6px]
+        group-focus-within:shadow-[0_0_9px_rgba(255,251,239,0.95),0_0_20px_rgba(249,231,178,0.95),0_0_32px_rgba(232,200,117,0.6)]
+      "
+              />
+
+              {/* Right luxury game border */}
+              <span
+                aria-hidden="true"
+                className="
+        pointer-events-none absolute inset-y-[-1px] right-[-1px] z-20
+        w-[5px]
+        bg-gradient-to-b
+        from-[#fffbeF]
+        via-[#f9e7b2]
+        to-[#c9a45c]
+        shadow-[0_0_7px_rgba(249,231,178,0.95),0_0_16px_rgba(232,200,117,0.7)]
+        transition-all duration-300
+        group-focus-within:w-[6px]
+        group-focus-within:shadow-[0_0_9px_rgba(255,251,239,0.95),0_0_20px_rgba(249,231,178,0.95),0_0_32px_rgba(232,200,117,0.6)]
+      "
+              />
+
               <FiSearch
                 size={22}
                 aria-hidden="true"
                 className="
         pointer-events-none absolute left-4 z-10
-        text-[#cbbd91]/80
+        text-[#f9e7b2]
+        drop-shadow-[0_0_5px_rgba(249,231,178,0.75)]
         transition-all duration-300
-        group-focus-within:text-[#fff6d8]
+        group-focus-within:scale-105
+        group-focus-within:text-[#fffbeF]
+        group-focus-within:drop-shadow-[0_0_7px_rgba(255,251,239,0.9)]
       "
               />
 
@@ -13532,16 +13574,20 @@ export default function LocalProductsPage() {
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => event.stopPropagation()}
                 className="
-        h-12 w-full min-w-0
+        h-8 w-full min-w-0
         appearance-none
+        border-0
         bg-transparent
-        pl-12 pr-4
-        text-[16px] font-medium
-        leading-6 text-white
+        px-10
+        text-[16px] font-light
+        leading-6 text-[#fffdf5]
         outline-none
-        placeholder:text-[#d5c9a4]/65
-        xl:h-10
-        xl:pl-11
+        ring-0
+        focus:outline-none
+        focus:ring-0
+        focus-visible:outline-none
+        focus-visible:ring-0
+        placeholder:text-[#f9e7b2]/85
         xl:text-base
         xl:leading-5
       "
