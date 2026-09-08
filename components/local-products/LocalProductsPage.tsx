@@ -1,4 +1,5 @@
-"use client";
+'use client'
+
 import {
   useCallback,
   useEffect,
@@ -1074,7 +1075,7 @@ const Toastify = (
 ): void => {
   const toastOptions: ToastOptions = {
     position: "bottom-right",
-    autoClose: 2000,
+    autoClose: 1000,
     hideProgressBar: false,
     closeOnClick: true,
     pauseOnHover: true,
@@ -5138,8 +5139,8 @@ export default function LocalProductsPage() {
         setFacebookLinkOpenSettings(
           event.newValue
             ? normalizeFacebookLinkOpenSettings(
-                JSON.parse(event.newValue) as unknown,
-              )
+              JSON.parse(event.newValue) as unknown,
+            )
             : defaultFacebookLinkOpenSettings,
         );
       } catch {
@@ -7613,6 +7614,9 @@ export default function LocalProductsPage() {
 
   const selectContactOption = (id: string): void => {
     setSelectedContactId(id);
+    setModalStack((current) =>
+      current.filter((modalName) => modalName !== "contact"),
+    );
     Toastify("Đã chọn liên hệ cho thiết bị này", 200);
   };
 
@@ -17427,7 +17431,7 @@ export default function LocalProductsPage() {
                                             toolUrl,
                                             `${tool.popupNamePrefix}-${activeFacebookPage.id}`,
                                             facebookLinkOpenSettings[
-                                              getFacebookPageToolOpenKey(tool.id)
+                                            getFacebookPageToolOpenKey(tool.id)
                                             ],
                                           );
                                         }}
