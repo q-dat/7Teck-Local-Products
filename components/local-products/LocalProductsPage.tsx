@@ -5138,8 +5138,8 @@ export default function LocalProductsPage() {
         setFacebookLinkOpenSettings(
           event.newValue
             ? normalizeFacebookLinkOpenSettings(
-              JSON.parse(event.newValue) as unknown,
-            )
+                JSON.parse(event.newValue) as unknown,
+              )
             : defaultFacebookLinkOpenSettings,
         );
       } catch {
@@ -13868,7 +13868,7 @@ export default function LocalProductsPage() {
           </div>
 
           <div
-            className={`floating-workspace-actions fixed flex flex-row items-center gap-2.5 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+            className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
           >
             <motion.button
               type="button"
@@ -13898,6 +13898,45 @@ export default function LocalProductsPage() {
                 <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               ) : (
                 <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+              )}
+            </motion.button>
+
+            <motion.button
+              type="button"
+              aria-pressed={activeModal === "contact"}
+              aria-label={
+                activeModal === "contact"
+                  ? "Đóng liên hệ"
+                  : "Mở nhanh liên hệ"
+              }
+              title={
+                activeModal === "contact"
+                  ? "Đóng liên hệ"
+                  : activeContactLabel
+                    ? `Liên hệ: ${activeContactLabel}`
+                    : "Mở nhanh liên hệ"
+              }
+              whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition ${activeModal === "contact"
+                ? "border-cyan-200/75 bg-[linear-gradient(135deg,#d8f6ff,#72bed6)] text-[#09202a] shadow-[0_14px_38px_rgba(69,177,211,0.28)]"
+                : activeContactOption
+                  ? "border-emerald-200/40 bg-[linear-gradient(145deg,rgba(12,38,31,0.97),rgba(5,16,13,0.98))] text-emerald-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)]"
+                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45"
+                }`}
+              onClick={() => {
+                setIsMobileCategoryMenuOpen(false);
+                setIsHeaderActionsMenuOpen(false);
+                if (activeModal === "contact") {
+                  closeModal();
+                  return;
+                }
+                openModal("contact");
+              }}
+            >
+              {activeModal === "contact" ? (
+                <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+              ) : (
+                <FiPhone aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               )}
             </motion.button>
 
@@ -17388,7 +17427,7 @@ export default function LocalProductsPage() {
                                             toolUrl,
                                             `${tool.popupNamePrefix}-${activeFacebookPage.id}`,
                                             facebookLinkOpenSettings[
-                                            getFacebookPageToolOpenKey(tool.id)
+                                              getFacebookPageToolOpenKey(tool.id)
                                             ],
                                           );
                                         }}
