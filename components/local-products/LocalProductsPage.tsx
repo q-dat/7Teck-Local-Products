@@ -37,6 +37,7 @@ import {
   FiRefreshCcw,
   FiRotateCw,
   FiSearch,
+  FiSettings,
   FiShare2,
   FiTrash2,
   FiUploadCloud,
@@ -196,6 +197,18 @@ type DevicePreferences = {
   isHeaderVisible: boolean;
 };
 
+type FacebookLinkOpenKey =
+  | "search"
+  | "pagePost"
+  | "pageStory"
+  | "duplicate"
+  | "group";
+type FacebookLinkOpenMode = "tab" | "popup";
+type FacebookLinkOpenSettings = Record<
+  FacebookLinkOpenKey,
+  FacebookLinkOpenMode
+>;
+
 type ExportPayload = {
   version: 21;
   settings: GlobalSettings;
@@ -302,6 +315,7 @@ type ModalName =
   | "imageAlbum"
   | "imageDownload"
   | "localImageManager"
+  | "facebookLinkSettings"
   | "";
 
 type CategoryTab = "all" | string;
@@ -465,6 +479,65 @@ const FACEBOOK_RECENT_POSTS_FILTER =
   "eyJyZWNlbnRfcG9zdHM6MCI6IntcIm5hbWVcIjpcInJlY2VudF9wb3N0c1wiLFwiYXJnc1wiOlwiXCJ9In0=";
 const DEFAULT_FACEBOOK_SEARCH_QUERY = "";
 const FACEBOOK_SEARCH_POPUP_COUNT = 4;
+const FACEBOOK_LINK_OPEN_SETTINGS_STORAGE_KEY =
+  "local-products-facebook-link-open-settings-v1";
+const defaultFacebookLinkOpenSettings: FacebookLinkOpenSettings = {
+  search: "tab",
+  pagePost: "tab",
+  pageStory: "tab",
+  duplicate: "tab",
+  group: "tab",
+};
+
+const normalizeFacebookLinkOpenMode = (value: unknown): FacebookLinkOpenMode =>
+  value === "popup" ? "popup" : "tab";
+
+const normalizeFacebookLinkOpenSettings = (value: unknown): FacebookLinkOpenSettings => {
+  if (!value || typeof value !== "object") {
+    return defaultFacebookLinkOpenSettings;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    search: normalizeFacebookLinkOpenMode(record.search),
+    pagePost: normalizeFacebookLinkOpenMode(record.pagePost),
+    pageStory: normalizeFacebookLinkOpenMode(record.pageStory),
+    duplicate: normalizeFacebookLinkOpenMode(record.duplicate),
+    group: normalizeFacebookLinkOpenMode(record.group),
+  };
+};
+
+const loadFacebookLinkOpenSettings = (): FacebookLinkOpenSettings => {
+  if (typeof window === "undefined") return defaultFacebookLinkOpenSettings;
+
+  try {
+    const raw = window.localStorage.getItem(
+      FACEBOOK_LINK_OPEN_SETTINGS_STORAGE_KEY,
+    );
+
+    return raw
+      ? normalizeFacebookLinkOpenSettings(JSON.parse(raw) as unknown)
+      : defaultFacebookLinkOpenSettings;
+  } catch {
+    return defaultFacebookLinkOpenSettings;
+  }
+};
+
+const saveFacebookLinkOpenSettings = (
+  settings: FacebookLinkOpenSettings,
+): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      FACEBOOK_LINK_OPEN_SETTINGS_STORAGE_KEY,
+      JSON.stringify(settings),
+    );
+  } catch {
+    return;
+  }
+};
 
 const loadDownloadedProductIds = (): Set<string> => {
   if (typeof window === "undefined") return new Set<string>();
@@ -596,11 +669,9 @@ const getActiveInteractionWindow = (): Window => {
   return window;
 };
 
-type FacebookWindowOpenMode = "popup" | "tab";
-
 type FacebookWindowOpenResult = {
   window: Window | null;
-  mode: FacebookWindowOpenMode;
+  mode: FacebookLinkOpenMode;
   usedPopupFallback: boolean;
 };
 
@@ -627,15 +698,14 @@ const hasActivePictureInPictureWindow = (): boolean => {
   return Boolean(pictureInPictureWindow && !pictureInPictureWindow.closed);
 };
 
-const openFacebookPopupWindow = (
+const openFacebookWindow = (
   openerWindow: Window,
   url: string,
   popupId: string,
+  mode: FacebookLinkOpenMode,
 ): FacebookWindowOpenResult => {
-  // Khi Local Product Manager đang ở Document PiP, mở Share bằng _blank
-  // để Chrome xử lý như tab bình thường thay vì sinh thêm popup từ PiP.
-  if (hasActivePictureInPictureWindow()) {
-    const newTab = openerWindow.open(url, "_blank");
+  if (mode === "tab" || hasActivePictureInPictureWindow()) {
+    const newTab = openerWindow.open(url, "_blank", "noopener,noreferrer");
 
     if (!newTab) {
       return { window: null, mode: "tab", usedPopupFallback: false };
@@ -647,9 +717,6 @@ const openFacebookPopupWindow = (
 
   const safePopupId = popupId.replace(/[^a-zA-Z0-9_-]/gu, "-");
   const popupName = `facebook-${safePopupId}-${crypto.randomUUID()}`;
-
-  // Chế độ bình thường luôn ưu tiên cửa sổ popup riêng.
-  // Không truyền width/height/position; Chrome tự quyết định kích thước.
   const popupWindow = openerWindow.open(url, popupName, "popup");
 
   if (popupWindow) {
@@ -657,8 +724,7 @@ const openFacebookPopupWindow = (
     return { window: popupWindow, mode: "popup", usedPopupFallback: false };
   }
 
-  // Popup bị chặn/lỗi: thử _blank đúng theo fallback mong muốn.
-  const fallbackTab = openerWindow.open(url, "_blank");
+  const fallbackTab = openerWindow.open(url, "_blank", "noopener,noreferrer");
 
   if (!fallbackTab) {
     return { window: null, mode: "tab", usedPopupFallback: true };
@@ -2275,6 +2341,10 @@ const FACEBOOK_PAGE_URL_TOOLS = [
     createUrl: createMetaBusinessStoryComposerUrl,
   },
 ] as const;
+
+const getFacebookPageToolOpenKey = (
+  toolId: (typeof FACEBOOK_PAGE_URL_TOOLS)[number]["id"],
+): FacebookLinkOpenKey => toolId === "post" ? "pagePost" : "pageStory";
 
 const normalizeMetaBusinessDuplicateUrl = (value: string): string => {
   return value.trim();
@@ -4832,6 +4902,8 @@ export default function LocalProductsPage() {
   );
   const [isFacebookSearchDialogOpen, setIsFacebookSearchDialogOpen] =
     useState<boolean>(false);
+  const [facebookLinkOpenSettings, setFacebookLinkOpenSettings] =
+    useState<FacebookLinkOpenSettings>(() => loadFacebookLinkOpenSettings());
   const [editingId, setEditingId] = useState<string>("");
   const [query, setQuery] = useState<string>("");
   const [productRenderState, setProductRenderState] = useState<{
@@ -5053,6 +5125,37 @@ export default function LocalProductsPage() {
     isHeaderVisible,
     selectedContactId,
   ]);
+
+  useEffect(() => {
+    saveFacebookLinkOpenSettings(facebookLinkOpenSettings);
+  }, [facebookLinkOpenSettings]);
+
+  useEffect(() => {
+    const handleFacebookLinkSettingsStorage = (event: StorageEvent): void => {
+      if (event.key !== FACEBOOK_LINK_OPEN_SETTINGS_STORAGE_KEY) return;
+
+      try {
+        setFacebookLinkOpenSettings(
+          event.newValue
+            ? normalizeFacebookLinkOpenSettings(
+              JSON.parse(event.newValue) as unknown,
+            )
+            : defaultFacebookLinkOpenSettings,
+        );
+      } catch {
+        setFacebookLinkOpenSettings(defaultFacebookLinkOpenSettings);
+      }
+    };
+
+    window.addEventListener("storage", handleFacebookLinkSettingsStorage);
+
+    return () => {
+      window.removeEventListener(
+        "storage",
+        handleFacebookLinkSettingsStorage,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     setActiveCategoryTab(loadActiveCategoryTab());
@@ -5668,6 +5771,40 @@ export default function LocalProductsPage() {
       const interactionWindow = getActiveInteractionWindow();
       const facebookSearchUrl =
         createFacebookRecentPostsSearchUrl(searchQuery);
+
+      if (facebookLinkOpenSettings.search === "tab" || hasActivePictureInPictureWindow()) {
+        const openedTabs: Window[] = [];
+
+        for (let index = 0; index < FACEBOOK_SEARCH_POPUP_COUNT; index += 1) {
+          const searchWindow = interactionWindow.open(
+            facebookSearchUrl,
+            "_blank",
+            "noopener,noreferrer",
+          );
+
+          if (!searchWindow) continue;
+
+          focusOpenedWindow(searchWindow);
+          openedTabs.push(searchWindow);
+        }
+
+        if (openedTabs.length === 0) {
+          Toastify(
+            "Trình duyệt đã chặn tab Facebook Search. Hãy cho phép mở tab mới.",
+            400,
+          );
+          return false;
+        }
+
+        Toastify(
+          openedTabs.length === FACEBOOK_SEARCH_POPUP_COUNT
+            ? `Đã mở ${openedTabs.length} tab Facebook Search`
+            : `Đã mở ${openedTabs.length}/${FACEBOOK_SEARCH_POPUP_COUNT} tab Facebook Search`,
+          openedTabs.length === FACEBOOK_SEARCH_POPUP_COUNT ? 200 : 300,
+        );
+        return true;
+      }
+
       const availableScreen =
         interactionWindow.screen as ScreenWithAvailablePosition;
       const availableWidth = Math.max(
@@ -5678,25 +5815,6 @@ export default function LocalProductsPage() {
         480,
         availableScreen.availHeight || interactionWindow.innerHeight,
       );
-
-      if (availableWidth < 768) {
-        const searchWindow = interactionWindow.open(
-          facebookSearchUrl,
-          "facebook-search-mobile",
-          "popup=yes,resizable=yes,scrollbars=yes",
-        );
-
-        if (!searchWindow) {
-          Toastify("Trình duyệt đã chặn tab Facebook Search", 400);
-          return false;
-        }
-
-        searchWindow.opener = null;
-        searchWindow.focus();
-        Toastify("Đã mở Facebook Search", 200);
-        return true;
-      }
-
       const columnCount = 2;
       const rowCount = 2;
       const gap = 10;
@@ -5757,7 +5875,6 @@ export default function LocalProductsPage() {
       }
 
       openedWindows[0]?.focus();
-
       Toastify(
         openedWindows.length === FACEBOOK_SEARCH_POPUP_COUNT
           ? `Đã mở và sắp xếp ${openedWindows.length} popup Facebook Search`
@@ -5766,7 +5883,9 @@ export default function LocalProductsPage() {
       );
 
       return true;
-    }, []);
+    },
+    [facebookLinkOpenSettings.search],
+  );
 
   const handleSubmitFacebookSearch = (
     event: FormEvent<HTMLFormElement>,
@@ -7749,11 +7868,13 @@ export default function LocalProductsPage() {
     openerWindow: Window,
     url: string,
     popupId: string,
+    openMode: FacebookLinkOpenMode,
   ): void => {
-    const openResult = openFacebookPopupWindow(
+    const openResult = openFacebookWindow(
       openerWindow,
       url,
       popupId,
+      openMode,
     );
 
     if (!openResult.window) {
@@ -7799,6 +7920,7 @@ export default function LocalProductsPage() {
       openerWindow,
       url,
       `duplicate-${activeFacebookPage.id}-${option.id}`,
+      facebookLinkOpenSettings.duplicate,
     );
   };
 
@@ -10058,10 +10180,11 @@ export default function LocalProductsPage() {
       return;
     }
 
-    const composerOpenResult = openFacebookPopupWindow(
+    const composerOpenResult = openFacebookWindow(
       openerWindow,
       composerUrl,
       `composer-${page.id}`,
+      facebookLinkOpenSettings.pagePost,
     );
     const composerWindow = composerOpenResult.window;
 
@@ -10149,10 +10272,11 @@ export default function LocalProductsPage() {
     mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
-    const groupOpenResult = openFacebookPopupWindow(
+    const groupOpenResult = openFacebookWindow(
       openerWindow,
       group.url,
       `group-${group.id}`,
+      facebookLinkOpenSettings.group,
     );
     const groupWindow = groupOpenResult.window;
 
@@ -13398,6 +13522,18 @@ export default function LocalProductsPage() {
 
               <button
                 type="button"
+                data-luxury-accent="sapphire"
+                title="Cài đặt cách mở link Meta, Fanpage và Group"
+                aria-label="Cài đặt cách mở link Meta, Fanpage và Group"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => openModal("facebookLinkSettings")}
+              >
+                <FiSettings aria-hidden="true" className={iconClassName} />
+                Link
+              </button>
+
+              <button
+                type="button"
                 data-luxury-accent="amber"
                 title="Mở công cụ đăng bài, tạo tin và nhân bản Fanpage"
                 aria-label="Mở công cụ Fanpage"
@@ -14412,6 +14548,9 @@ export default function LocalProductsPage() {
                   {activeModal === "facebookDuplicatePosts" ? (
                     <FiShare2 aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "facebookLinkSettings" ? (
+                    <FiSettings aria-hidden="true" className={iconClassName} />
+                  ) : null}
                   {activeModal === "importExport" ? (
                     <FiArchive aria-hidden="true" className={iconClassName} />
                   ) : null}
@@ -14456,6 +14595,9 @@ export default function LocalProductsPage() {
                     {activeModal === "facebookDuplicatePosts"
                       ? "Công cụ Fanpage"
                       : null}
+                    {activeModal === "facebookLinkSettings"
+                      ? "Cài đặt mở link Meta / Facebook"
+                      : null}
                     {activeModal === "importExport"
                       ? "Quản lý dữ liệu"
                       : null}
@@ -14481,6 +14623,97 @@ export default function LocalProductsPage() {
             <div
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
+              {activeModal === "facebookLinkSettings" ? (
+                <section className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                  <article className="border border-[#d8c99f]/20 bg-[#d8c99f]/[0.06] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="text-xs font-black text-white">
+                          Cách mở link
+                        </h3>
+                        <p className="mt-1 text-[10px] leading-4 text-[#eadfbe]/80">
+                          Mặc định là tab mới bằng <span className="font-mono text-white">_blank</span>. Có thể đổi riêng từng nhóm nút sang Popup. Trạng thái được lưu trên localStorage của thiết bị này.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 border border-white/10 bg-slate-900/70 px-2 py-1.5 text-[9px] font-black text-slate-200 transition hover:bg-slate-800"
+                        onClick={() =>
+                          setFacebookLinkOpenSettings(defaultFacebookLinkOpenSettings)
+                        }
+                      >
+                        Đặt mặc định
+                      </button>
+                    </div>
+
+                    <div className="mt-3 grid gap-2">
+                      {([
+                        ["search", "Facebook Search (4 link)"],
+                        ["pagePost", "Fanpage Post / Tạo bài"],
+                        ["pageStory", "Fanpage Story / Tạo tin"],
+                        ["duplicate", "Fanpage nhân bản"],
+                        ["group", "Facebook Group"],
+                      ] as const).map(([key, label]) => {
+                        const mode = facebookLinkOpenSettings[key];
+
+                        return (
+                          <div
+                            key={key}
+                            className="grid gap-2 border border-white/10 bg-slate-950/60 p-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black text-white">
+                                {label}
+                              </p>
+                              <p className="mt-0.5 text-[9px] text-slate-500">
+                                {mode === "tab"
+                                  ? "Mở tab mới bằng _blank"
+                                  : "Mở cửa sổ popup"}
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-1 border border-white/10 bg-black/20 p-1">
+                              <button
+                                type="button"
+                                aria-pressed={mode === "tab"}
+                                className={`min-h-8 px-3 py-1.5 text-[9px] font-black transition ${mode === "tab"
+                                  ? "bg-[#d8c99f] text-[#17130a]"
+                                  : "bg-transparent text-slate-400 hover:bg-white/5"
+                                  }`}
+                                onClick={() =>
+                                  setFacebookLinkOpenSettings((current) => ({
+                                    ...current,
+                                    [key]: "tab",
+                                  }))
+                                }
+                              >
+                                _blank
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={mode === "popup"}
+                                className={`min-h-8 px-3 py-1.5 text-[9px] font-black transition ${mode === "popup"
+                                  ? "bg-violet-300 text-slate-950"
+                                  : "bg-transparent text-slate-400 hover:bg-white/5"
+                                  }`}
+                                onClick={() =>
+                                  setFacebookLinkOpenSettings((current) => ({
+                                    ...current,
+                                    [key]: "popup",
+                                  }))
+                                }
+                              >
+                                Popup
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                </section>
+              ) : null}
+
               {activeModal === "localImageManager" ? (
                 <section className="mx-auto flex w-full max-w-5xl flex-col gap-3">
                   <article className="border border-white/10 bg-slate-900 p-3">
@@ -17154,6 +17387,9 @@ export default function LocalProductsPage() {
                                             openerWindow,
                                             toolUrl,
                                             `${tool.popupNamePrefix}-${activeFacebookPage.id}`,
+                                            facebookLinkOpenSettings[
+                                            getFacebookPageToolOpenKey(tool.id)
+                                            ],
                                           );
                                         }}
                                       >
