@@ -9309,11 +9309,11 @@ export default function LocalProductsPage() {
     requestConfirm({
       title: "Xóa dữ liệu hiện tại trước khi khôi phục?",
       description:
-        "Toàn bộ sản phẩm, ảnh và dữ liệu ứng dụng hiện tại sẽ bị xóa. Sau đó trang sẽ tải lại và mở bước chọn tệp backup mới.",
-      confirmLabel: "Xóa và tiếp tục",
+        "Chỉ xóa dữ liệu tĩnh trên thiết bị: localStorage và IndexedDB. MongoDB và Cloudinary không bị thay đổi. Sau đó trang sẽ tải lại và mở bước chọn tệp backup mới.",
+      confirmLabel: "Xóa Local và tiếp tục",
       tone: "danger",
       onConfirm: async () => {
-        setPageLoadingText("Đang xóa toàn bộ dữ liệu hiện tại...");
+        setPageLoadingText("Đang xóa dữ liệu Local hiện tại...");
         await waitForUiPaint();
 
         try {
@@ -9321,8 +9321,7 @@ export default function LocalProductsPage() {
             RESTORE_BACKUP_AFTER_RELOAD_KEY,
             "1",
           );
-          await clearAllLocalProductData();
-          await clearBootstrapCache();
+          await clearAllBrowserLocalData();
           window.location.reload();
         } catch (error) {
           window.sessionStorage.removeItem(RESTORE_BACKUP_AFTER_RELOAD_KEY);
