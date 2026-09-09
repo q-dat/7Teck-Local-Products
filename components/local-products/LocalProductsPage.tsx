@@ -4846,6 +4846,8 @@ export default function LocalProductsPage() {
   );
   const contactSelectionPromptedRef = useRef<boolean>(false);
   const previousContactOptionCountRef = useRef<number>(0);
+  const systemDeleteTapCountRef = useRef<number>(0);
+  const systemDeleteLastTapAtRef = useRef<number>(0);
   const persistedAppStateSignaturesRef = useRef<{
     settings: string;
     scheduleConfig: string;
@@ -5030,9 +5032,6 @@ export default function LocalProductsPage() {
     productsRef.current = products;
   }, [products]);
 
-  const currentLocalImageFiles =
-    localImageView === "trash" ? localTrashImageFiles : localImageFiles;
-  const filteredLocalImageFiles = currentLocalImageFiles;
   const localImageTotalSize = useMemo(
     () => localImageFiles.reduce((total, file) => total + file.size, 0),
     [localImageFiles],
@@ -9334,26 +9333,66 @@ export default function LocalProductsPage() {
     });
   };
 
+  const executeClearAllLocalData = async (): Promise<void> => {
+    setPageLoadingText("Đang xóa MongoDB và ảnh Cloudinary...");
+    await waitForUiPaint();
+
+    try {
+      await clearAllLocalProductData();
+      await clearBootstrapCache();
+      resetLocalProductState();
+      closeAllModals();
+      Toastify("Đã xóa toàn bộ dữ liệu MongoDB và Cloudinary", 200);
+    } finally {
+      setPageLoadingText("");
+    }
+  };
+
   const handleClearAllLocalData = (): void => {
+    if (pendingConfirm || isConfirmExecuting || pageLoadingText) return;
+
+    const now = Date.now();
+    const lastTapAt = systemDeleteLastTapAtRef.current;
+
+    if (lastTapAt > 0 && now - lastTapAt < 1000) {
+      return;
+    }
+
+    systemDeleteLastTapAtRef.current = now;
+    systemDeleteTapCountRef.current += 1;
+
+    if (systemDeleteTapCountRef.current < 3) {
+      return;
+    }
+
+    systemDeleteTapCountRef.current = 0;
+    systemDeleteLastTapAtRef.current = 0;
+
     requestConfirm({
-      title: "Xóa toàn bộ dữ liệu hệ thống?",
+      title: "Xác nhận xóa dữ liệu hệ thống?",
       description:
         "Toàn bộ sản phẩm, cấu hình trong MongoDB và mọi ảnh sản phẩm thuộc thư mục quản lý trên Cloudinary sẽ bị xóa.",
-      confirmLabel: "Xóa toàn bộ dữ liệu",
+      confirmLabel: "Xác nhận xóa",
+      cancelLabel: "Hủy",
       tone: "danger",
-      onConfirm: async () => {
-        setPageLoadingText("Đang xóa MongoDB và ảnh Cloudinary...");
-        await waitForUiPaint();
-
-        try {
-          await clearAllLocalProductData();
-          await clearBootstrapCache();
-          resetLocalProductState();
-          closeAllModals();
-          Toastify("Đã xóa toàn bộ dữ liệu MongoDB và Cloudinary", 200);
-        } finally {
-          setPageLoadingText("");
-        }
+      onCancel: () => {
+        systemDeleteTapCountRef.current = 0;
+        systemDeleteLastTapAtRef.current = 0;
+      },
+      onConfirm: () => {
+        requestConfirm({
+          title: "Xóa dữ liệu hệ thống lần cuối?",
+          description:
+            "Thao tác tiếp theo sẽ xóa toàn bộ dữ liệu MongoDB và ảnh Cloudinary. Không thể hoàn tác.",
+          confirmLabel: "Sẵn sàng xóa",
+          cancelLabel: "Hủy",
+          tone: "danger",
+          onCancel: () => {
+            systemDeleteTapCountRef.current = 0;
+            systemDeleteLastTapAtRef.current = 0;
+          },
+          onConfirm: executeClearAllLocalData,
+        });
       },
     });
   };
@@ -9635,9 +9674,9 @@ export default function LocalProductsPage() {
   };
 
   const openLocalImageManager = (): void => {
-    setLocalImageView("active");
+    setLocalImageView("trash");
     setSelectedLocalImageNames(
-      new Set<string>(localImageFiles.map((file) => file.name)),
+      new Set<string>(localTrashImageFiles.map((file) => file.name)),
     );
     openModal("localImageManager");
 
@@ -9705,6 +9744,46 @@ export default function LocalProductsPage() {
       );
     } finally {
       setIsLocalImageManagerBusy(false);
+    }
+  };
+
+  const handleHeaderLocalImageShortcut = async (): Promise<void> => {
+    if (isLocalImageManagerBusy) return;
+
+    setIsHeaderActionsMenuOpen(false);
+    setLocalImageView("trash");
+    setSelectedLocalImageNames(new Set<string>());
+    setIsLocalImageManagerBusy(true);
+    setPageLoadingText("Đang chuyển toàn bộ ảnh vào _trash...");
+    await waitForUiPaint();
+
+    try {
+      const handle = await getWritableLocalImageDirectory();
+      if (!handle) return;
+
+      const names = localImageFiles.map((file) => file.name);
+      if (names.length > 0) {
+        await moveLocalImagesToTrash(handle, names);
+      }
+
+      await applyLocalImageDirectorySnapshot(handle, "trash");
+      openModal("localImageManager");
+      Toastify(
+        names.length > 0
+          ? `Đã chuyển ${names.length} ảnh vào _trash`
+          : "Không có ảnh đang dùng để chuyển vào _trash",
+        200,
+      );
+    } catch (error) {
+      if (!isAbortError(error)) {
+        Toastify(
+          error instanceof Error ? error.message : "Không thể chuyển ảnh vào _trash",
+          400,
+        );
+      }
+    } finally {
+      setIsLocalImageManagerBusy(false);
+      setPageLoadingText("");
     }
   };
 
@@ -13074,13 +13153,31 @@ export default function LocalProductsPage() {
 
         .local-products-workspace .floating-workspace-actions {
           left: 0.75rem;
+          right: auto;
           bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+        }
+
+        .local-products-workspace .floating-scroll-top {
+          position: fixed !important;
+          left: calc(0.75rem + 44px + 0.5rem) !important;
+          right: auto !important;
+          bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)) !important;
+          z-index: 1005 !important;
         }
 
         @media (min-width: 1280px) {
           .local-products-workspace .floating-workspace-actions {
-            left: 1rem;
+            left: auto;
+            right: 1rem;
             bottom: 72px;
+          }
+
+          .local-products-workspace .floating-scroll-top {
+            position: fixed !important;
+            left: 1rem !important;
+            right: auto !important;
+            bottom: 72px !important;
+            z-index: 1005 !important;
           }
         }
 
@@ -13464,7 +13561,7 @@ export default function LocalProductsPage() {
                 title="Quản lý ảnh trong thư mục đã chọn"
                 aria-label="Quản lý ảnh trên máy"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
-                onClick={openLocalImageManager}
+                onClick={() => void handleHeaderLocalImageShortcut()}
               >
                 <FiArchive aria-hidden="true" className={iconClassName} />
                 Ảnh máy
@@ -13872,11 +13969,26 @@ export default function LocalProductsPage() {
           </div>
 
           <div
-            className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+            className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:grid xl:grid-cols-2 xl:grid-rows-2 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
           >
-            <motion.button
-              type="button"
-              aria-controls="header-action-menu"
+            <div className="flex items-center gap-2 xl:contents">
+              <motion.button
+                type="button"
+                aria-label="Chuyển ảnh trên máy vào _trash"
+                title="Ảnh máy: chuyển toàn bộ ảnh vào _trash"
+                whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                className={`hidden h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-1 xl:row-start-2 xl:flex ${isLocalImageManagerBusy
+                  ? "border-slate-600/60 bg-slate-800/90 text-slate-500"
+                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45 hover:text-[#f3e7c6]"
+                  }`}
+                onClick={() => void handleHeaderLocalImageShortcut()}
+              >
+                {isLocalImageManagerBusy ? <FiRotateCw aria-hidden="true" className="h-6 w-6 animate-spin xl:h-5 xl:w-5" /> : <FiArchive aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />}
+              </motion.button>
+
+              <motion.button
+                type="button"
+                aria-controls="header-action-menu"
               aria-expanded={isHeaderActionsMenuOpen}
               aria-label={
                 isHeaderActionsMenuOpen
@@ -13889,7 +14001,7 @@ export default function LocalProductsPage() {
                   : "Mở menu chức năng"
               }
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition ${isHeaderActionsMenuOpen
+              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
                 ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                 : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                 }`}
@@ -13903,7 +14015,8 @@ export default function LocalProductsPage() {
               ) : (
                 <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               )}
-            </motion.button>
+              </motion.button>
+            </div>
 
             <motion.button
               type="button"
@@ -13921,7 +14034,7 @@ export default function LocalProductsPage() {
                     : "Mở nhanh liên hệ"
               }
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition ${activeModal === "contact"
+              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-1 ${activeModal === "contact"
                 ? "border-cyan-200/75 bg-[linear-gradient(135deg,#d8f6ff,#72bed6)] text-[#09202a] shadow-[0_14px_38px_rgba(69,177,211,0.28)]"
                 : activeContactOption
                   ? "border-emerald-200/40 bg-[linear-gradient(145deg,rgba(12,38,31,0.97),rgba(5,16,13,0.98))] text-emerald-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)]"
@@ -13943,27 +14056,27 @@ export default function LocalProductsPage() {
                 <FiPhone aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
               )}
             </motion.button>
+          </div>
 
-            <AnimatePresence initial={false}>
-              {isScrollTopVisible ? (
-                <motion.button
-                  type="button"
-                  initial={{ opacity: 0, x: -8, scale: 0.9 }}
-                  animate={{ opacity: 1, x: 0, scale: 1 }}
-                  exit={{ opacity: 0, x: -6, scale: 0.9 }}
+          <AnimatePresence initial={false}>
+            {isScrollTopVisible ? (
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, x: -8, scale: 0.9 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: -6, scale: 0.9 }}
                   transition={{
                     duration: prefersReducedMotion ? 0.1 : 0.2,
                   }}
                   aria-label="Cuộn lên đầu trang"
-                  title="Lên đầu trang"
-                  className="flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
-                  onClick={handleScrollToTop}
-                >
-                  <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                title="Lên đầu trang"
+                className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
+                onClick={handleScrollToTop}
+              >
+                <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
                 </motion.button>
               ) : null}
             </AnimatePresence>
-          </div>
 
           <AnimatePresence initial={false}>
             {draggingCategory ? (
@@ -14758,193 +14871,50 @@ export default function LocalProductsPage() {
               ) : null}
 
               {activeModal === "localImageManager" ? (
-                <section className="mx-auto flex w-full max-w-5xl flex-col gap-3">
-                  <article className="border border-white/10 bg-slate-900 p-3">
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                <section className="grid w-full grid-cols-1 gap-2">
+                  <article className="border border-[#d8c99f]/20 bg-[linear-gradient(145deg,rgba(216,201,159,0.055),rgba(255,255,255,0.012))] p-2.5">
+                    <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                          Thư mục được cấp quyền
-                        </p>
-                        <h3 className={`${fullCardItemNameClassName} mt-1 text-sm font-black text-white`}>
-                          {localImageDirectoryHandle?.name || "Chưa chọn thư mục ảnh"}
-                        </h3>
-                        <p className="mt-1 text-[10px] leading-4 text-slate-400">
-                          Chỉ quản lý file JPG, JPEG, PNG, WebP, HEIC và HEIF ở ngay thư mục này. Không quét toàn ổ D và không quét thư mục con. Thư mục _trash là vùng an toàn của app, không phải Thùng rác Windows.
-                        </p>
-                        <p className="mt-1 text-[10px] font-black text-amber-100">
-                          Quyền: {localImageDirectoryPermission === "granted"
-                            ? "Đã cấp"
-                            : localImageDirectoryPermission === "denied"
-                              ? "Đã từ chối"
-                              : "Cần xác nhận lại"}
-                        </p>
+                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-amber-100/65">Ảnh máy</p>
+                        <h3 className="mt-0.5 truncate text-sm font-black text-white">{localImageDirectoryHandle?.name || "Chưa chọn thư mục ảnh"}</h3>
+                        <p className="mt-1 text-[10px] leading-4 text-slate-500">Chỉ hiển thị ảnh đang nằm trong vùng an toàn _trash.</p>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-1.5 xl:w-[300px]">
-                        <button
-                          type="button"
-                          disabled={isLocalImageManagerBusy || !canUseDirectoryPicker()}
-                          className="border border-cyan-300/35 bg-cyan-300/10 px-3 py-2 text-[10px] font-black text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-40"
-                          onClick={() => void handleChooseLocalImageDirectory()}
-                        >
-                          Chọn thư mục ảnh
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isLocalImageManagerBusy || !localImageDirectoryHandle}
-                          className="border border-white/10 bg-slate-800 px-3 py-2 text-[10px] font-black text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                          onClick={() => void handleRefreshLocalImageDirectory()}
-                        >
-                          Làm mới
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!localImageDirectoryHandle}
-                          className="col-span-2 border border-rose-300/25 bg-rose-300/[0.05] px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40"
-                          onClick={handleForgetLocalImageDirectory}
-                        >
-                          Bỏ liên kết, không xóa file
-                        </button>
-                      </div>
+                      <span className="shrink-0 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[9px] font-black text-amber-100">_trash</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <button type="button" disabled={isLocalImageManagerBusy || !canUseDirectoryPicker()} className="border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1.5 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void handleChooseLocalImageDirectory()}>Chọn thư mục</button>
+                      <button type="button" disabled={isLocalImageManagerBusy || !localImageDirectoryHandle} className="border border-white/10 bg-slate-800 px-2.5 py-1.5 text-[9px] font-black text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void handleRefreshLocalImageDirectory()}>Làm mới</button>
+                      <button type="button" disabled={!localImageDirectoryHandle} className="border border-rose-300/25 bg-rose-300/[0.05] px-2.5 py-1.5 text-[9px] font-black text-rose-100 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40" onClick={handleForgetLocalImageDirectory}>Bỏ liên kết</button>
                     </div>
                   </article>
 
-                  {!canUseDirectoryPicker() ? (
-                    <div className="border border-rose-300/30 bg-rose-300/[0.06] p-3 text-xs leading-5 text-rose-100">
-                      File System Access API không khả dụng. Hãy dùng Chrome/Edge desktop và mở app bằng HTTPS.
-                    </div>
-                  ) : null}
-
-                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                    <div className="border border-white/10 bg-slate-900 p-2.5">
-                      <p className="text-[9px] font-black uppercase text-slate-500">Ảnh chính</p>
-                      <p className="mt-1 text-sm font-black text-white">{localImageFiles.length}</p>
-                    </div>
-                    <div className="border border-white/10 bg-slate-900 p-2.5">
-                      <p className="text-[9px] font-black uppercase text-slate-500">Dung lượng</p>
-                      <p className="mt-1 text-sm font-black text-white">{formatFileSize(localImageTotalSize)}</p>
-                    </div>
-                    <div className="border border-amber-300/20 bg-amber-300/[0.05] p-2.5">
-                      <p className="text-[9px] font-black uppercase text-amber-100/70">Trong _trash</p>
-                      <p className="mt-1 text-sm font-black text-amber-100">{localTrashImageFiles.length}</p>
-                    </div>
-                    <div className="border border-amber-300/20 bg-amber-300/[0.05] p-2.5">
-                      <p className="text-[9px] font-black uppercase text-amber-100/70">Dung lượng _trash</p>
-                      <p className="mt-1 text-sm font-black text-amber-100">{formatFileSize(localTrashImageTotalSize)}</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="border border-amber-300/20 bg-amber-300/[0.045] p-2.5"><p className="text-[8px] font-black uppercase tracking-[0.08em] text-amber-100/60">Trong _trash</p><p className="mt-0.5 text-base font-black text-amber-100">{localTrashImageFiles.length}</p></div>
+                    <div className="border border-amber-300/20 bg-amber-300/[0.045] p-2.5"><p className="text-[8px] font-black uppercase tracking-[0.08em] text-amber-100/60">Dung lượng _trash</p><p className="mt-0.5 text-base font-black text-amber-100">{formatFileSize(localTrashImageTotalSize)}</p></div>
                   </div>
 
-                  <article className="min-w-0 border border-white/10 bg-slate-900 p-3">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        aria-pressed={localImageView === "active"}
-                        className={`border px-3 py-2 text-[10px] font-black transition ${localImageView === "active"
-                          ? "border-cyan-300/50 bg-cyan-300/15 text-cyan-100"
-                          : "border-white/10 bg-slate-800 text-slate-300"}`}
-                        onClick={() => {
-                          setLocalImageView("active");
-                          setSelectedLocalImageNames(
-                            new Set<string>(
-                              localImageFiles.map((file) => file.name),
-                            ),
-                          );
-                        }}
-                      >
-                        Ảnh đang dùng
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={localImageView === "trash"}
-                        className={`border px-3 py-2 text-[10px] font-black transition ${localImageView === "trash"
-                          ? "border-amber-300/50 bg-amber-300/15 text-amber-100"
-                          : "border-white/10 bg-slate-800 text-slate-300"}`}
-                        onClick={() => {
-                          setLocalImageView("trash");
-                          setSelectedLocalImageNames(
-                            new Set<string>(
-                              localTrashImageFiles.map((file) => file.name),
-                            ),
-                          );
-                        }}
-                      >
-                        _trash
-                      </button>
+                  <article className="min-w-0 border border-white/10 bg-slate-900/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div><h3 className="text-xs font-black text-white">Ảnh trong _trash</h3><p className="mt-0.5 text-[9px] text-slate-500">Chọn ảnh để khôi phục hoặc xóa vĩnh viễn.</p></div>
+                      <button type="button" disabled={localTrashImageFiles.length === 0 || isLocalImageManagerBusy} className="border border-white/10 bg-slate-800 px-2.5 py-1.5 text-[9px] font-black text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => setSelectedLocalImageNames(new Set<string>(localTrashImageFiles.map((file) => file.name)))}>Chọn tất cả</button>
                     </div>
-
-                    <div className="mt-2 grid grid-cols-1 gap-1.5">
-                      {localImageView === "active" ? (
-                        <div className="grid grid-cols-1 gap-1.5 border border-amber-300/20 bg-amber-300/[0.045] p-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-                          <p className="text-[10px] leading-4 text-amber-50/80">
-                            Đã chọn tự động toàn bộ {selectedLocalImageNames.size} ảnh đang dùng. Bấm Đồng ý để chuyển an toàn vào _trash.
-                          </p>
-                          <button
-                            type="button"
-                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
-                            className="border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[10px] font-black text-amber-100 transition hover:bg-amber-300/20 disabled:opacity-40"
-                            onClick={handleMoveSelectedLocalImagesToTrash}
-                          >
-                            Đồng ý, chuyển vào _trash
-                          </button>
-                        </div>
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      <button type="button" disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy} className="border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handleRestoreSelectedLocalImages}>Khôi phục</button>
+                      <button type="button" disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy} className="border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handlePermanentlyDeleteSelectedLocalImages}>Xóa vĩnh viễn</button>
+                    </div>
+                    <div className="mt-2 max-h-[42dvh] min-w-0 overflow-y-auto border border-white/10 bg-slate-950/70">
+                      {localTrashImageFiles.length === 0 ? (
+                        <div className="p-5 text-center text-xs text-slate-500">{localImageDirectoryHandle ? "_trash hiện không có ảnh" : "Chọn thư mục ảnh để bắt đầu"}</div>
                       ) : (
-                        <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                          <button
-                            type="button"
-                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
-                            className="border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/20 disabled:opacity-40"
-                            onClick={handleRestoreSelectedLocalImages}
-                          >
-                            Khôi phục {selectedLocalImageNames.size || "ảnh"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy}
-                            className="border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/20 disabled:opacity-40"
-                            onClick={handlePermanentlyDeleteSelectedLocalImages}
-                          >
-                            Xóa vĩnh viễn
-                          </button>
-                        </div>
+                        localTrashImageFiles.slice(0, LOCAL_IMAGE_RENDER_LIMIT).map((file) => (
+                          <div key={`trash-${file.name}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.06] p-2 last:border-b-0">
+                            <span className="min-w-0"><span className="block truncate text-[10px] font-black text-slate-100" title={file.name}>{file.name}</span><span className="mt-0.5 block text-[9px] text-slate-500">{new Date(file.lastModified).toLocaleString("vi-VN")}</span></span>
+                            <span className="text-[9px] font-black text-slate-400">{formatFileSize(file.size)}</span>
+                          </div>
+                        ))
                       )}
                     </div>
-
-                    <div className="mt-3 max-h-[52dvh] min-w-0 overflow-y-auto border border-white/10 bg-slate-950/60">
-                      {filteredLocalImageFiles.length === 0 ? (
-                        <div className="p-5 text-center text-xs text-slate-500">
-                          {localImageDirectoryHandle
-                            ? "Không có ảnh phù hợp"
-                            : "Chọn thư mục ảnh để bắt đầu quản lý"}
-                        </div>
-                      ) : (
-                        filteredLocalImageFiles
-                          .slice(0, LOCAL_IMAGE_RENDER_LIMIT)
-                          .map((file) => (
-                            <div
-                              key={`${localImageView}-${file.name}`}
-                              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.06] p-2.5 last:border-b-0"
-                            >
-                              <span className="min-w-0">
-                                <span className="block truncate text-[11px] font-black text-slate-100" title={file.name}>
-                                  {file.name}
-                                </span>
-                                <span className="mt-0.5 block text-[9px] text-slate-500">
-                                  {new Date(file.lastModified).toLocaleString("vi-VN")}
-                                </span>
-                              </span>
-                              <span className="text-[10px] font-black text-slate-400">
-                                {formatFileSize(file.size)}
-                              </span>
-                            </div>
-                          ))
-                      )}
-                    </div>
-
-                    {filteredLocalImageFiles.length > LOCAL_IMAGE_RENDER_LIMIT ? (
-                      <p className="mt-2 text-[10px] text-slate-500">
-                        Đang hiển thị {LOCAL_IMAGE_RENDER_LIMIT}/{filteredLocalImageFiles.length} file để giữ UI nhẹ. Toàn bộ file trong vùng đang mở vẫn được chọn tự động.
-                      </p>
-                    ) : null}
+                    {localTrashImageFiles.length > LOCAL_IMAGE_RENDER_LIMIT ? <p className="mt-2 text-[9px] text-slate-500">Đang hiển thị {LOCAL_IMAGE_RENDER_LIMIT}/{localTrashImageFiles.length} file.</p> : null}
                   </article>
                 </section>
               ) : null}
@@ -17862,9 +17832,10 @@ export default function LocalProductsPage() {
 
                       <button
                         type="button"
-                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-rose-300/40 bg-rose-300/10 px-3 py-2 text-[11px] font-black text-rose-100 transition hover:bg-rose-300/20 active:opacity-80 xl:mt-auto"
+                        aria-disabled="true"
+                        className="mt-3 flex min-h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] font-black text-slate-500 opacity-70 transition hover:bg-slate-800 active:opacity-70 xl:mt-auto"
                         onClick={handleClearAllLocalData}
-                        title="Xóa toàn bộ dữ liệu MongoDB và Cloudinary"
+                        title="Xóa dữ liệu hệ thống"
                       >
                         <FiTrash2
                           aria-hidden="true"
