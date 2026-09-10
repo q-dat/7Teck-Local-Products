@@ -308,6 +308,7 @@ type ModalName =
   | "globalDescription"
   | "shareCopyOption"
   | "contactSelection"
+  | "initialSync"
   | "contact"
   | "facebookPages"
   | "facebookDuplicatePosts"
@@ -4845,6 +4846,7 @@ export default function LocalProductsPage() {
     new Set<string>(),
   );
   const contactSelectionPromptedRef = useRef<boolean>(false);
+  const initialContactSyncPromptedRef = useRef<boolean>(false);
   const previousContactOptionCountRef = useRef<number>(0);
   const systemDeleteTapCountRef = useRef<number>(0);
   const systemDeleteLastTapAtRef = useRef<number>(0);
@@ -7092,6 +7094,9 @@ export default function LocalProductsPage() {
 
     if (receivedFirstContactList && !selectedContactId) {
       contactSelectionPromptedRef.current = false;
+      setModalStack((current) =>
+        current.filter((modalName) => modalName !== "initialSync"),
+      );
     }
 
     const selectedContactExists = settings.contactOptions.some(
@@ -7100,7 +7105,10 @@ export default function LocalProductsPage() {
 
     if (selectedContactExists) {
       setModalStack((current) =>
-        current.filter((modalName) => modalName !== "contactSelection"),
+        current.filter(
+          (modalName) =>
+            modalName !== "contactSelection" && modalName !== "initialSync",
+        ),
       );
       return;
     }
@@ -7108,6 +7116,24 @@ export default function LocalProductsPage() {
     if (selectedContactId) {
       contactSelectionPromptedRef.current = false;
       setSelectedContactId("");
+    }
+
+    if (contactOptionCount === 0) {
+      if (initialContactSyncPromptedRef.current) return;
+
+      initialContactSyncPromptedRef.current = true;
+      setModalStack((current) =>
+        current.includes("initialSync")
+          ? current
+          : [...current, "initialSync"],
+      );
+      return;
+    }
+
+    if (initialContactSyncPromptedRef.current) {
+      setModalStack((current) =>
+        current.filter((modalName) => modalName !== "initialSync"),
+      );
     }
 
     if (contactSelectionPromptedRef.current) return;
@@ -7617,6 +7643,17 @@ export default function LocalProductsPage() {
       current.filter((modalName) => modalName !== "contact"),
     );
     Toastify("Đã chọn liên hệ cho thiết bị này", 200);
+  };
+
+  const handleInitialContactSync = async (): Promise<void> => {
+    setModalStack((current) =>
+      current.filter((modalName) => modalName !== "initialSync"),
+    );
+
+    await handleRefreshCloudData({
+      notifyWhenCurrent: false,
+      notifyOnError: true,
+    });
   };
 
   const confirmInitialContactSelection = (id: string): void => {
@@ -13988,32 +14025,32 @@ export default function LocalProductsPage() {
               <motion.button
                 type="button"
                 aria-controls="header-action-menu"
-              aria-expanded={isHeaderActionsMenuOpen}
-              aria-label={
-                isHeaderActionsMenuOpen
-                  ? "Đóng menu chức năng header"
-                  : "Mở menu chức năng header"
-              }
-              title={
-                isHeaderActionsMenuOpen
-                  ? "Đóng menu chức năng"
-                  : "Mở menu chức năng"
-              }
-              whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
-                ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
-                : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
-                }`}
-              onClick={() => {
-                setIsMobileCategoryMenuOpen(false);
-                setIsHeaderActionsMenuOpen((current) => !current);
-              }}
-            >
-              {isHeaderActionsMenuOpen ? (
-                <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-              ) : (
-                <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-              )}
+                aria-expanded={isHeaderActionsMenuOpen}
+                aria-label={
+                  isHeaderActionsMenuOpen
+                    ? "Đóng menu chức năng header"
+                    : "Mở menu chức năng header"
+                }
+                title={
+                  isHeaderActionsMenuOpen
+                    ? "Đóng menu chức năng"
+                    : "Mở menu chức năng"
+                }
+                whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
+                  ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
+                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
+                  }`}
+                onClick={() => {
+                  setIsMobileCategoryMenuOpen(false);
+                  setIsHeaderActionsMenuOpen((current) => !current);
+                }}
+              >
+                {isHeaderActionsMenuOpen ? (
+                  <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                ) : (
+                  <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                )}
               </motion.button>
             </div>
 
@@ -14064,18 +14101,18 @@ export default function LocalProductsPage() {
                 initial={{ opacity: 0, x: -8, scale: 0.9 }}
                 animate={{ opacity: 1, x: 0, scale: 1 }}
                 exit={{ opacity: 0, x: -6, scale: 0.9 }}
-                  transition={{
-                    duration: prefersReducedMotion ? 0.1 : 0.2,
-                  }}
-                  aria-label="Cuộn lên đầu trang"
+                transition={{
+                  duration: prefersReducedMotion ? 0.1 : 0.2,
+                }}
+                aria-label="Cuộn lên đầu trang"
                 title="Lên đầu trang"
                 className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
                 onClick={handleScrollToTop}
               >
                 <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-                </motion.button>
-              ) : null}
-            </AnimatePresence>
+              </motion.button>
+            ) : null}
+          </AnimatePresence>
 
           <AnimatePresence initial={false}>
             {draggingCategory ? (
@@ -14697,6 +14734,9 @@ export default function LocalProductsPage() {
                     activeModal === "contactSelection" ? (
                     <FiPhone aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "initialSync" ? (
+                    <FiRefreshCcw aria-hidden="true" className={iconClassName} />
+                  ) : null}
                   {activeModal === "facebookPages" ? (
                     <FiShare2 aria-hidden="true" className={iconClassName} />
                   ) : null}
@@ -14742,6 +14782,9 @@ export default function LocalProductsPage() {
                       : null}
                     {activeModal === "contactSelection"
                       ? "Chọn liên hệ của bạn"
+                      : null}
+                    {activeModal === "initialSync"
+                      ? "Đồng bộ dữ liệu ban đầu"
                       : null}
                     {activeModal === "contact" ? "Liên hệ khi copy" : null}
                     {activeModal === "facebookPages"
@@ -16767,6 +16810,48 @@ export default function LocalProductsPage() {
                 </section>
               ) : null}
 
+              {activeModal === "initialSync" ? (
+                <section className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-3">
+                  <article className="rounded-md border border-cyan-300/30 bg-cyan-300/10 p-3">
+                    <h3 className="text-sm font-black text-white">
+                      Chưa có dữ liệu trên thiết bị
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-cyan-100/80">
+                      Thiết bị này hiện chưa có liên hệ hoặc dữ liệu cấu hình. Hãy đồng bộ dữ liệu có sẵn từ Cloud trước khi thiết lập liên hệ.
+                    </p>
+                  </article>
+
+                  <article className="rounded-md border border-white/10 bg-slate-950/60 p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
+                        <FiDatabase aria-hidden="true" className={iconClassName} />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-xs font-black text-white">
+                          Đồng bộ dữ liệu có sẵn
+                        </h3>
+                        <p className="mt-1 text-[11px] leading-5 text-slate-400">
+                          Tải dữ liệu đã có trên MongoDB và Cloudinary về thiết bị này.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={Boolean(pageLoadingText)}
+                      className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2 text-[11px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                      onClick={() => void handleInitialContactSync()}
+                    >
+                      <FiRefreshCcw
+                        aria-hidden="true"
+                        className={`${iconClassName} ${pageLoadingText ? "animate-spin" : ""}`}
+                      />
+                      <span>{pageLoadingText ? "Đang đồng bộ..." : "Đồng bộ dữ liệu"}</span>
+                    </button>
+                  </article>
+                </section>
+              ) : null}
+
               {activeModal === "contactSelection" ? (
                 <section className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-3">
                   <article className="rounded-md border border-emerald-300/30 bg-emerald-300/10 p-3">
@@ -16803,13 +16888,6 @@ export default function LocalProductsPage() {
                         <p className="text-xs leading-5 text-slate-400">
                           Chưa có liên hệ nào. Hãy tạo liên hệ trước khi chọn.
                         </p>
-                        <button
-                          type="button"
-                          className="mt-3 rounded-md border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-xs font-black text-emerald-100 transition hover:bg-emerald-300/20"
-                          onClick={() => openModal("contact")}
-                        >
-                          Mở quản lý Liên hệ
-                        </button>
                       </div>
                     )}
                   </article>
