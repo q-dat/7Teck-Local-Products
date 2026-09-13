@@ -4979,6 +4979,7 @@ export default function LocalProductsPage() {
   >(() => new Set<string>());
   const [includeInternalShareImages, setIncludeInternalShareImages] =
     useState<boolean>(true);
+  const [shareContactId, setShareContactId] = useState<string>("");
   const [skipInternalDownloadImages, setSkipInternalDownloadImages] =
     useState<boolean>(false);
   const [shareDialogStep, setShareDialogStep] =
@@ -5606,6 +5607,30 @@ export default function LocalProductsPage() {
       ) ?? null,
     [selectedFacebookPageId, settings.facebookPages],
   );
+  const shareContactOptions = useMemo(() => {
+    if (settings.contactOptions.length === 0) return [];
+
+    const activeId = shareContactId || selectedContactId;
+    const activeOption = settings.contactOptions.find(
+      (option) => option.id === activeId,
+    );
+
+    if (!activeOption) return settings.contactOptions;
+
+    return [
+      activeOption,
+      ...settings.contactOptions.filter((option) => option.id !== activeOption.id),
+    ];
+  }, [shareContactId, selectedContactId, settings.contactOptions]);
+
+  const shareContactOption = useMemo(
+    () =>
+      settings.contactOptions.find(
+        (option) => option.id === (shareContactId || selectedContactId),
+      ) ?? null,
+    [shareContactId, selectedContactId, settings.contactOptions],
+  );
+
   const facebookDuplicatePostTemplates = settings.facebookDuplicatePosts;
   const facebookDuplicatePostGroups = useMemo(() => {
     const groupedOptions = new Map<
@@ -7350,6 +7375,7 @@ export default function LocalProductsPage() {
           }
 
           setPendingShare(null);
+          setShareContactId("");
           setIncludeInternalShareImages(true);
           setFacebookGroupActiveIndex(0);
         }
@@ -8480,6 +8506,7 @@ export default function LocalProductsPage() {
     setPendingDownload(null);
     setSkipInternalDownloadImages(false);
     setPendingShare(null);
+    setShareContactId("");
     setIncludeInternalShareImages(true);
     setShareDialogStep("share");
     resetContactEditor();
@@ -9886,13 +9913,16 @@ export default function LocalProductsPage() {
 
   const getConfiguredAutoCopyContent = (
     source: AutoCopyContentSource,
+    contactTextOverride?: string,
   ): { label: "Post" | "Cmt"; text: string } => {
+    const contactText = contactTextOverride ?? activeContactText;
+
     if (settings.autoCopyShareMode === "comment") {
       return {
         label: "Cmt",
         text: composeCopyText(
           source.commentText,
-          activeContactText,
+          contactText,
           false,
         ),
       };
@@ -9902,7 +9932,7 @@ export default function LocalProductsPage() {
       label: "Post",
       text: composeCopyText(
         source.postText,
-        activeContactText,
+        contactText,
         includeSocialTags,
       ),
     };
@@ -10075,24 +10105,61 @@ export default function LocalProductsPage() {
     priceText: string,
     contentType: ProductContentType,
     realEstateComment: string,
+    contactId = selectedContactId,
   ): void => {
-    const { label, text } = getConfiguredAutoCopyContent({
-      postText: description,
-      commentText: buildCommentContentText(
-        title,
-        description,
-        priceText,
-        "",
-        contentType,
-        realEstateComment,
-      ),
-    });
+    const contactText = getSelectedContactText(
+      settings.contactOptions,
+      contactId,
+    );
+    const { label, text } = getConfiguredAutoCopyContent(
+      {
+        postText: description,
+        commentText: buildCommentContentText(
+          title,
+          description,
+          priceText,
+          "",
+          contentType,
+          realEstateComment,
+        ),
+      },
+      contactText,
+    );
 
     void handleCopyField(
       shareKey,
       label.toLowerCase(),
       text,
     );
+  };
+
+  const copyShareContentForContact = (contactId: string): void => {
+    if (!pendingShare) return;
+
+    const contactText = getSelectedContactText(
+      settings.contactOptions,
+      contactId,
+    );
+    const { label, text } = getConfiguredAutoCopyContent(
+      {
+        postText: pendingShare.postText,
+        commentText: pendingShare.commentText,
+      },
+      contactText,
+    );
+
+    void handleCopyField(
+      pendingShare.shareKey,
+      label.toLowerCase(),
+      text,
+    );
+  };
+
+  const handleSelectShareContact = (contactId: string): void => {
+    if (isShareExecuting || !pendingShare) return;
+
+    setShareContactId(contactId);
+    copyShareContentForContact(contactId);
   };
 
   const handleShareProduct = (product: LocalProduct): void => {
@@ -10107,6 +10174,7 @@ export default function LocalProductsPage() {
 
     setShareDialogStep("share");
     setIncludeInternalShareImages(true);
+    setShareContactId(selectedContactId);
     setFacebookGroupActiveIndex(0);
     setPendingShare({
       productId: product.id,
@@ -10133,6 +10201,7 @@ export default function LocalProductsPage() {
       product.priceText,
       product.contentType,
       product.realEstateComment,
+      selectedContactId,
     );
   };
 
@@ -10158,6 +10227,7 @@ export default function LocalProductsPage() {
 
     setShareDialogStep("share");
     setIncludeInternalShareImages(true);
+    setShareContactId(selectedContactId);
     setFacebookGroupActiveIndex(0);
     setPendingShare({
       productId: albumSource.productId,
@@ -10184,6 +10254,7 @@ export default function LocalProductsPage() {
       albumSource.priceText,
       albumSource.contentType,
       albumSource.realEstateComment,
+      selectedContactId,
     );
   };
 
@@ -10191,15 +10262,20 @@ export default function LocalProductsPage() {
     request: ShareRequest,
     mode: Exclude<ShareContentMode, "imagesOnly">,
   ): string => {
+    const shareContactText = getSelectedContactText(
+      settings.contactOptions,
+      shareContactId || selectedContactId,
+    );
+
     return mode === "post"
       ? composeCopyText(
         request.postText,
-        activeContactText,
+        shareContactText,
         includeSocialTags,
       )
       : composeCopyText(
         request.commentText,
-        activeContactText,
+        shareContactText,
         false,
       );
   };
@@ -10326,6 +10402,7 @@ export default function LocalProductsPage() {
     }
 
     setPendingShare(null);
+    setShareContactId("");
     setIncludeInternalShareImages(true);
     setShareDialogStep("share");
     setIsShareExecuting(false);
@@ -10710,6 +10787,7 @@ export default function LocalProductsPage() {
       Toastify("Không thể chia sẻ hoặc copy nội dung", 400);
     } finally {
       setPendingShare(null);
+      setShareContactId("");
       setIncludeInternalShareImages(true);
       setShareDialogStep("share");
       setFacebookGroupActiveIndex(0);
@@ -18550,6 +18628,7 @@ export default function LocalProductsPage() {
                 className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#d8c99f]/25 bg-[#d8c99f]/[0.06] text-[#eadfbe] transition hover:border-[#d8c99f]/50 hover:bg-[#d8c99f]/10 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
                 onClick={() => {
                   setPendingShare(null);
+                  setShareContactId("");
                   setIncludeInternalShareImages(true);
                   setShareDialogStep("share");
                   setFacebookGroupActiveIndex(0);
@@ -18603,7 +18682,7 @@ export default function LocalProductsPage() {
               </span>
             </button>
 
-            <section className="mt-2 border border-[#d8c99f]/20 bg-slate-950/45 p-2">
+            <section className="mt-2 border border-white/10 bg-slate-950/55 p-2">
               {shareDialogStep === "facebookGroup" ? (
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -18624,7 +18703,15 @@ export default function LocalProductsPage() {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isShareExecuting}
+                    className="col-span-2 min-h-12 border border-[#f2d58b]/80 bg-[linear-gradient(135deg,#f6e8b9_0%,#d8b75b_52%,#efd995_100%)] p-3 text-xs font-black !text-[#17130a] shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_7px_20px_rgba(216,183,91,0.18)] transition hover:brightness-105 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                    onClick={() => void executeShareRequest("imagesOnly")}
+                  >
+                    Chỉ hình ảnh
+                  </button>
                   <button
                     type="button"
                     disabled={isShareExecuting}
@@ -18641,26 +18728,73 @@ export default function LocalProductsPage() {
                   >
                     Cmt
                   </button>
-                  <button
-                    type="button"
-                    disabled={isShareExecuting}
-                    className="min-h-11 border border-white/15 bg-slate-800/80 p-3 text-xs font-black text-white transition hover:border-white/25 hover:bg-slate-700 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
-                    onClick={() => void executeShareRequest("imagesOnly")}
-                  >
-                    Chỉ hình ảnh
-                  </button>
                 </div>
               )}
+
+              {shareDialogStep === "share" ? (
+                <div className="mt-2 border border-emerald-300/25 bg-emerald-300/[0.045] p-2">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-[0.12em] text-emerald-200/80">
+                        Liên hệ cho lượt share này
+                      </p>
+                      <p className="mt-0.5 text-[8px] leading-4 text-slate-500">
+                        Mặc định lấy liên hệ đang chọn trong Setting. Chọn mục khác chỉ thay nội dung đã copy của lượt Share này, không đổi liên hệ mặc định.
+                      </p>
+                    </div>
+                    <span className="shrink-0 border border-emerald-200/30 bg-emerald-200/10 px-2 py-1 text-[8px] font-black text-emerald-100">
+                      {shareContactOption ? "TẠM THỜI" : "CHƯA CÓ"}
+                    </span>
+                  </div>
+
+                  {shareContactOptions.length > 0 ? (
+                    <div className="mt-2 h-[72px] snap-y snap-mandatory space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                      {shareContactOptions.map((option, index) => {
+                        const isActiveContact =
+                          option.id === (shareContactId || selectedContactId);
+
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            disabled={isShareExecuting}
+                            aria-pressed={isActiveContact}
+                            className={`flex min-h-11 w-full snap-start items-center gap-2 border p-2 text-left transition active:opacity-80 disabled:cursor-wait disabled:opacity-50 ${isActiveContact
+                              ? "border-emerald-200/65 bg-emerald-200/15 text-emerald-50 shadow-[inset_3px_0_0_rgba(167,243,208,0.8)]"
+                              : "border-white/10 bg-slate-950/65 text-slate-300 hover:border-emerald-200/35 hover:bg-emerald-200/[0.06]"
+                              }`}
+                            onClick={() => handleSelectShareContact(option.id)}
+                          >
+                            <span className={`flex h-6 w-6 shrink-0 items-center justify-center border text-[8px] font-black ${isActiveContact
+                              ? "border-emerald-200/55 bg-emerald-200/20 text-emerald-50"
+                              : "border-white/10 bg-slate-900 text-slate-500"
+                              }`}>
+                              {isActiveContact ? "✓" : index + 1}
+                            </span>
+                            <span className="min-w-0 flex-1 break-words text-[9px] font-black leading-4">
+                              {option.text}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="mt-2 border border-dashed border-emerald-300/20 bg-black/15 p-2 text-[9px] text-slate-500">
+                      Chưa có liên hệ trong Setting.
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </section>
 
             {shareDialogStep === "share" ? (
               <div className="mt-2 grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
-                <section className="flex min-w-0 flex-col border border-[#d8c99f]/25 bg-[#d8c99f]/[0.055] p-2.5">
+                <section className="flex min-w-0 flex-col border border-sky-300/25 bg-sky-300/[0.055] p-2.5">
                   {settings.facebookPages.length > 0 ? (
                     <>
-                      <div className="mb-3 flex items-center justify-between gap-2 border-b border-[#d8c99f]/15 pb-2">
+                      <div className="mb-3 flex items-center justify-between gap-2 border-b border-sky-300/15 pb-2">
                         <div>
-                          <p className="text-[10px] font-black text-[#eadfbe]">
+                          <p className="text-[10px] font-black text-sky-100">
                             Fanpage Facebook
                           </p>
                           <p className="mt-0.5 text-[9px] text-slate-500">
@@ -18668,7 +18802,7 @@ export default function LocalProductsPage() {
                             Composer
                           </p>
                         </div>
-                        <span className="border border-[#d8c99f]/25 bg-[#d8c99f]/10 px-2 py-1 text-[9px] font-black text-[#eadfbe]">
+                        <span className="border border-sky-200/30 bg-sky-200/10 px-2 py-1 text-[9px] font-black text-sky-100">
                           Page
                         </span>
                       </div>
@@ -18738,6 +18872,7 @@ export default function LocalProductsPage() {
                       className="w-full border border-dashed border-[#d8c99f]/30 bg-black/20 px-3 py-2 text-[10px] font-black text-[#eadfbe] transition hover:bg-[#d8c99f]/[0.08] disabled:opacity-40"
                       onClick={() => {
                         setPendingShare(null);
+                        setShareContactId("");
                         setIncludeInternalShareImages(true);
                         openModal("facebookPages");
                       }}
@@ -18747,19 +18882,19 @@ export default function LocalProductsPage() {
                   )}
                 </section>
 
-                <section className="flex min-w-0 flex-col border border-violet-300/25 bg-violet-300/[0.055] p-2.5">
+                <section className="flex min-w-0 flex-col border border-fuchsia-300/25 bg-fuchsia-300/[0.055] p-2.5">
                   {selectedFacebookGroups.length > 0 ? (
                     <>
-                      <div className="flex min-w-0 items-start justify-between gap-2 border-b border-violet-300/15 pb-2">
+                      <div className="flex min-w-0 items-start justify-between gap-2 border-b border-fuchsia-300/15 pb-2">
                         <div className="min-w-0">
-                          <p className="text-[10px] font-black text-violet-100">
+                          <p className="text-[10px] font-black text-fuchsia-100">
                             Danh sách Group Facebook
                           </p>
                           <p className="mt-0.5 text-[9px] leading-4 text-slate-500">
                             Meta Post/Cmt copy nội dung, tải ảnh chính và mở Group
                           </p>
                         </div>
-                        <span className="shrink-0 border border-violet-200/35 bg-violet-200/10 px-2 py-1 text-[9px] font-black text-violet-100">
+                        <span className="shrink-0 border border-fuchsia-200/35 bg-fuchsia-200/10 px-2 py-1 text-[9px] font-black text-fuchsia-100">
                           {selectedFacebookGroups.length} Group
                         </span>
                       </div>
@@ -18943,6 +19078,7 @@ export default function LocalProductsPage() {
                       className="w-full border border-dashed border-violet-300/30 bg-black/20 px-3 py-2 text-[10px] font-black text-violet-100 transition hover:bg-violet-300/[0.08] disabled:opacity-40"
                       onClick={() => {
                         setPendingShare(null);
+                        setShareContactId("");
                         setIncludeInternalShareImages(true);
                         openModal("facebookPages");
                       }}
