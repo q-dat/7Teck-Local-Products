@@ -43,6 +43,8 @@ import {
   FiTrash2,
   FiUploadCloud,
   FiX,
+  FiChevronLeft,
+  FiChevronRight,
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -5007,6 +5009,8 @@ export default function LocalProductsPage() {
   const activeModal = modalStack[modalStack.length - 1] ?? "";
   const [selectedSlotId, setSelectedSlotId] = useState<string>("");
   const [selectedAlbumImageId, setSelectedAlbumImageId] = useState<string>("");
+  const [albumLightboxIndex, setAlbumLightboxIndex] = useState<number | null>(null);
+  const albumFullscreenRef = useRef<HTMLDivElement | null>(null);
   const [selectedAlbumImageIds, setSelectedAlbumImageIds] = useState<
     Set<string>
   >(() => new Set<string>());
@@ -6616,6 +6620,41 @@ export default function LocalProductsPage() {
     );
   }, [albumImages, selectedAlbumImageId]);
 
+  const handleOpenAlbumFullscreen = useCallback(async (index: number): Promise<void> => {
+    if (index < 0 || index >= albumImages.length) return;
+
+    const fullscreenElement = albumFullscreenRef.current;
+
+    if (!fullscreenElement) {
+      Toastify("Không thể mở ảnh toàn màn hình", 400);
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement !== fullscreenElement) {
+        await fullscreenElement.requestFullscreen();
+      }
+
+      setAlbumLightboxIndex(index);
+    } catch (error: unknown) {
+      setAlbumLightboxIndex(null);
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        Toastify("Vui lòng bấm trực tiếp vào ảnh để mở toàn màn hình", 300);
+        return;
+      }
+
+      Toastify("Không thể mở ảnh toàn màn hình", 400);
+    }
+  }, [albumImages.length]);
+
+  const handleCloseAlbumFullscreen = useCallback((): void => {
+    setAlbumLightboxIndex(null);
+
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, []);
+
   const activeScheduleProducts = useMemo(() => {
     return products.filter((product) => !product.isDone);
   }, [products]);
@@ -7336,6 +7375,25 @@ export default function LocalProductsPage() {
         return;
       }
 
+      if (albumLightboxIndex !== null) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          handleCloseAlbumFullscreen();
+          return;
+        }
+
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          setAlbumLightboxIndex((current) => {
+            if (current === null || albumImages.length === 0) return current;
+
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            return (current + direction + albumImages.length) % albumImages.length;
+          });
+          return;
+        }
+      }
+
       if (event.key !== "Escape") return;
 
       if (isHeaderActionsMenuOpen) {
@@ -7408,6 +7466,9 @@ export default function LocalProductsPage() {
     };
   }, [
     activeModal,
+    albumImages.length,
+    albumLightboxIndex,
+    handleCloseAlbumFullscreen,
     pendingDownload,
     pendingShare,
     shareDialogStep,
@@ -18266,14 +18327,33 @@ export default function LocalProductsPage() {
 
                     <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/35 p-2  ">
                       {selectedAlbumImage ? (
-                        <div className="flex h-full min-h-0 w-full  items-center justify-center overflow-hidden">
-                          <img
-                            src={selectedAlbumImage.dataUrl}
-                            alt={selectedAlbumImage.name}
-                            width={1600}
-                            height={1600}
-                            className="block h-auto max-h-full w-auto max-w-full object-contain"
-                          />
+                        <div className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden">
+                          <button
+                            type="button"
+                            className="group relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/70"
+                            onClick={() => {
+                              const imageIndex = albumImages.findIndex(
+                                (image) => image.id === selectedAlbumImage.id,
+                              );
+
+                              if (imageIndex >= 0) {
+                                void handleOpenAlbumFullscreen(imageIndex);
+                              }
+                            }}
+                            title="Mở ảnh toàn màn hình"
+                            aria-label="Mở ảnh toàn màn hình"
+                          >
+                            <img
+                              src={selectedAlbumImage.dataUrl}
+                              alt={selectedAlbumImage.name}
+                              width={1600}
+                              height={1600}
+                              className="block h-auto max-h-full w-auto max-w-full object-contain transition duration-300 group-hover:scale-[1.01]"
+                            />
+                            <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 border border-white/10 bg-black/60 px-2 py-1 text-[9px] font-black text-slate-200 opacity-0 backdrop-blur transition duration-200 group-hover:opacity-100">
+                              Bấm để xem toàn màn hình
+                            </span>
+                          </button>
                         </div>
                       ) : (
                         <FiImage
@@ -18356,6 +18436,107 @@ export default function LocalProductsPage() {
           </div>
         </div>
       ) : null}
+{activeModal === "imageAlbum" && albumSource ? (
+  <div
+    ref={albumFullscreenRef}
+    className={`fixed inset-0 z-[1000002] m-0 flex h-dvh w-dvw items-center justify-center overflow-hidden border-0 bg-black p-0 ${
+      albumLightboxIndex === null
+        ? "pointer-events-none opacity-0"
+        : "opacity-100"
+    }`}
+    role="dialog"
+    aria-modal={albumLightboxIndex !== null}
+    aria-hidden={albumLightboxIndex === null}
+    aria-label="Xem ảnh toàn màn hình"
+  >
+    {albumLightboxIndex !== null && albumImages[albumLightboxIndex] ? (
+      <>
+        <img
+          src={albumImages[albumLightboxIndex].dataUrl}
+          alt={albumImages[albumLightboxIndex].name}
+          className="block h-dvh w-dvw object-contain"
+        />
+
+        <div className="pointer-events-none absolute bottom-5 right-5 z-30 flex max-w-[calc(100vw-1.25rem)] justify-end px-0">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/15 bg-black/75 p-2 shadow-xl backdrop-blur-md">
+            {/* Prev */}
+            <button
+              type="button"
+              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
+              onClick={() =>
+                setAlbumLightboxIndex((current) => {
+                  if (current === null || albumImages.length === 0) {
+                    return current;
+                  }
+
+                  return (
+                    (current - 1 + albumImages.length) %
+                    albumImages.length
+                  );
+                })
+              }
+              disabled={albumImages.length <= 1}
+              aria-label="Ảnh trước"
+              title="Ảnh trước"
+            >
+              <FiChevronLeft
+                aria-hidden="true"
+                className="h-7 w-7"
+              />
+            </button>
+
+            {/* Counter */}
+            <span
+              className="min-w-12 px-1 text-center text-xs font-semibold tabular-nums text-white/85"
+              aria-live="polite"
+            >
+              {albumLightboxIndex + 1} / {albumImages.length}
+            </span>
+
+            {/* Next */}
+            <button
+              type="button"
+              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
+              onClick={() =>
+                setAlbumLightboxIndex((current) => {
+                  if (current === null || albumImages.length === 0) {
+                    return current;
+                  }
+
+                  return (
+                    (current + 1) % albumImages.length
+                  );
+                })
+              }
+              disabled={albumImages.length <= 1}
+              aria-label="Ảnh tiếp theo"
+              title="Ảnh tiếp theo"
+            >
+              <FiChevronRight
+                aria-hidden="true"
+                className="h-7 w-7"
+              />
+            </button>
+
+            {/* Close - nằm ngay bên phải Next */}
+            <button
+              type="button"
+              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95"
+              onClick={handleCloseAlbumFullscreen}
+              aria-label="Đóng xem toàn màn hình"
+              title="Đóng"
+            >
+              <FiX
+                aria-hidden="true"
+                className="h-6 w-6"
+              />
+            </button>
+          </div>
+        </div>
+      </>
+    ) : null}
+  </div>
+) : null}
 
       {pendingConfirm ? (
         <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center p-2">
