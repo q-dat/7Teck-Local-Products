@@ -12011,6 +12011,16 @@ export default function LocalProductsPage() {
           scrollbar-width: thin;
         }
 
+        /* iOS Safari: keep the page layout fixed when form controls receive focus.
+           Controls below 16px trigger the browser's automatic focus zoom. */
+        @media (max-width: 1279px) {
+          .local-products-workspace input,
+          .local-products-workspace textarea,
+          .local-products-workspace select {
+            font-size: 16px !important;
+          }
+        }
+
         .local-products-workspace *::-webkit-scrollbar {
           width: 6px;
           height: 6px;
