@@ -372,6 +372,83 @@ type ShareRequest = {
   successMessage: string;
 };
 
+type PersistedShareModalState = {
+  pendingShare: ShareRequest;
+  includeInternalShareImages: boolean;
+  shareContactId: string;
+  shareDialogStep: ShareDialogStep;
+  facebookGroupActiveIndex: number;
+};
+
+const SHARE_MODAL_SESSION_STORAGE_KEY = "local-products-share-modal-state-v1";
+
+const loadPersistedShareModalState = (): PersistedShareModalState | null => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(SHARE_MODAL_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<PersistedShareModalState>;
+
+    if (
+      !parsed.pendingShare ||
+      typeof parsed.pendingShare !== "object" ||
+      typeof parsed.pendingShare.productId !== "string" ||
+      typeof parsed.pendingShare.title !== "string" ||
+      !Array.isArray(parsed.pendingShare.images) ||
+      typeof parsed.pendingShare.postText !== "string" ||
+      typeof parsed.pendingShare.commentText !== "string" ||
+      typeof parsed.pendingShare.shareKey !== "string" ||
+      typeof parsed.pendingShare.successMessage !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      pendingShare: parsed.pendingShare as ShareRequest,
+      includeInternalShareImages: parsed.includeInternalShareImages !== false,
+      shareContactId:
+        typeof parsed.shareContactId === "string"
+          ? parsed.shareContactId
+          : "",
+      shareDialogStep:
+        parsed.shareDialogStep === "facebookGroup" ? "facebookGroup" : "share",
+      facebookGroupActiveIndex:
+        typeof parsed.facebookGroupActiveIndex === "number" &&
+          Number.isSafeInteger(parsed.facebookGroupActiveIndex) &&
+          parsed.facebookGroupActiveIndex >= 0
+          ? parsed.facebookGroupActiveIndex
+          : 0,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const savePersistedShareModalState = (state: PersistedShareModalState): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(
+      SHARE_MODAL_SESSION_STORAGE_KEY,
+      JSON.stringify(state),
+    );
+  } catch {
+    return;
+  }
+};
+
+const clearPersistedShareModalState = (): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.removeItem(SHARE_MODAL_SESSION_STORAGE_KEY);
+  } catch {
+    return;
+  }
+};
+
 type PreparedBackup = {
   blob: Blob;
   filename: string;
@@ -4921,7 +4998,9 @@ export default function LocalProductsPage() {
   const [facebookGroupUrlDraft, setFacebookGroupUrlDraft] =
     useState<string>("");
   const [facebookGroupActiveIndex, setFacebookGroupActiveIndex] =
-    useState<number>(0);
+    useState<number>(
+      () => loadPersistedShareModalState()?.facebookGroupActiveIndex ?? 0,
+    );
   const [facebookSearchQuery, setFacebookSearchQuery] = useState<string>(
     DEFAULT_FACEBOOK_SEARCH_QUERY,
   );
@@ -4995,17 +5074,24 @@ export default function LocalProductsPage() {
   >(null);
   const [pendingDownload, setPendingDownload] =
     useState<DownloadRequest | null>(null);
-  const [pendingShare, setPendingShare] = useState<ShareRequest | null>(null);
+  const [pendingShare, setPendingShare] = useState<ShareRequest | null>(
+    () => loadPersistedShareModalState()?.pendingShare ?? null,
+  );
   const [downloadedProductIds, setDownloadedProductIds] = useState<
     Set<string>
   >(() => new Set<string>());
   const [includeInternalShareImages, setIncludeInternalShareImages] =
-    useState<boolean>(true);
-  const [shareContactId, setShareContactId] = useState<string>("");
+    useState<boolean>(
+      () => loadPersistedShareModalState()?.includeInternalShareImages ?? true,
+    );
+  const [shareContactId, setShareContactId] = useState<string>(
+    () => loadPersistedShareModalState()?.shareContactId ?? "",
+  );
   const [skipInternalDownloadImages, setSkipInternalDownloadImages] =
     useState<boolean>(false);
-  const [shareDialogStep, setShareDialogStep] =
-    useState<ShareDialogStep>("share");
+  const [shareDialogStep, setShareDialogStep] = useState<ShareDialogStep>(
+    () => loadPersistedShareModalState()?.shareDialogStep ?? "share",
+  );
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(
     null,
   );
@@ -5052,6 +5138,27 @@ export default function LocalProductsPage() {
     useState<HourlyNotificationConfig>(() => loadHourlyNotificationConfig());
   const hourlyNotificationTimeoutRef = useRef<number | null>(null);
   const hourlyAudioContextRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    if (!pendingShare) {
+      clearPersistedShareModalState();
+      return;
+    }
+
+    savePersistedShareModalState({
+      pendingShare,
+      includeInternalShareImages,
+      shareContactId,
+      shareDialogStep,
+      facebookGroupActiveIndex,
+    });
+  }, [
+    pendingShare,
+    includeInternalShareImages,
+    shareContactId,
+    shareDialogStep,
+    facebookGroupActiveIndex,
+  ]);
 
   useEffect(() => {
     productsRef.current = products;
@@ -7454,6 +7561,7 @@ export default function LocalProductsPage() {
             return;
           }
 
+          clearPersistedShareModalState();
           setPendingShare(null);
           setShareContactId("");
           setIncludeInternalShareImages(true);
@@ -8620,6 +8728,7 @@ export default function LocalProductsPage() {
     setPendingBackup(null);
     setPendingDownload(null);
     setSkipInternalDownloadImages(false);
+    clearPersistedShareModalState();
     setPendingShare(null);
     setShareContactId("");
     setIncludeInternalShareImages(true);
@@ -10498,12 +10607,6 @@ export default function LocalProductsPage() {
       );
     const composerWindow = composerOpenResult.window;
 
-    if (composerOpenResult.usedPopupFallback && composerWindow) {
-      Toastify(
-        "Cửa sổ Meta Business bị chặn, đã tự động chuyển sang tab mới.",
-        300,
-      );
-    }
 
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
@@ -10526,20 +10629,16 @@ export default function LocalProductsPage() {
       if (copiedToClipboard) {
         setCopiedKey(request.shareKey);
         Toastify(
-          `Đã copy ${contentLabel}, ${imageDownloadLabel} và mở ${page.name}`,
+          `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
           200,
         );
       } else {
         Toastify(
-          `${imageDownloadLabel} và đã mở ${page.name}, nhưng không thể tự động copy nội dung`,
+          `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
           300,
         );
       }
 
-      setPendingShare(null);
-      setShareContactId("");
-      setIncludeInternalShareImages(true);
-      setShareDialogStep("share");
       setIsShareExecuting(false);
       return;
     }
@@ -10549,9 +10648,9 @@ export default function LocalProductsPage() {
 
       Toastify(
         copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}; không thể mở Meta Business bằng cửa sổ mới hoặc tab mới`
-          : `${imageDownloadLabel}; không thể mở Meta Business bằng cửa sổ mới hoặc tab mới`,
-        copiedToClipboard ? 300 : 400,
+          ? `Đã copy nội dung, ${imageDownloadLabel}`
+          : imageDownloadLabel,
+        copiedToClipboard ? 200 : 300,
       );
       setIsShareExecuting(false);
       return;
@@ -10563,20 +10662,16 @@ export default function LocalProductsPage() {
     if (copiedToClipboard) {
       setCopiedKey(request.shareKey);
       Toastify(
-        `Đã copy ${contentLabel}, ${imageDownloadLabel} và mở ${page.name}`,
+        `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
         200,
       );
     } else {
       Toastify(
-        `${imageDownloadLabel} và đã mở ${page.name}, nhưng không thể tự động copy nội dung`,
+        `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
         300,
       );
     }
 
-    setPendingShare(null);
-    setShareContactId("");
-    setIncludeInternalShareImages(true);
-    setShareDialogStep("share");
     setIsShareExecuting(false);
   };
 
@@ -10608,20 +10703,17 @@ export default function LocalProductsPage() {
     mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
-    const groupOpenResult = openFacebookWindow(
-      openerWindow,
-      group.url,
-      `group-${group.id}`,
-      facebookLinkOpenSettings.group,
-    );
+    const isNativeTab = facebookLinkOpenSettings.group === "tab";
+    const groupOpenResult: FacebookWindowOpenResult = isNativeTab
+      ? { window: null, mode: "tab", usedPopupFallback: false }
+      : openFacebookWindow(
+        openerWindow,
+        group.url,
+        `group-${group.id}`,
+        facebookLinkOpenSettings.group,
+      );
     const groupWindow = groupOpenResult.window;
 
-    if (groupOpenResult.usedPopupFallback && groupWindow) {
-      Toastify(
-        "Cửa sổ Group bị chặn, đã tự động chuyển sang tab mới.",
-        300,
-      );
-    }
     const textValue = getShareRequestText(request, mode);
     const copyPromise = textValue
       ? copyText(textValue).then(
@@ -10641,9 +10733,9 @@ export default function LocalProductsPage() {
 
       Toastify(
         copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}; không thể mở Group bằng cửa sổ mới hoặc tab mới`
-          : `${imageDownloadLabel}; không thể mở Group bằng cửa sổ mới hoặc tab mới`,
-        copiedToClipboard ? 300 : 400,
+          ? `Đã copy nội dung, ${imageDownloadLabel}`
+          : imageDownloadLabel,
+        copiedToClipboard ? 200 : 300,
       );
       setIsShareExecuting(false);
       return;
@@ -10656,12 +10748,12 @@ export default function LocalProductsPage() {
     if (copiedToClipboard) {
       setCopiedKey(request.shareKey);
       Toastify(
-        `Đã copy ${contentLabel}, ${imageDownloadLabel} và mở ${groupLabel}`,
+        `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
         200,
       );
     } else {
       Toastify(
-        `${imageDownloadLabel} và đã mở ${groupLabel}, nhưng không thể tự động copy nội dung`,
+        `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
         300,
       );
     }
@@ -10958,11 +11050,6 @@ export default function LocalProductsPage() {
 
       Toastify("Không thể chia sẻ hoặc copy nội dung", 400);
     } finally {
-      setPendingShare(null);
-      setShareContactId("");
-      setIncludeInternalShareImages(true);
-      setShareDialogStep("share");
-      setFacebookGroupActiveIndex(0);
       setIsShareExecuting(false);
     }
   };
@@ -19070,6 +19157,7 @@ export default function LocalProductsPage() {
                 disabled={isShareExecuting}
                 className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#d8c99f]/25 bg-[#d8c99f]/[0.06] text-[#eadfbe] transition hover:border-[#d8c99f]/50 hover:bg-[#d8c99f]/10 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
                 onClick={() => {
+                  clearPersistedShareModalState();
                   setPendingShare(null);
                   setShareContactId("");
                   setIncludeInternalShareImages(true);
@@ -19371,6 +19459,7 @@ export default function LocalProductsPage() {
                       disabled={isShareExecuting}
                       className="w-full border border-dashed border-[#d8c99f]/30 bg-black/20 px-3 py-2 text-[10px] font-black text-[#eadfbe] transition hover:bg-[#d8c99f]/[0.08] disabled:opacity-40"
                       onClick={() => {
+                        clearPersistedShareModalState();
                         setPendingShare(null);
                         setShareContactId("");
                         setIncludeInternalShareImages(true);
@@ -19478,8 +19567,21 @@ export default function LocalProductsPage() {
                                           rel="noopener noreferrer"
                                           aria-label={`Mở ${group.name}`}
                                           className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
-                                          onClick={() => {
-                                            setFacebookGroupActiveIndex(groupIndex);
+                                          onClick={(event) => {
+                                            if (isShareExecuting) {
+                                              event.preventDefault();
+                                              return;
+                                            }
+
+                                            const openerWindow =
+                                              event.currentTarget.ownerDocument.defaultView ??
+                                              window;
+
+                                            handleOpenFacebookGroup(
+                                              openerWindow,
+                                              groupIndex,
+                                              "post",
+                                            );
                                           }}
                                         >
                                           Mở link
@@ -19493,15 +19595,13 @@ export default function LocalProductsPage() {
                                           className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
                                           onClick={(event) => {
                                             const openerWindow =
-                                              event.currentTarget.ownerDocument.defaultView ?? window;
+                                              event.currentTarget.ownerDocument.defaultView ??
+                                              window;
 
-                                            setFacebookGroupActiveIndex(groupIndex);
-
-                                            openFacebookUrl(
+                                            handleOpenFacebookGroup(
                                               openerWindow,
-                                              group.url,
-                                              `group-${group.id}`,
-                                              facebookLinkOpenSettings.group,
+                                              groupIndex,
+                                              "post",
                                             );
                                           }}
                                         >
@@ -19596,6 +19696,7 @@ export default function LocalProductsPage() {
                       disabled={isShareExecuting}
                       className="w-full border border-dashed border-violet-300/30 bg-black/20 px-3 py-2 text-[10px] font-black text-violet-100 transition hover:bg-violet-300/[0.08] disabled:opacity-40"
                       onClick={() => {
+                        clearPersistedShareModalState();
                         setPendingShare(null);
                         setShareContactId("");
                         setIncludeInternalShareImages(true);
