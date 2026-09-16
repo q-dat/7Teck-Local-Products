@@ -19271,7 +19271,7 @@ export default function LocalProductsPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   aria-disabled={isShareExecuting}
-                                  className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                  className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 p-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
                                   onClick={(event) => {
                                     if (isShareExecuting) {
                                       event.preventDefault();
@@ -19297,7 +19297,7 @@ export default function LocalProductsPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   aria-disabled={isShareExecuting}
-                                  className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                  className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 p-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
                                   onClick={(event) => {
                                     if (isShareExecuting) {
                                       event.preventDefault();
@@ -19358,7 +19358,7 @@ export default function LocalProductsPage() {
                                   Meta Cmt
                                 </button>
                               </>)}
-                            </article>
+                          </article>
                         ))}
                       </div>
                       <p className="mt-auto pt-3 text-[9px] leading-4 text-slate-400">
@@ -19419,13 +19419,12 @@ export default function LocalProductsPage() {
                                 ({ option: group, index: groupIndex }) => {
                                   const isActiveGroup =
                                     groupIndex ===
-                                    facebookGroupActiveIndex %
-                                    selectedFacebookGroups.length;
+                                    facebookGroupActiveIndex % selectedFacebookGroups.length;
 
                                   return (
                                     <article
                                       key={group.id}
-                                      className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-stretch gap-1.5 border p-1.5 transition ${isActiveGroup
+                                      className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 border p-1.5 transition ${isActiveGroup
                                         ? "border-[#f0e3c0]/65 bg-[linear-gradient(135deg,rgba(216,201,159,0.16),rgba(139,92,246,0.08))] shadow-[inset_3px_0_0_rgba(240,227,192,0.75),0_8px_24px_rgba(0,0,0,0.18)]"
                                         : "border-white/10 bg-slate-950/55 hover:border-violet-300/30 hover:bg-violet-300/[0.06]"
                                         }`}
@@ -19435,9 +19434,7 @@ export default function LocalProductsPage() {
                                         disabled={isShareExecuting}
                                         aria-pressed={isActiveGroup}
                                         className="flex min-w-0 cursor-pointer items-center gap-2 px-1.5 py-1 text-left disabled:cursor-wait disabled:opacity-50"
-                                        onClick={() =>
-                                          setFacebookGroupActiveIndex(groupIndex)
-                                        }
+                                        onClick={() => setFacebookGroupActiveIndex(groupIndex)}
                                       >
                                         <span
                                           aria-hidden="true"
@@ -19446,20 +19443,29 @@ export default function LocalProductsPage() {
                                             : "border-slate-600 bg-slate-900"
                                             }`}
                                         />
+
                                         <span className="min-w-0 flex-1">
                                           <span className="mb-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-violet-200/75">
                                             {normalizeCategoryName(group.category) ||
                                               "Chưa phân loại"}
                                           </span>
-                                          <span className={`block whitespace-normal break-words text-[10px] font-black ${isActiveGroup ? "text-[#f4e8c7]" : "text-slate-200"}`}>
+
+                                          <span
+                                            className={`block whitespace-normal break-words text-[10px] font-black ${isActiveGroup
+                                              ? "text-[#f4e8c7]"
+                                              : "text-slate-200"
+                                              }`}
+                                          >
                                             {group.name}
                                           </span>
+
                                           <span className="mt-0.5 block truncate text-[8px] text-slate-500">
                                             {group.url}
                                           </span>
                                         </span>
+
                                         {isActiveGroup ? (
-                                          <span className="shrink-0 border border-[#f0e3c0]/40 bg-[#f0e3c0]/10 px-1.5 py-0.5 text-[8px] font-black text-[#f4e8c7]">
+                                          <span className="shrink-0 border border-[#f0e3c0]/40 bg-[#f0e3c0]/10 p-2 text-[8px] font-black text-[#f4e8c7]">
                                             ACTIVE
                                           </span>
                                         ) : null}
@@ -19471,12 +19477,12 @@ export default function LocalProductsPage() {
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           aria-label={`Mở ${group.name}`}
-                                          className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
+                                          className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
                                           onClick={() => {
                                             setFacebookGroupActiveIndex(groupIndex);
                                           }}
                                         >
-                                          Mở
+                                          Mở link
                                         </a>
                                       ) : (
                                         <button
@@ -19484,13 +19490,13 @@ export default function LocalProductsPage() {
                                           disabled={isShareExecuting}
                                           title={`Mở ${group.name}`}
                                           aria-label={`Mở ${group.name}`}
-                                          className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                          className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
                                           onClick={(event) => {
                                             const openerWindow =
-                                              event.currentTarget.ownerDocument.defaultView ??
-                                              window;
+                                              event.currentTarget.ownerDocument.defaultView ?? window;
 
                                             setFacebookGroupActiveIndex(groupIndex);
+
                                             openFacebookUrl(
                                               openerWindow,
                                               group.url,
@@ -19499,7 +19505,7 @@ export default function LocalProductsPage() {
                                             );
                                           }}
                                         >
-                                          Mở
+                                          Mở link
                                         </button>
                                       )}
 
@@ -19508,7 +19514,7 @@ export default function LocalProductsPage() {
                                         disabled={isShareExecuting}
                                         title={`Copy link ${group.name}`}
                                         aria-label={`Copy link ${group.name}`}
-                                        className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] px-2 py-1.5 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                        className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] p-2 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
                                         onClick={() => {
                                           setFacebookGroupActiveIndex(groupIndex);
                                           void copyFacebookUrl(
