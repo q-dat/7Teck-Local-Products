@@ -35,6 +35,8 @@ import {
   FiMonitor,
   FiPhone,
   FiPlus,
+  FiLock,
+  FiUnlock,
   FiRefreshCcw,
   FiRotateCw,
   FiSearch,
@@ -319,6 +321,7 @@ type ModalName =
   | "imageDownload"
   | "localImageManager"
   | "facebookLinkSettings"
+  | "writeAccessDenied"
   | "";
 
 type CategoryTab = "all" | string;
@@ -4869,6 +4872,23 @@ export default function LocalProductsPage() {
     },
     [],
   );
+  const [isWriteAccessUnlocked, setIsWriteAccessUnlocked] =
+    useState<boolean>(false);
+
+  const requestWriteAccess = useCallback((): boolean => {
+    if (isWriteAccessUnlocked) return true;
+
+    setModalStack((current) => {
+      if (current[current.length - 1] === "writeAccessDenied") return current;
+      return [...current, "writeAccessDenied"];
+    });
+    return false;
+  }, [isWriteAccessUnlocked]);
+
+  const toggleWriteAccess = useCallback((): void => {
+    setIsWriteAccessUnlocked((current) => !current);
+  }, []);
+
   const [products, setProducts] = useState<LocalProduct[]>([]);
   const [cacheSyncVersion, setCacheSyncVersion] = useState<number>(0);
   const [availableRemoteSyncVersion, setAvailableRemoteSyncVersion] =
@@ -6148,6 +6168,8 @@ export default function LocalProductsPage() {
       targetKey?: string,
       position: CategoryDropPosition = "after",
     ): void => {
+      if (!requestWriteAccess()) return;
+
       const sourceCategory = categories.find(
         (category) => normalizeTextKey(category) === sourceKey,
       );
@@ -6182,7 +6204,7 @@ export default function LocalProductsPage() {
       }));
       Toastify("Đã lưu thứ tự danh mục", 200);
     },
-    [categories],
+    [categories, requestWriteAccess],
   );
 
   const handleCategoryDragStart = (
@@ -7597,6 +7619,8 @@ export default function LocalProductsPage() {
     key: Key,
     value: ProductDraft[Key],
   ): void => {
+    if (!requestWriteAccess()) return;
+
     setDraft((current) => ({
       ...current,
       [key]: value,
@@ -7607,6 +7631,8 @@ export default function LocalProductsPage() {
     key: Key,
     value: GlobalSettings[Key],
   ): void => {
+    if (!requestWriteAccess()) return;
+
     setSettings((current) => ({
       ...current,
       [key]: value,
@@ -7614,6 +7640,8 @@ export default function LocalProductsPage() {
   };
 
   const updateDraftCategoryColor = (color: string): void => {
+    if (!requestWriteAccess()) return;
+
     const categoryKey = normalizeTextKey(draft.category);
 
     if (!categoryKey || !CATEGORY_COLOR_PATTERN.test(color)) return;
@@ -7628,6 +7656,8 @@ export default function LocalProductsPage() {
   };
 
   const resetDraftCategoryColor = (): void => {
+    if (!requestWriteAccess()) return;
+
     const categoryKey = normalizeTextKey(draft.category);
 
     if (!categoryKey) return;
@@ -7656,6 +7686,8 @@ export default function LocalProductsPage() {
   };
 
   const saveContactOption = (): void => {
+    if (!requestWriteAccess()) return;
+
     const text = contactDraft.trim();
 
     if (!text) {
@@ -7721,6 +7753,8 @@ export default function LocalProductsPage() {
   };
 
   const removeContactOption = (id: string): void => {
+    if (!requestWriteAccess()) return;
+
     const option = settings.contactOptions.find((item) => item.id === id);
     if (!option) return;
 
@@ -7766,6 +7800,8 @@ export default function LocalProductsPage() {
   };
 
   const saveFacebookPageOption = (): void => {
+    if (!requestWriteAccess()) return;
+
     const assetId = normalizeFacebookAssetId(facebookPageAssetIdDraft);
     const name = facebookPageNameDraft.trim() || `Fanpage ${assetId}`;
 
@@ -7817,6 +7853,8 @@ export default function LocalProductsPage() {
   };
 
   const removeFacebookPageOption = (id: string): void => {
+    if (!requestWriteAccess()) return;
+
     const option = settings.facebookPages.find((item) => item.id === id);
     if (!option) return;
 
@@ -7863,6 +7901,8 @@ export default function LocalProductsPage() {
   };
 
   const saveFacebookDuplicatePostOption = (): void => {
+    if (!requestWriteAccess()) return;
+
     const url = normalizeMetaBusinessDuplicateUrl(facebookDuplicateUrlDraft);
 
     if (!url) return;
@@ -7904,6 +7944,8 @@ export default function LocalProductsPage() {
   };
 
   const removeFacebookDuplicatePostOption = (id: string): void => {
+    if (!requestWriteAccess()) return;
+
     const option = settings.facebookDuplicatePosts.find(
       (item) => item.id === id,
     );
@@ -8020,6 +8062,8 @@ export default function LocalProductsPage() {
   };
 
   const addFacebookGroupOption = (): void => {
+    if (!requestWriteAccess()) return;
+
     const url = normalizeFacebookGroupUrl(facebookGroupUrlDraft);
 
     if (!url) {
@@ -8069,6 +8113,8 @@ export default function LocalProductsPage() {
   };
 
   const updateFacebookGroupOptionName = (id: string, name: string): void => {
+    if (!requestWriteAccess()) return;
+
     setSettings((current) => ({
       ...current,
       facebookGroups: current.facebookGroups.map((group) =>
@@ -8081,6 +8127,8 @@ export default function LocalProductsPage() {
     id: string,
     category: string,
   ): void => {
+    if (!requestWriteAccess()) return;
+
     setSettings((current) => ({
       ...current,
       facebookGroups: current.facebookGroups.map((group) =>
@@ -8090,6 +8138,8 @@ export default function LocalProductsPage() {
   };
 
   const toggleFacebookGroupSelection = (id: string): void => {
+    if (!requestWriteAccess()) return;
+
     setSettings((current) => {
       const selected = current.selectedFacebookGroupIds.includes(id);
 
@@ -8105,6 +8155,8 @@ export default function LocalProductsPage() {
   };
 
   const removeFacebookGroupOption = (id: string): void => {
+    if (!requestWriteAccess()) return;
+
     setSettings((current) => ({
       ...current,
       facebookGroups: current.facebookGroups.filter(
@@ -8120,6 +8172,8 @@ export default function LocalProductsPage() {
     key: Key,
     value: ScheduleConfig[Key],
   ): void => {
+    if (!requestWriteAccess()) return;
+
     setScheduleConfig((current) => ({
       ...current,
       [key]: value,
@@ -8581,6 +8635,8 @@ export default function LocalProductsPage() {
   };
 
   const openProductModalForCreate = (): void => {
+    if (!requestWriteAccess()) return;
+
     releaseUnsubmittedDraftImages();
     setEditingId("");
     setDraft(emptyDraft);
@@ -8592,6 +8648,8 @@ export default function LocalProductsPage() {
     files: File[],
     imageField: ProductImageField = "images",
   ): void => {
+    if (!requestWriteAccess()) return;
+
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
     if (imageFiles.length === 0) {
@@ -8676,6 +8734,8 @@ export default function LocalProductsPage() {
     targetImageField: ProductImageField,
     targetImageId?: string,
   ): void => {
+    if (!requestWriteAccess()) return;
+
     if (sourceImageField === targetImageField) return;
 
     setDraft((current) => {
@@ -8787,6 +8847,8 @@ export default function LocalProductsPage() {
     imageId: string,
     imageField: ProductImageField = "images",
   ): void => {
+    if (!requestWriteAccess()) return;
+
     const removedImage = draft[imageField].find((image) => image.id === imageId);
 
     if (draftPendingImagesRef.current.has(imageId)) {
@@ -8824,6 +8886,8 @@ export default function LocalProductsPage() {
     targetImageId: string,
     imageField: ProductImageField = "images",
   ): void => {
+    if (!requestWriteAccess()) return;
+
     if (!sourceImageId || !targetImageId || sourceImageId === targetImageId)
       return;
 
@@ -8932,6 +8996,7 @@ export default function LocalProductsPage() {
     event: FormEvent<HTMLFormElement>,
   ): void => {
     event.preventDefault();
+    if (!requestWriteAccess()) return;
 
     const now = new Date().toISOString();
     const rawName = draft.name.trim();
@@ -9025,6 +9090,8 @@ export default function LocalProductsPage() {
   };
 
   const handleEdit = (product: LocalProduct): void => {
+    if (!requestWriteAccess()) return;
+
     setEditingId(product.id);
     setDraft({
       name: product.name,
@@ -9046,6 +9113,8 @@ export default function LocalProductsPage() {
   };
 
   const handleDelete = async (id: string): Promise<void> => {
+    if (!requestWriteAccess()) return;
+
     const product = products.find((item) => item.id === id);
     const productName = product?.name ?? "sản phẩm này";
 
@@ -9109,6 +9178,8 @@ export default function LocalProductsPage() {
     product: LocalProduct,
     nextIsDone: boolean,
   ): Promise<void> => {
+    if (!requestWriteAccess()) return;
+
     const productId = product.id;
     const now = new Date().toISOString();
     const nextProduct: LocalProduct = {
@@ -9394,6 +9465,8 @@ export default function LocalProductsPage() {
   };
 
   const handleBeginBackupRestore = (): void => {
+    if (!requestWriteAccess()) return;
+
     if (isBackupRestoreReady) {
       openBackupFilePicker();
       return;
@@ -9426,6 +9499,8 @@ export default function LocalProductsPage() {
   };
 
   const executeClearAllLocalData = async (): Promise<void> => {
+    if (!requestWriteAccess()) return;
+
     setPageLoadingText("Đang xóa MongoDB và ảnh Cloudinary...");
     await waitForUiPaint();
 
@@ -9441,6 +9516,8 @@ export default function LocalProductsPage() {
   };
 
   const handleClearAllLocalData = (): void => {
+    if (!requestWriteAccess()) return;
+
     if (pendingConfirm || isConfirmExecuting || pageLoadingText) return;
 
     const now = Date.now();
@@ -9490,6 +9567,8 @@ export default function LocalProductsPage() {
   };
 
   const handleClearAllBrowserLocalData = (): void => {
+    if (!requestWriteAccess()) return;
+
     requestConfirm({
       title: "Xóa toàn bộ dữ liệu Local trên thiết bị?",
       description:
@@ -9565,6 +9644,8 @@ export default function LocalProductsPage() {
     payload: ParsedImportPayload,
     clearExistingData = true,
   ): Promise<void> => {
+    if (!requestWriteAccess()) return;
+
     try {
       if (clearExistingData) {
         setPageLoadingText("Đang xóa dữ liệu hiện tại...");
@@ -9601,6 +9682,8 @@ export default function LocalProductsPage() {
   const handleImportJson = async (
     event: ChangeEvent<HTMLInputElement>,
   ): Promise<void> => {
+    if (!requestWriteAccess()) return;
+
     const input = event.currentTarget;
     const file = input.files?.[0];
 
@@ -10404,12 +10487,15 @@ export default function LocalProductsPage() {
       return;
     }
 
-    const composerOpenResult = openFacebookWindow(
-      openerWindow,
-      composerUrl,
-      `composer-${page.id}`,
-      facebookLinkOpenSettings.pagePost,
-    );
+    const isNativeTab = facebookLinkOpenSettings.pagePost === "tab";
+    const composerOpenResult: FacebookWindowOpenResult = isNativeTab
+      ? { window: null, mode: "tab", usedPopupFallback: false }
+      : openFacebookWindow(
+        openerWindow,
+        composerUrl,
+        `composer-${page.id}`,
+        facebookLinkOpenSettings.pagePost,
+      );
     const composerWindow = composerOpenResult.window;
 
     if (composerOpenResult.usedPopupFallback && composerWindow) {
@@ -10432,6 +10518,31 @@ export default function LocalProductsPage() {
       request,
       shouldDownload,
     );
+
+    if (!composerWindow && isNativeTab) {
+      const copiedToClipboard = await copyPromise;
+      const contentLabel = mode === "post" ? "Post" : "Cmt";
+
+      if (copiedToClipboard) {
+        setCopiedKey(request.shareKey);
+        Toastify(
+          `Đã copy ${contentLabel}, ${imageDownloadLabel} và mở ${page.name}`,
+          200,
+        );
+      } else {
+        Toastify(
+          `${imageDownloadLabel} và đã mở ${page.name}, nhưng không thể tự động copy nội dung`,
+          300,
+        );
+      }
+
+      setPendingShare(null);
+      setShareContactId("");
+      setIncludeInternalShareImages(true);
+      setShareDialogStep("share");
+      setIsShareExecuting(false);
+      return;
+    }
 
     if (!composerWindow) {
       const copiedToClipboard = await copyPromise;
@@ -11032,6 +11143,8 @@ export default function LocalProductsPage() {
   };
 
   const toggleScheduleCategory = (category: string): void => {
+    if (!requestWriteAccess()) return;
+
     setScheduleConfig((current) => {
       const categoryKey = normalizeTextKey(category);
       const exists = current.selectedCategories.some(
@@ -11082,6 +11195,8 @@ export default function LocalProductsPage() {
     taskIndex: number,
     productId: string,
   ): void => {
+    if (!requestWriteAccess()) return;
+
     const assignmentKey = createScheduleAssignmentKey(
       date,
       slotIndex,
@@ -11215,6 +11330,8 @@ export default function LocalProductsPage() {
   };
 
   const addScheduleTask = (): void => {
+    if (!requestWriteAccess()) return;
+
     setScheduleConfig((current) => {
       const nextTaskCount = Math.min(64, current.taskCount + 1);
 
@@ -11230,6 +11347,8 @@ export default function LocalProductsPage() {
   };
 
   const requestRemoveScheduleTask = (taskIndex: number): void => {
+    if (!requestWriteAccess()) return;
+
     if (scheduleConfig.taskCount <= 1) {
       Toastify("Cần giữ lại ít nhất một task", 300);
       return;
@@ -11239,6 +11358,8 @@ export default function LocalProductsPage() {
   };
 
   const removeScheduleTask = (taskIndexToRemove: number): void => {
+    if (!requestWriteAccess()) return;
+
     setScheduleConfig((current) => {
       const nextTaskCount = Math.max(1, current.taskCount - 1);
       const nextTaskNames = current.taskNames.filter(
@@ -11288,6 +11409,8 @@ export default function LocalProductsPage() {
   };
 
   const updateScheduleTaskName = (taskIndex: number, value: string): void => {
+    if (!requestWriteAccess()) return;
+
     setScheduleConfig((current) => {
       const taskNames = Array.from(
         { length: Math.max(1, current.taskCount) },
@@ -11316,6 +11439,8 @@ export default function LocalProductsPage() {
   };
 
   const autoFillScheduleAssignments = (): void => {
+    if (!requestWriteAccess()) return;
+
     const targetDate = today;
     const targetPrefix = `${targetDate}::task`;
     const slotCount = scheduleTimes.length;
@@ -11403,6 +11528,8 @@ export default function LocalProductsPage() {
   };
 
   const resetActiveScheduleTaskAssignments = (): void => {
+    if (!requestWriteAccess()) return;
+
     const taskPrefix = `${today}::task${activeScheduleTaskIndex + 1}::`;
 
     setScheduleAssignments((current) => {
@@ -11436,6 +11563,8 @@ export default function LocalProductsPage() {
   };
 
   const resetAllScheduleAssignments = (): void => {
+    if (!requestWriteAccess()) return;
+
     const todayPrefix = `${today}::`;
 
     setScheduleAssignments((current) => {
@@ -11486,6 +11615,8 @@ export default function LocalProductsPage() {
   };
 
   const swapPostedRecordKeys = (sourceKey: string, targetKey: string): void => {
+    if (!requestWriteAccess()) return;
+
     setPostedRecords((current) => {
       const sourceRecord = current.find(
         (record) => record.slotId === sourceKey,
@@ -11522,6 +11653,8 @@ export default function LocalProductsPage() {
     targetKey: string,
     productId: string,
   ): void => {
+    if (!requestWriteAccess()) return;
+
     if (!sourceKey || sourceKey === targetKey) return;
 
     setScheduleAssignments((current) => {
@@ -11567,6 +11700,8 @@ export default function LocalProductsPage() {
     slotIndex: number,
     taskIndex = 0,
   ): void => {
+    if (!requestWriteAccess()) return;
+
     const postedKey = createPostedKey(date, slotIndex, taskIndex);
 
     setPostedRecords((current) => {
@@ -13541,6 +13676,16 @@ export default function LocalProductsPage() {
               >
                 <FiArchive aria-hidden="true" className={iconClassName} />
                 Data
+                <span className={`ml-auto inline-flex h-4 w-4 items-center justify-center rounded-sm border ${isWriteAccessUnlocked
+                  ? "border-emerald-300/45 bg-emerald-300/10 text-emerald-200"
+                  : "border-rose-300/35 bg-rose-300/10 text-rose-200"
+                  }`}>
+                  {isWriteAccessUnlocked ? (
+                    <FiUnlock aria-hidden="true" className="h-2.5 w-2.5" />
+                  ) : (
+                    <FiLock aria-hidden="true" className="h-2.5 w-2.5" />
+                  )}
+                </span>
               </button>
 
               <button
@@ -17808,6 +17953,7 @@ export default function LocalProductsPage() {
 
               {activeModal === "importExport" ? (
                 <section className="flex w-full flex-col gap-3">
+
                   <article className="relative overflow-hidden rounded-md border border-amber-200/45 bg-[linear-gradient(135deg,rgba(251,191,36,0.2),rgba(245,158,11,0.08)_55%,rgba(15,23,42,0.9))] p-3 shadow-[0_18px_50px_rgba(245,158,11,0.1)] xl:p-4">
                     <div className="absolute inset-y-0 left-0 w-1 bg-amber-300" />
 
@@ -17990,6 +18136,42 @@ export default function LocalProductsPage() {
                         <span>Xóa toàn bộ dữ liệu</span>
                       </button>
                     </article>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-slate-950/70 p-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ${isWriteAccessUnlocked
+                        ? "border-emerald-300/35 bg-emerald-300/10 text-emerald-200"
+                        : "border-rose-300/30 bg-rose-300/10 text-rose-200"
+                        }`}>
+                        {isWriteAccessUnlocked ? (
+                          <FiUnlock aria-hidden="true" className="h-4 w-4" />
+                        ) : (
+                          <FiLock aria-hidden="true" className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-300">
+                          Quyền chỉnh sửa dữ liệu
+                        </p>
+                        <p className={`mt-0.5 text-[9px] font-bold ${isWriteAccessUnlocked ? "text-emerald-200" : "text-rose-200"}`}>
+                          {isWriteAccessUnlocked ? "Đã mở khóa · Có thể thêm / sửa / xóa" : "Đang khóa · Chỉ được xem và đọc dữ liệu"}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      aria-pressed={isWriteAccessUnlocked}
+                      title={isWriteAccessUnlocked ? "Khóa quyền chỉnh sửa dữ liệu" : "Mở khóa quyền chỉnh sửa dữ liệu"}
+                      className={`flex shrink-0 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-black transition ${isWriteAccessUnlocked
+                        ? "border-rose-300/35 bg-rose-300/10 text-rose-100 hover:bg-rose-300/20"
+                        : "border-emerald-300/35 bg-emerald-300/10 text-emerald-100 hover:bg-emerald-300/20"
+                        }`}
+                      onClick={toggleWriteAccess}
+                    >
+                      {isWriteAccessUnlocked ? <FiLock aria-hidden="true" className="h-3 w-3" /> : <FiUnlock aria-hidden="true" className="h-3 w-3" />}
+                      {isWriteAccessUnlocked ? "Khóa" : "Mở khóa"}
+                    </button>
                   </div>
                 </section>
               ) : null}
@@ -18446,107 +18628,177 @@ export default function LocalProductsPage() {
           </div>
         </div>
       ) : null}
-{activeModal === "imageAlbum" && albumSource ? (
-  <div
-    ref={albumFullscreenRef}
-    className={`fixed inset-0 z-[1000002] m-0 flex h-dvh w-dvw items-center justify-center overflow-hidden border-0 bg-black p-0 ${
-      albumLightboxIndex === null
-        ? "pointer-events-none opacity-0"
-        : "opacity-100"
-    }`}
-    role="dialog"
-    aria-modal={albumLightboxIndex !== null}
-    aria-hidden={albumLightboxIndex === null}
-    aria-label="Xem ảnh toàn màn hình"
-  >
-    {albumLightboxIndex !== null && albumImages[albumLightboxIndex] ? (
-      <>
-        <img
-          src={albumImages[albumLightboxIndex].dataUrl}
-          alt={albumImages[albumLightboxIndex].name}
-          className="block h-dvh w-dvw object-contain"
-        />
-
-        <div className="pointer-events-none absolute bottom-5 right-5 z-30 flex max-w-[calc(100vw-1.25rem)] justify-end px-0">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/15 bg-black/75 p-2 shadow-xl backdrop-blur-md">
-            {/* Prev */}
-            <button
-              type="button"
-              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
-              onClick={() =>
-                setAlbumLightboxIndex((current) => {
-                  if (current === null || albumImages.length === 0) {
-                    return current;
-                  }
-
-                  return (
-                    (current - 1 + albumImages.length) %
-                    albumImages.length
-                  );
-                })
-              }
-              disabled={albumImages.length <= 1}
-              aria-label="Ảnh trước"
-              title="Ảnh trước"
-            >
-              <FiChevronLeft
-                aria-hidden="true"
-                className="h-7 w-7"
+      {activeModal === "imageAlbum" && albumSource ? (
+        <div
+          ref={albumFullscreenRef}
+          className={`fixed inset-0 z-[1000002] m-0 flex h-dvh w-dvw items-center justify-center overflow-hidden border-0 bg-black p-0 ${albumLightboxIndex === null
+            ? "pointer-events-none opacity-0"
+            : "opacity-100"
+            }`}
+          role="dialog"
+          aria-modal={albumLightboxIndex !== null}
+          aria-hidden={albumLightboxIndex === null}
+          aria-label="Xem ảnh toàn màn hình"
+        >
+          {albumLightboxIndex !== null && albumImages[albumLightboxIndex] ? (
+            <>
+              <img
+                src={albumImages[albumLightboxIndex].dataUrl}
+                alt={albumImages[albumLightboxIndex].name}
+                className="block h-dvh w-dvw object-contain"
               />
-            </button>
 
-            {/* Counter */}
-            <span
-              className="min-w-12 px-1 text-center text-xs font-semibold tabular-nums text-white/85"
-              aria-live="polite"
-            >
-              {albumLightboxIndex + 1} / {albumImages.length}
-            </span>
+              <div className="pointer-events-none absolute bottom-5 right-5 z-30 flex max-w-[calc(100vw-1.25rem)] justify-end px-0">
+                <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/15 bg-black/75 p-2 shadow-xl backdrop-blur-md">
+                  {/* Prev */}
+                  <button
+                    type="button"
+                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
+                    onClick={() =>
+                      setAlbumLightboxIndex((current) => {
+                        if (current === null || albumImages.length === 0) {
+                          return current;
+                        }
 
-            {/* Next */}
-            <button
-              type="button"
-              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
-              onClick={() =>
-                setAlbumLightboxIndex((current) => {
-                  if (current === null || albumImages.length === 0) {
-                    return current;
-                  }
+                        return (
+                          (current - 1 + albumImages.length) %
+                          albumImages.length
+                        );
+                      })
+                    }
+                    disabled={albumImages.length <= 1}
+                    aria-label="Ảnh trước"
+                    title="Ảnh trước"
+                  >
+                    <FiChevronLeft
+                      aria-hidden="true"
+                      className="h-7 w-7"
+                    />
+                  </button>
 
-                  return (
-                    (current + 1) % albumImages.length
-                  );
-                })
-              }
-              disabled={albumImages.length <= 1}
-              aria-label="Ảnh tiếp theo"
-              title="Ảnh tiếp theo"
-            >
-              <FiChevronRight
-                aria-hidden="true"
-                className="h-7 w-7"
-              />
-            </button>
+                  {/* Counter */}
+                  <span
+                    className="min-w-12 px-1 text-center text-xs font-semibold tabular-nums text-white/85"
+                    aria-live="polite"
+                  >
+                    {albumLightboxIndex + 1} / {albumImages.length}
+                  </span>
 
-            {/* Close - nằm ngay bên phải Next */}
-            <button
-              type="button"
-              className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95"
-              onClick={handleCloseAlbumFullscreen}
-              aria-label="Đóng xem toàn màn hình"
-              title="Đóng"
-            >
-              <FiX
-                aria-hidden="true"
-                className="h-6 w-6"
-              />
-            </button>
-          </div>
+                  {/* Next */}
+                  <button
+                    type="button"
+                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
+                    onClick={() =>
+                      setAlbumLightboxIndex((current) => {
+                        if (current === null || albumImages.length === 0) {
+                          return current;
+                        }
+
+                        return (
+                          (current + 1) % albumImages.length
+                        );
+                      })
+                    }
+                    disabled={albumImages.length <= 1}
+                    aria-label="Ảnh tiếp theo"
+                    title="Ảnh tiếp theo"
+                  >
+                    <FiChevronRight
+                      aria-hidden="true"
+                      className="h-7 w-7"
+                    />
+                  </button>
+
+                  {/* Close - nằm ngay bên phải Next */}
+                  <button
+                    type="button"
+                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95"
+                    onClick={handleCloseAlbumFullscreen}
+                    aria-label="Đóng xem toàn màn hình"
+                    title="Đóng"
+                  >
+                    <FiX
+                      aria-hidden="true"
+                      className="h-6 w-6"
+                    />
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
-      </>
-    ) : null}
-  </div>
-) : null}
+      ) : null}
+
+      <AnimatePresence>
+        {activeModal === "writeAccessDenied" ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1000002] flex items-center justify-center bg-black/70 px-4 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.97, y: 8 }}
+              className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyan-300/20 bg-[#070d16]/95 p-[1px] shadow-[0_20px_80px_rgba(0,0,0,0.55)]"
+            >
+              <style>{`
+                @keyframes writeAccessLed {
+                  0%, 100% { transform: translateX(-70%); opacity: 0.12; }
+                  50% { transform: translateX(70%); opacity: 0.42; }
+                }
+              `}</style>
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px overflow-hidden bg-cyan-300/10">
+                <div className="h-full w-1/2 bg-cyan-200/45 blur-[2px] [animation:writeAccessLed_3.6s_ease-in-out_infinite]" />
+              </div>
+              <div className="rounded-[7px] border border-white/[0.07] bg-[linear-gradient(145deg,rgba(11,22,35,0.98),rgba(5,10,18,0.98))] p-5">
+                <div className="flex items-start gap-3">
+                  <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-rose-300/25 bg-rose-300/[0.07] text-rose-200 shadow-[0_0_24px_rgba(251,113,133,0.08)]">
+                    <span className="absolute inset-0 rounded-md border border-rose-200/10 [animation:pulse_2.6s_ease-in-out_infinite]" />
+                    <FiLock aria-hidden="true" className="relative h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[9px] font-black uppercase tracking-[0.18em] text-cyan-200/65">ACCESS CONTROL</p>
+                    <h3 className="mt-1 text-base font-black text-white">Bạn cần được cấp quyền</h3>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      Chức năng này đang được khóa để bảo vệ dữ liệu. Vui lòng liên hệ Zalo quản trị viên để được mở quyền chỉnh sửa.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-md border border-cyan-300/10 bg-cyan-300/[0.035] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.08em] text-slate-500">Zalo quản trị viên</p>
+                      <p className="mt-1 font-mono text-sm font-black tracking-[0.08em] text-cyan-100">0333 133 050</p>
+                    </div>
+                    <span className="h-2 w-2 rounded-full bg-cyan-200/60 shadow-[0_0_12px_rgba(165,243,252,0.45)]" />
+                  </div>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <a
+                    href="https://zalo.me/0333133050"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex min-h-10 flex-1 items-center justify-center rounded-md border border-cyan-200/30 bg-cyan-300/10 px-3 py-2 text-[10px] font-black text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-300/15"
+                  >
+                    Liên hệ Zalo quản trị viên
+                  </a>
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-md border border-white/10 bg-white/[0.035] px-3 py-2 text-[10px] font-black text-slate-300 transition hover:bg-white/[0.07]"
+                    onClick={closeModal}
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {pendingConfirm ? (
         <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center p-2">
@@ -19012,44 +19264,101 @@ export default function LocalProductsPage() {
                               </p>
                             </div>
 
-                            <button
-                              type="button"
-                              disabled={isShareExecuting}
-                              className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                              onClick={(event) => {
-                                const openerWindow =
-                                  event.currentTarget.ownerDocument.defaultView ??
-                                  window;
+                            {facebookLinkOpenSettings.pagePost === "tab" ? (
+                              <>
+                                <a
+                                  href={createMetaBusinessComposerUrl(option.assetId)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-disabled={isShareExecuting}
+                                  className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                  onClick={(event) => {
+                                    if (isShareExecuting) {
+                                      event.preventDefault();
+                                      return;
+                                    }
 
-                                handleOpenMetaBusinessComposer(
-                                  openerWindow,
-                                  option,
-                                  "post",
-                                );
-                              }}
-                            >
-                              Meta Post
-                            </button>
+                                    const openerWindow =
+                                      event.currentTarget.ownerDocument.defaultView ??
+                                      window;
 
-                            <button
-                              type="button"
-                              disabled={isShareExecuting}
-                              className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                              onClick={(event) => {
-                                const openerWindow =
-                                  event.currentTarget.ownerDocument.defaultView ??
-                                  window;
+                                    handleOpenMetaBusinessComposer(
+                                      openerWindow,
+                                      option,
+                                      "post",
+                                    );
+                                  }}
+                                >
+                                  Meta Post
+                                </a>
 
-                                handleOpenMetaBusinessComposer(
-                                  openerWindow,
-                                  option,
-                                  "comment",
-                                );
-                              }}
-                            >
-                              Meta Cmt
-                            </button>
-                          </article>
+                                <a
+                                  href={createMetaBusinessComposerUrl(option.assetId)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-disabled={isShareExecuting}
+                                  className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                  onClick={(event) => {
+                                    if (isShareExecuting) {
+                                      event.preventDefault();
+                                      return;
+                                    }
+
+                                    const openerWindow =
+                                      event.currentTarget.ownerDocument.defaultView ??
+                                      window;
+
+                                    handleOpenMetaBusinessComposer(
+                                      openerWindow,
+                                      option,
+                                      "comment",
+                                    );
+                                  }}
+                                >
+                                  Meta Cmt
+                                </a>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isShareExecuting}
+                                  className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                  onClick={(event) => {
+                                    const openerWindow =
+                                      event.currentTarget.ownerDocument.defaultView ??
+                                      window;
+
+                                    handleOpenMetaBusinessComposer(
+                                      openerWindow,
+                                      option,
+                                      "post",
+                                    );
+                                  }}
+                                >
+                                  Meta Post
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isShareExecuting}
+                                  className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                  onClick={(event) => {
+                                    const openerWindow =
+                                      event.currentTarget.ownerDocument.defaultView ??
+                                      window;
+
+                                    handleOpenMetaBusinessComposer(
+                                      openerWindow,
+                                      option,
+                                      "comment",
+                                    );
+                                  }}
+                                >
+                                  Meta Cmt
+                                </button>
+                              </>)}
+                            </article>
                         ))}
                       </div>
                       <p className="mt-auto pt-3 text-[9px] leading-4 text-slate-400">
@@ -19082,7 +19391,7 @@ export default function LocalProductsPage() {
                             Danh sách Group Facebook
                           </p>
                           <p className="mt-0.5 text-[9px] leading-4 text-slate-500">
-                            Meta Post/Cmt copy nội dung, tải ảnh chính và mở Group
+                            Mở Group Facebook hoặc copy link Group
                           </p>
                         </div>
                         <span className="shrink-0 border border-fuchsia-200/35 bg-fuchsia-200/10 px-2 py-1 text-[9px] font-black text-fuchsia-100">
@@ -19142,7 +19451,7 @@ export default function LocalProductsPage() {
                                             {normalizeCategoryName(group.category) ||
                                               "Chưa phân loại"}
                                           </span>
-                                          <span className={`block truncate text-[10px] font-black ${isActiveGroup ? "text-[#f4e8c7]" : "text-slate-200"}`}>
+                                          <span className={`block whitespace-normal break-words text-[10px] font-black ${isActiveGroup ? "text-[#f4e8c7]" : "text-slate-200"}`}>
                                             {group.name}
                                           </span>
                                           <span className="mt-0.5 block truncate text-[8px] text-slate-500">
@@ -19156,46 +19465,59 @@ export default function LocalProductsPage() {
                                         ) : null}
                                       </button>
 
+                                      {facebookLinkOpenSettings.group === "tab" ? (
+                                        <a
+                                          href={group.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          aria-label={`Mở ${group.name}`}
+                                          className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
+                                          onClick={() => {
+                                            setFacebookGroupActiveIndex(groupIndex);
+                                          }}
+                                        >
+                                          Mở
+                                        </a>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          disabled={isShareExecuting}
+                                          title={`Mở ${group.name}`}
+                                          aria-label={`Mở ${group.name}`}
+                                          className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                          onClick={(event) => {
+                                            const openerWindow =
+                                              event.currentTarget.ownerDocument.defaultView ??
+                                              window;
+
+                                            setFacebookGroupActiveIndex(groupIndex);
+                                            openFacebookUrl(
+                                              openerWindow,
+                                              group.url,
+                                              `group-${group.id}`,
+                                              facebookLinkOpenSettings.group,
+                                            );
+                                          }}
+                                        >
+                                          Mở
+                                        </button>
+                                      )}
+
                                       <button
                                         type="button"
                                         disabled={isShareExecuting}
-                                        title={`Mở ${group.name}, copy Post và tải ảnh chính`}
-                                        aria-label={`Mở ${group.name}, copy Post và tải ảnh chính`}
-                                        className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={(event) => {
-                                          const openerWindow =
-                                            event.currentTarget.ownerDocument.defaultView ??
-                                            window;
-
-                                          handleOpenFacebookGroup(
-                                            openerWindow,
-                                            groupIndex,
-                                            "post",
-                                          );
-                                        }}
-                                      >
-                                        Meta Post
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        disabled={isShareExecuting}
-                                        title={`Mở ${group.name}, copy Cmt và tải ảnh chính`}
-                                        aria-label={`Mở ${group.name}, copy Cmt và tải ảnh chính`}
+                                        title={`Copy link ${group.name}`}
+                                        aria-label={`Copy link ${group.name}`}
                                         className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] px-2 py-1.5 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={(event) => {
-                                          const openerWindow =
-                                            event.currentTarget.ownerDocument.defaultView ??
-                                            window;
-
-                                          handleOpenFacebookGroup(
-                                            openerWindow,
-                                            groupIndex,
-                                            "comment",
+                                        onClick={() => {
+                                          setFacebookGroupActiveIndex(groupIndex);
+                                          void copyFacebookUrl(
+                                            group.url,
+                                            "Đã copy link Group Facebook",
                                           );
                                         }}
                                       >
-                                        Meta Cmt
+                                        Copy link
                                       </button>
                                     </article>
                                   );
@@ -19213,7 +19535,7 @@ export default function LocalProductsPage() {
                               <p className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-500">
                                 Share Sheet cho Group active
                               </p>
-                              <p className="mt-1 truncate text-[10px] font-black text-[#f4e8c7]">
+                              <p className="mt-1 whitespace-normal break-words text-[10px] font-black text-[#f4e8c7]">
                                 {activeFacebookGroup.name}
                               </p>
                               <p className="mt-0.5 truncate text-[8px] font-bold uppercase tracking-[0.08em] text-violet-200/70">
