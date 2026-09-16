@@ -416,8 +416,8 @@ const loadPersistedShareModalState = (): PersistedShareModalState | null => {
         parsed.shareDialogStep === "facebookGroup" ? "facebookGroup" : "share",
       facebookGroupActiveIndex:
         typeof parsed.facebookGroupActiveIndex === "number" &&
-          Number.isSafeInteger(parsed.facebookGroupActiveIndex) &&
-          parsed.facebookGroupActiveIndex >= 0
+        Number.isSafeInteger(parsed.facebookGroupActiveIndex) &&
+        parsed.facebookGroupActiveIndex >= 0
           ? parsed.facebookGroupActiveIndex
           : 0,
     };
@@ -10605,16 +10605,6 @@ export default function LocalProductsPage() {
         `composer-${page.id}`,
         facebookLinkOpenSettings.pagePost,
       );
-    const composerWindow = composerOpenResult.window;
-
-
-    const textValue = getShareRequestText(request, mode);
-    const copyPromise = textValue
-      ? copyText(textValue).then(
-        () => true,
-        () => false,
-      )
-      : Promise.resolve(false);
 
     setIsShareExecuting(true);
     const imageDownloadLabel = prepareMetaImageDownload(
@@ -10622,56 +10612,7 @@ export default function LocalProductsPage() {
       shouldDownload,
     );
 
-    if (!composerWindow && isNativeTab) {
-      const copiedToClipboard = await copyPromise;
-      const contentLabel = mode === "post" ? "Post" : "Cmt";
-
-      if (copiedToClipboard) {
-        setCopiedKey(request.shareKey);
-        Toastify(
-          `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
-          200,
-        );
-      } else {
-        Toastify(
-          `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
-          300,
-        );
-      }
-
-      setIsShareExecuting(false);
-      return;
-    }
-
-    if (!composerWindow) {
-      const copiedToClipboard = await copyPromise;
-
-      Toastify(
-        copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}`
-          : imageDownloadLabel,
-        copiedToClipboard ? 200 : 300,
-      );
-      setIsShareExecuting(false);
-      return;
-    }
-
-    const copiedToClipboard = await copyPromise;
-    const contentLabel = mode === "post" ? "Post" : "Cmt";
-
-    if (copiedToClipboard) {
-      setCopiedKey(request.shareKey);
-      Toastify(
-        `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
-        200,
-      );
-    } else {
-      Toastify(
-        `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
-        300,
-      );
-    }
-
+    Toastify(imageDownloadLabel, imageDownloadLabel.startsWith("đang tải") ? 200 : 300);
     setIsShareExecuting(false);
   };
 
@@ -10704,23 +10645,15 @@ export default function LocalProductsPage() {
     shouldDownload: boolean,
   ): Promise<void> => {
     const isNativeTab = facebookLinkOpenSettings.group === "tab";
-    const groupOpenResult: FacebookWindowOpenResult = isNativeTab
-      ? { window: null, mode: "tab", usedPopupFallback: false }
-      : openFacebookWindow(
+
+    if (!isNativeTab) {
+      openFacebookWindow(
         openerWindow,
         group.url,
         `group-${group.id}`,
         facebookLinkOpenSettings.group,
       );
-    const groupWindow = groupOpenResult.window;
-
-    const textValue = getShareRequestText(request, mode);
-    const copyPromise = textValue
-      ? copyText(textValue).then(
-        () => true,
-        () => false,
-      )
-      : Promise.resolve(false);
+    }
 
     setIsShareExecuting(true);
     const imageDownloadLabel = prepareMetaImageDownload(
@@ -10728,36 +10661,7 @@ export default function LocalProductsPage() {
       shouldDownload,
     );
 
-    if (!groupWindow) {
-      const copiedToClipboard = await copyPromise;
-
-      Toastify(
-        copiedToClipboard
-          ? `Đã copy nội dung, ${imageDownloadLabel}`
-          : imageDownloadLabel,
-        copiedToClipboard ? 200 : 300,
-      );
-      setIsShareExecuting(false);
-      return;
-    }
-
-    const copiedToClipboard = await copyPromise;
-    const contentLabel = mode === "post" ? "Post" : "Cmt";
-    const groupLabel = group.name.trim() || `Group ${groupIndex + 1}`;
-
-    if (copiedToClipboard) {
-      setCopiedKey(request.shareKey);
-      Toastify(
-        `Đã copy ${contentLabel}, ${imageDownloadLabel}`,
-        200,
-      );
-    } else {
-      Toastify(
-        `${imageDownloadLabel}, nhưng không thể tự động copy nội dung`,
-        300,
-      );
-    }
-
+    Toastify(imageDownloadLabel, imageDownloadLabel.startsWith("đang tải") ? 200 : 300);
     setIsShareExecuting(false);
   };
 
