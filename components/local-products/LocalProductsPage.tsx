@@ -191,12 +191,12 @@ type GlobalSettings = {
   selectedFacebookGroupIds: string[];
   categoryColors: CategoryColorMap;
   categoryOrder: string[];
-  autoCopyShareMode: AutoCopyShareMode;
   updatedAt: string;
 };
 
 type DevicePreferences = {
   includeSocialTags: boolean;
+  autoCopyShareMode: AutoCopyShareMode;
   isCopyNfkcEnabled: boolean;
   selectedContactId: string;
   isHeaderVisible: boolean;
@@ -416,8 +416,8 @@ const loadPersistedShareModalState = (): PersistedShareModalState | null => {
         parsed.shareDialogStep === "facebookGroup" ? "facebookGroup" : "share",
       facebookGroupActiveIndex:
         typeof parsed.facebookGroupActiveIndex === "number" &&
-        Number.isSafeInteger(parsed.facebookGroupActiveIndex) &&
-        parsed.facebookGroupActiveIndex >= 0
+          Number.isSafeInteger(parsed.facebookGroupActiveIndex) &&
+          parsed.facebookGroupActiveIndex >= 0
           ? parsed.facebookGroupActiveIndex
           : 0,
     };
@@ -482,6 +482,7 @@ const DEVICE_PREFERENCES_STORAGE_KEY =
   "local-products-device-preferences-v1";
 const defaultDevicePreferences: DevicePreferences = {
   includeSocialTags: false,
+  autoCopyShareMode: "post",
   isCopyNfkcEnabled: false,
   selectedContactId: "",
   isHeaderVisible: false,
@@ -494,6 +495,8 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
 
   return {
     includeSocialTags: record.includeSocialTags === true,
+    autoCopyShareMode:
+      record.autoCopyShareMode === "comment" ? "comment" : "post",
     isCopyNfkcEnabled: record.isCopyNfkcEnabled === true,
     selectedContactId:
       typeof record.selectedContactId === "string"
@@ -689,7 +692,6 @@ const defaultSettings: GlobalSettings = {
   selectedFacebookGroupIds: [],
   categoryColors: {},
   categoryOrder: [],
-  autoCopyShareMode: "post",
   updatedAt: "",
 };
 
@@ -3103,8 +3105,6 @@ const normalizeGlobalSettings = (
     selectedFacebookGroupIds,
     categoryColors,
     categoryOrder,
-    autoCopyShareMode:
-      record.autoCopyShareMode === "comment" ? "comment" : "post",
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
   };
 };
@@ -5035,6 +5035,8 @@ export default function LocalProductsPage() {
     useState<boolean>(false);
   const [includeSocialTags, setIncludeSocialTags] =
     useState<boolean>(false);
+  const [autoCopyShareMode, setAutoCopyShareMode] =
+    useState<AutoCopyShareMode>("post");
   const [selectedContactId, setSelectedContactId] = useState<string>("");
   const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
@@ -5212,6 +5214,7 @@ export default function LocalProductsPage() {
   useEffect(() => {
     const applyPreferences = (preferences: DevicePreferences): void => {
       setIncludeSocialTags(preferences.includeSocialTags);
+      setAutoCopyShareMode(preferences.autoCopyShareMode);
       setIsCopyNfkcEnabled(preferences.isCopyNfkcEnabled);
       setSelectedContactId(preferences.selectedContactId);
       setIsHeaderVisible(preferences.isHeaderVisible);
@@ -5246,12 +5249,14 @@ export default function LocalProductsPage() {
 
     saveDevicePreferences({
       includeSocialTags,
+      autoCopyShareMode,
       isCopyNfkcEnabled,
       selectedContactId,
       isHeaderVisible,
     });
   }, [
     includeSocialTags,
+    autoCopyShareMode,
     isCopyNfkcEnabled,
     isDevicePreferencesReady,
     isHeaderVisible,
@@ -10170,7 +10175,7 @@ export default function LocalProductsPage() {
   ): { label: "Post" | "Cmt"; text: string } => {
     const contactText = contactTextOverride ?? activeContactText;
 
-    if (settings.autoCopyShareMode === "comment") {
+    if (autoCopyShareMode === "comment") {
       return {
         label: "Cmt",
         text: composeCopyText(
@@ -10289,7 +10294,7 @@ export default function LocalProductsPage() {
     const postText =
       product.description.trim() || settings.commonDescription.trim();
     const autoCopyLabel =
-      settings.autoCopyShareMode === "comment" ? "Cmt" : "Post";
+      autoCopyShareMode === "comment" ? "Cmt" : "Post";
 
     requestDownload({
       productIds: [product.id],
@@ -10981,7 +10986,7 @@ export default function LocalProductsPage() {
     requestDownload({
       productIds: [albumSource.productId],
       title: "Tải ảnh đã chọn",
-      description: `Tải ${selectedImageCount} ảnh đã chọn về máy? Nội dung ${settings.autoCopyShareMode === "comment" ? "Cmt" : "Post"} đã chọn sẽ được tự động copy trước khi tải.`,
+      description: `Tải ${selectedImageCount} ảnh đã chọn về máy? Nội dung ${autoCopyShareMode === "comment" ? "Cmt" : "Post"} đã chọn sẽ được tự động copy trước khi tải.`,
       mode: selectedImageCount === 1 ? "single" : "multiple",
       images: selectedImages,
       internalImages: selectedInternalImages,
@@ -11025,7 +11030,7 @@ export default function LocalProductsPage() {
     requestDownload({
       productIds: [albumSource.productId],
       title: "Tải toàn bộ album",
-      description: `Tải toàn bộ ảnh trong album về máy? Nội dung ${settings.autoCopyShareMode === "comment" ? "Cmt" : "Post"} đã chọn sẽ được tự động copy trước khi tải.`,
+      description: `Tải toàn bộ ảnh trong album về máy? Nội dung ${autoCopyShareMode === "comment" ? "Cmt" : "Post"} đã chọn sẽ được tự động copy trước khi tải.`,
       mode: totalAlbumImages === 1 ? "single" : "multiple",
       images: albumSource.images,
       internalImages,
@@ -11121,7 +11126,7 @@ export default function LocalProductsPage() {
         .filter((product) => product.images.length > 0)
         .map((product) => product.id),
       title: "Tải toàn bộ ảnh",
-      description: `Tải ảnh của tất cả sản phẩm chưa DONE về máy? Toàn bộ nội dung ${settings.autoCopyShareMode === "comment" ? "Cmt" : "Post"} của các sản phẩm này sẽ được tự động copy trước khi tải.`,
+      description: `Tải ảnh của tất cả sản phẩm chưa DONE về máy? Toàn bộ nội dung ${autoCopyShareMode === "comment" ? "Cmt" : "Post"} của các sản phẩm này sẽ được tự động copy trước khi tải.`,
       mode: "multiple",
       images: allMainImages,
       internalImages: allInternalImages,
@@ -13745,16 +13750,16 @@ export default function LocalProductsPage() {
               <button
                 type="button"
                 data-luxury-accent={
-                  settings.autoCopyShareMode === "post" ? "sapphire" : "amber"
+                  autoCopyShareMode === "post" ? "sapphire" : "amber"
                 }
-                title={`Tùy chọn copy cho Chia sẻ và Tải ảnh · hiện đang chọn ${settings.autoCopyShareMode === "post" ? "Post" : "Cmt"}`}
-                aria-label={`Mở tùy chọn copy cho Chia sẻ và Tải ảnh, hiện đang chọn ${settings.autoCopyShareMode === "post" ? "Post" : "Cmt"}`}
+                title={`Tùy chọn copy cho Chia sẻ và Tải ảnh · hiện đang chọn ${autoCopyShareMode === "post" ? "Post" : "Cmt"}`}
+                aria-label={`Mở tùy chọn copy cho Chia sẻ và Tải ảnh, hiện đang chọn ${autoCopyShareMode === "post" ? "Post" : "Cmt"}`}
                 className={`${headerActionButtonBaseClassName} ${headerActiveButtonClassName}`}
                 onClick={() => openModal("shareCopyOption")}
               >
                 <FiShare2 aria-hidden="true" className={iconClassName} />
                 <span className="min-w-0 truncate">
-                  Copy {settings.autoCopyShareMode === "post" ? "Post" : "Cmt"}
+                  Copy {autoCopyShareMode === "post" ? "Post" : "Cmt"}
                 </span>
               </button>
 
@@ -16951,30 +16956,30 @@ export default function LocalProductsPage() {
                         </p>
                       </div>
                       <span
-                        className={`shrink-0 rounded-md px-2.5 py-1 text-[10px] font-black ${settings.autoCopyShareMode === "post"
+                        className={`shrink-0 rounded-md px-2.5 py-1 text-[10px] font-black ${autoCopyShareMode === "post"
                           ? "bg-cyan-300 text-slate-950"
                           : "bg-amber-300 text-slate-950"
                           }`}
                       >
-                        Hiện tại: {settings.autoCopyShareMode === "post" ? "Post" : "Cmt"}
+                        Hiện tại: {autoCopyShareMode === "post" ? "Post" : "Cmt"}
                       </span>
                     </div>
 
                     <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
                       <button
                         type="button"
-                        aria-pressed={settings.autoCopyShareMode === "post"}
-                        className={`group flex min-h-40 flex-col items-stretch rounded-md border p-3 text-left transition ${settings.autoCopyShareMode === "post"
+                        aria-pressed={autoCopyShareMode === "post"}
+                        className={`group flex min-h-40 flex-col items-stretch rounded-md border p-3 text-left transition ${autoCopyShareMode === "post"
                           ? "border-cyan-300/70 bg-cyan-300/15 shadow-[0_0_0_1px_rgba(103,232,249,0.15)]"
                           : "border-white/10 bg-slate-900/70 hover:border-cyan-300/35 hover:bg-cyan-300/[0.07]"
                           }`}
                         onClick={() =>
-                          updateSettingField("autoCopyShareMode", "post")
+                          setAutoCopyShareMode("post")
                         }
                       >
                         <span className="flex items-center justify-between gap-3">
                           <span
-                            className={`flex h-10 w-10 items-center justify-center rounded-md border ${settings.autoCopyShareMode === "post"
+                            className={`flex h-10 w-10 items-center justify-center rounded-md border ${autoCopyShareMode === "post"
                               ? "border-cyan-300/50 bg-cyan-300/20 text-cyan-100"
                               : "border-white/10 bg-slate-950 text-slate-400"
                               }`}
@@ -16982,15 +16987,15 @@ export default function LocalProductsPage() {
                             <FiFileText aria-hidden="true" className="h-4 w-4" />
                           </span>
                           <span
-                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black ${settings.autoCopyShareMode === "post"
+                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black ${autoCopyShareMode === "post"
                               ? "bg-cyan-300 text-slate-950"
                               : "border border-white/10 bg-slate-950 text-slate-500"
                               }`}
                           >
-                            {settings.autoCopyShareMode === "post" ? (
+                            {autoCopyShareMode === "post" ? (
                               <FiCheck aria-hidden="true" className="h-3 w-3" />
                             ) : null}
-                            {settings.autoCopyShareMode === "post"
+                            {autoCopyShareMode === "post"
                               ? "ĐANG CHỌN"
                               : "BẤM ĐỂ CHỌN"}
                           </span>
@@ -17006,18 +17011,18 @@ export default function LocalProductsPage() {
 
                       <button
                         type="button"
-                        aria-pressed={settings.autoCopyShareMode === "comment"}
-                        className={`group flex min-h-40 flex-col items-stretch rounded-md border p-3 text-left transition ${settings.autoCopyShareMode === "comment"
+                        aria-pressed={autoCopyShareMode === "comment"}
+                        className={`group flex min-h-40 flex-col items-stretch rounded-md border p-3 text-left transition ${autoCopyShareMode === "comment"
                           ? "border-amber-300/70 bg-amber-300/15 shadow-[0_0_0_1px_rgba(252,211,77,0.15)]"
                           : "border-white/10 bg-slate-900/70 hover:border-amber-300/35 hover:bg-amber-300/[0.07]"
                           }`}
                         onClick={() =>
-                          updateSettingField("autoCopyShareMode", "comment")
+                          setAutoCopyShareMode("comment")
                         }
                       >
                         <span className="flex items-center justify-between gap-3">
                           <span
-                            className={`flex h-10 w-10 items-center justify-center rounded-md border ${settings.autoCopyShareMode === "comment"
+                            className={`flex h-10 w-10 items-center justify-center rounded-md border ${autoCopyShareMode === "comment"
                               ? "border-amber-300/50 bg-amber-300/20 text-amber-100"
                               : "border-white/10 bg-slate-950 text-slate-400"
                               }`}
@@ -17025,15 +17030,15 @@ export default function LocalProductsPage() {
                             <FiClipboard aria-hidden="true" className="h-4 w-4" />
                           </span>
                           <span
-                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black ${settings.autoCopyShareMode === "comment"
+                            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black ${autoCopyShareMode === "comment"
                               ? "bg-amber-300 text-slate-950"
                               : "border border-white/10 bg-slate-950 text-slate-500"
                               }`}
                           >
-                            {settings.autoCopyShareMode === "comment" ? (
+                            {autoCopyShareMode === "comment" ? (
                               <FiCheck aria-hidden="true" className="h-3 w-3" />
                             ) : null}
-                            {settings.autoCopyShareMode === "comment"
+                            {autoCopyShareMode === "comment"
                               ? "ĐANG CHỌN"
                               : "BẤM ĐỂ CHỌN"}
                           </span>
