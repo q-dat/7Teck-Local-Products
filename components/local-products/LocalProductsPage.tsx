@@ -2576,10 +2576,41 @@ const normalizeSelectedFacebookGroupIds = (
   );
 };
 
-const extractSocialTagText = (value: string): string => {
+const extractSocialTagText = (value: string): string[] => {
   const matches = value.match(/#[\p{L}\p{N}_]+/gu) ?? [];
 
-  return Array.from(new Set(matches)).join(" ");
+  return Array.from(new Set(matches));
+};
+
+const randomizeSocialTagText = (value: string): string => {
+  const uniqueTags = extractSocialTagText(value);
+
+  if (uniqueTags.length === 0) return "";
+
+  const shuffledTags = [...uniqueTags];
+
+  for (let index = shuffledTags.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffledTags[index], shuffledTags[randomIndex]] = [
+      shuffledTags[randomIndex],
+      shuffledTags[index],
+    ];
+  }
+
+  if (shuffledTags.length <= 3) {
+    return shuffledTags.join(" ");
+  }
+
+  const minimumTagCount = 3;
+  const maximumRemovableCount = shuffledTags.length - minimumTagCount;
+  const removableCount =
+    1 + Math.floor(Math.random() * maximumRemovableCount);
+  const keepCount = Math.max(
+    minimumTagCount,
+    shuffledTags.length - removableCount,
+  );
+
+  return shuffledTags.slice(0, keepCount).join(" ");
 };
 
 const removeSocialTags = (value: string): string => {
@@ -3289,7 +3320,7 @@ const composeCopyText = (
   const cleanValue = removeSocialTags(value);
   const cleanContactText = contactText.trim();
   const cleanSocialTagText = includeSocialTags
-    ? extractSocialTagText(socialTagSource)
+    ? randomizeSocialTagText(socialTagSource)
     : "";
   const sections = cleanValue ? [cleanValue] : [];
 
