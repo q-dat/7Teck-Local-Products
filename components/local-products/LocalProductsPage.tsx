@@ -9907,7 +9907,7 @@ export default function LocalProductsPage() {
   const applyLocalImageDirectorySnapshot = async (
     handle: LocalFileSystemDirectoryHandle,
     view: "active" | "trash" = localImageView,
-  ): Promise<void> => {
+  ): Promise<LocalImageDirectorySnapshot> => {
     const snapshot = await readLocalImageDirectorySnapshot(handle);
 
     setLocalImageFiles(snapshot.active);
@@ -9919,6 +9919,8 @@ export default function LocalProductsPage() {
         ),
       ),
     );
+
+    return snapshot;
   };
 
   const handleChooseLocalImageDirectory = async (): Promise<LocalFileSystemDirectoryHandle | null> => {
@@ -9972,52 +9974,6 @@ export default function LocalProductsPage() {
 
     Toastify("Chrome cần cấp lại quyền thư mục ảnh", 300);
     return null;
-  };
-
-  const handleRefreshLocalImageDirectory = async (): Promise<void> => {
-    const handle = await getWritableLocalImageDirectory();
-
-    if (!handle) return;
-
-    setIsLocalImageManagerBusy(true);
-
-    try {
-      await applyLocalImageDirectorySnapshot(handle);
-      Toastify("Đã cập nhật danh sách ảnh trên máy", 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Không thể đọc thư mục ảnh";
-      Toastify(message, 400);
-    } finally {
-      setIsLocalImageManagerBusy(false);
-    }
-  };
-
-  const openLocalImageManager = (): void => {
-    setLocalImageView("trash");
-    setSelectedLocalImageNames(
-      new Set<string>(localTrashImageFiles.map((file) => file.name)),
-    );
-    openModal("localImageManager");
-
-    if (!localImageDirectoryHandle) return;
-
-    void (async () => {
-      const permission = await queryLocalImageDirectoryPermission(
-        localImageDirectoryHandle,
-      );
-
-      if (permission !== "granted") return;
-
-      try {
-        await applyLocalImageDirectorySnapshot(
-          localImageDirectoryHandle,
-          "active",
-        );
-      } catch {
-        // Danh sách đang có vẫn được giữ; người dùng có thể bấm Làm mới khi cần.
-      }
-    })();
   };
 
   const handleForgetLocalImageDirectory = (): void => {
@@ -10074,30 +10030,54 @@ export default function LocalProductsPage() {
     setLocalImageView("trash");
     setSelectedLocalImageNames(new Set<string>());
     setIsLocalImageManagerBusy(true);
-    setPageLoadingText("Đang chuyển toàn bộ ảnh vào _trash...");
+    setPageLoadingText("Đang cập nhật danh sách ảnh trên máy...");
     await waitForUiPaint();
 
     try {
       const handle = await getWritableLocalImageDirectory();
+
       if (!handle) return;
 
-      const names = localImageFiles.map((file) => file.name);
+      // Luôn đọc trực tiếp thư mục thật trước khi xử lý để không dùng state cũ.
+      const freshSnapshot = await applyLocalImageDirectorySnapshot(
+        handle,
+        "active",
+      );
+      const names = freshSnapshot.active.map((file) => file.name);
+
+      setPageLoadingText(
+        names.length > 0
+          ? `Đang chuyển ${names.length} ảnh vào _trash...`
+          : "Đang kiểm tra _trash...",
+      );
+      await waitForUiPaint();
+
+      let moved = 0;
+      let failed = 0;
+
       if (names.length > 0) {
-        await moveLocalImagesToTrash(handle, names);
+        const result = await moveLocalImagesToTrash(handle, names);
+        moved = result.moved;
+        failed = result.failed;
       }
 
       await applyLocalImageDirectorySnapshot(handle, "trash");
       openModal("localImageManager");
-      Toastify(
-        names.length > 0
-          ? `Đã chuyển ${names.length} ảnh vào _trash`
-          : "Không có ảnh đang dùng để chuyển vào _trash",
-        200,
-      );
+
+      if (failed > 0) {
+        Toastify(
+          `Đã cập nhật danh sách, chuyển ${moved} ảnh vào _trash; ${failed} ảnh lỗi`,
+          300,
+        );
+      } else if (moved > 0) {
+        Toastify(`Đã cập nhật danh sách và chuyển ${moved} ảnh vào _trash`, 200);
+      } else {
+        Toastify("Đã cập nhật danh sách; không có ảnh đang dùng để chuyển vào _trash", 200);
+      }
     } catch (error) {
       if (!isAbortError(error)) {
         Toastify(
-          error instanceof Error ? error.message : "Không thể chuyển ảnh vào _trash",
+          error instanceof Error ? error.message : "Không thể cập nhật thư mục ảnh",
           400,
         );
       }
@@ -15208,7 +15188,6 @@ export default function LocalProductsPage() {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <button type="button" disabled={isLocalImageManagerBusy || !canUseDirectoryPicker()} className="border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1.5 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void handleChooseLocalImageDirectory()}>Chọn thư mục</button>
-                      <button type="button" disabled={isLocalImageManagerBusy || !localImageDirectoryHandle} className="border border-white/10 bg-slate-800 px-2.5 py-1.5 text-[9px] font-black text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void handleRefreshLocalImageDirectory()}>Làm mới</button>
                       <button type="button" disabled={!localImageDirectoryHandle} className="border border-rose-300/25 bg-rose-300/[0.05] px-2.5 py-1.5 text-[9px] font-black text-rose-100 transition hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-40" onClick={handleForgetLocalImageDirectory}>Bỏ liên kết</button>
                     </div>
                   </article>
