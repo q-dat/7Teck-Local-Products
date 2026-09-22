@@ -737,7 +737,7 @@ const compactLuxuryDialogClassName =
   "luxury-dialog w-full max-w-md border p-3";
 
 const fullCardItemNameClassName =
-  "min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]";
+  "block min-w-0 w-full max-w-full whitespace-normal break-words !overflow-visible [overflow-wrap:anywhere] [word-break:break-word]";
 
 const getActiveInteractionWindow = (): Window => {
   if (typeof window === "undefined") {
@@ -12374,6 +12374,19 @@ export default function LocalProductsPage() {
           white-space: nowrap;
         }
 
+        .local-products-workspace button[data-product-name="true"] {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          white-space: normal !important;
+          overflow: visible !important;
+          overflow-wrap: anywhere !important;
+          word-break: break-word !important;
+          flex-wrap: wrap !important;
+          text-overflow: clip;
+        }
+
         .local-products-workspace button[data-description-line="true"] {
           width: 100%;
           min-width: 0;
@@ -14693,7 +14706,8 @@ export default function LocalProductsPage() {
 
                           <button
                             type="button"
-                            className={`${fullCardItemNameClassName} w-full text-left text-[12px] font-black leading-[18px] text-white transition hover:text-[#f1e5c2]`}
+                            data-product-name="true"
+                            className={`${fullCardItemNameClassName} !whitespace-normal !overflow-visible !flex-wrap text-left text-[12px] font-black leading-[18px] text-white transition hover:text-[#f1e5c2]`}
                             title={isWriteAccessUnlocked ? "Bấm để sửa sản phẩm" : "Bấm để xem thêm mô tả"}
                             onClick={(event) => {
                               event.stopPropagation();
