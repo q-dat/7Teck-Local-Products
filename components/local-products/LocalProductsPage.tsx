@@ -14567,9 +14567,6 @@ export default function LocalProductsPage() {
                           : "border-[#d8c99f]/[0.15] bg-[#0b0e14]"
                         }`}
                       onClickCapture={() => setSelectedProductId(product.id)}
-                      onClick={() => {
-                        handleEdit(product);
-                      }}
                     >
                       <button
                         type="button"
@@ -14694,100 +14691,100 @@ export default function LocalProductsPage() {
                             </div>
                           ) : null}
 
-                          <h3 className={`${fullCardItemNameClassName} text-[12px] font-black leading-[18px] text-white`}>
+                          <button
+                            type="button"
+                            className={`${fullCardItemNameClassName} w-full text-left text-[12px] font-black leading-[18px] text-white transition hover:text-[#f1e5c2]`}
+                            title={isWriteAccessUnlocked ? "Bấm để sửa sản phẩm" : "Bấm để xem thêm mô tả"}
+                            onClick={(event) => {
+                              event.stopPropagation();
+
+                              if (isWriteAccessUnlocked) {
+                                handleEdit(product);
+                                return;
+                              }
+
+                              toggleExpandedProduct(product.id);
+                            }}
+                          >
                             {product.name}
-                          </h3>
+                          </button>
                           <div className="mt-1 truncate text-xs font-black text-[#f1e5c2]">
                             {product.priceText || "Chưa có giá"}
                           </div>
                         </div>
 
-                        <div
-                          role={descriptionPreview.length > 90 ? "button" : undefined}
-                          tabIndex={descriptionPreview.length > 90 ? 0 : undefined}
-                          aria-expanded={descriptionPreview.length > 90 ? expanded : undefined}
-                          className={`w-full min-w-0 border border-[#d8c99f]/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] p-2 [clip-path:polygon(7px_0,100%_0,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,0_100%,0_7px)] ${descriptionPreview.length > 90
-                            ? "cursor-pointer transition hover:border-[#d8c99f]/30 hover:bg-[#d8c99f]/[0.045]"
-                            : ""
-                            }`}
-                          onMouseUp={(event) => {
-                            event.stopPropagation();
-                            updateSelectedDescriptionCopy(
-                              product.id,
-                              event.currentTarget,
-                            );
-                          }}
-                          onTouchEnd={(event) => {
-                            event.stopPropagation();
-                            updateSelectedDescriptionCopy(
-                              product.id,
-                              event.currentTarget,
-                            );
-                          }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-
-                            const hasSelectedText = updateSelectedDescriptionCopy(
-                              product.id,
-                              event.currentTarget,
-                            );
-
-                            if (hasSelectedText) return;
-
-                            if (descriptionPreview.length > 90) {
-                              toggleExpandedProduct(product.id);
-                            }
-                          }}
-                          onKeyDown={(event) => {
-                            event.stopPropagation();
-
-                            if (
-                              descriptionPreview.length > 90 &&
-                              (event.key === "Enter" || event.key === " ")
-                            ) {
-                              event.preventDefault();
-                              toggleExpandedProduct(product.id);
-                            }
-                          }}
-                        >
+                        {expanded ? (
                           <div
-                            className={`${expanded ? "line-clamp-none" : "line-clamp-1"
-                              } w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[16px] text-slate-300 [overflow-wrap:anywhere]`}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded="true"
+                            className="w-full min-w-0 cursor-pointer border border-[#d8c99f]/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] p-2 transition hover:border-[#d8c99f]/30 hover:bg-[#d8c99f]/[0.045]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+
+                              const selection = getActiveInteractionWindow().getSelection();
+                              if (selection && !selection.isCollapsed && selection.toString().trim()) {
+                                return;
+                              }
+
+                              toggleExpandedProduct(product.id);
+                            }}
+                            onKeyDown={(event) => {
+                              event.stopPropagation();
+
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleExpandedProduct(product.id);
+                              }
+                            }}
                           >
-                            {renderDescriptionText(
-                              product.id,
-                              descriptionPreview,
-                              expanded,
-                            )}
-                          </div>
-                          {selectedDescriptionCopy?.productId === product.id &&
-                            selectedDescriptionCopy.text ? (
+                            <div className="w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[16px] text-slate-300 [overflow-wrap:anywhere]">
+                              {renderDescriptionText(
+                                product.id,
+                                descriptionPreview,
+                                true,
+                              )}
+                            </div>
+                            {selectedDescriptionCopy?.productId === product.id &&
+                              selectedDescriptionCopy.text ? (
+                              <button
+                                type="button"
+                                data-luxury-accent="emerald"
+                                className="mt-2 inline-flex w-full items-center justify-center gap-1 border border-emerald-300/40 bg-emerald-300/[0.07] px-1.5 py-1 text-[9px] font-black text-emerald-100 transition hover:border-emerald-200/60 hover:bg-emerald-300/[0.12] active:opacity-80"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleCopySelectedDescription(product.id);
+                                }}
+                              >
+                                {renderCopyIcon(`selected-description-${product.id}`)}
+                                Copy phần đã chọn
+                              </button>
+                            ) : null}
                             <button
                               type="button"
-                              data-luxury-accent="emerald"
-                              className="mt-2 inline-flex w-full items-center justify-center gap-1 border border-emerald-300/40 bg-emerald-300/[0.07] px-1.5 py-1 text-[9px] font-black text-emerald-100 transition hover:border-emerald-200/60 hover:bg-emerald-300/[0.12] active:opacity-80"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void handleCopySelectedDescription(product.id);
-                              }}
-                            >
-                              {renderCopyIcon(`selected-description-${product.id}`)}
-                              Copy phần đã chọn
-                            </button>
-                          ) : null}
-                          {descriptionPreview.length > 90 ? (
-                            <button
-                              type="button"
-                              className="mt-2 text-[11px] font-black text-slate-300"
+                              className="mt-2 inline-flex w-full items-center justify-center border border-[#d8c99f]/20 bg-[#d8c99f]/[0.045] px-2 py-1.5 text-[10px] font-black text-slate-200 transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.08] hover:text-[#f1e5c2]"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 toggleExpandedProduct(product.id);
                               }}
                             >
-                              {expanded ? "Thu gọn" : "Xem thêm"}
+                              Thu gọn
                             </button>
-                          ) : null}
-                        </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="flex min-h-9 w-full items-center justify-center border border-[#d8c99f]/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] px-2 py-2 text-[11px] font-black uppercase tracking-[0.08em] text-slate-300 transition hover:border-[#d8c99f]/30 hover:bg-[#d8c99f]/[0.045] hover:text-[#f1e5c2]"
+                            title="Xem chi tiết mô tả"
+                            aria-label="Xem chi tiết mô tả"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleExpandedProduct(product.id);
+                            }}
+                          >
+                            XEM CHI TIẾT
+                          </button>
+                        )}
 
                         <div className="grid  grid-cols-2 gap-1.5">
                           <button
