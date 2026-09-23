@@ -1,5 +1,6 @@
-import LocalProductsPage from "@/components/local-products/LocalProductsPage";
+import LocalPage from "./LocalPage";
 
 export default function Page() {
-  return <LocalProductsPage />;
+  return <LocalPage scope="technology" />;
+
 }
