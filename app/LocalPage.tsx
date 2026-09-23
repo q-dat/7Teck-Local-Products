@@ -55,21 +55,12 @@ import "react-toastify/dist/ReactToastify.css";
 type ProductImage = {
   id: string;
   name: string;
-  originalName: string;
   dataUrl: string;
   size: number;
   type: string;
   createdAt: string;
   publicId: string;
-  assetId: string;
   version: number;
-  format: string;
-  width: number;
-  height: number;
-  bytes: number;
-  etag: string;
-  sha256: string;
-  resourceType: "image";
 };
 
 type ImageBlobCacheRecord = {
@@ -217,7 +208,7 @@ type FacebookLinkOpenSettings = Record<
 >;
 
 type ExportPayload = {
-  version: 21;
+  version: 22;
   settings: GlobalSettings;
   products: LocalProduct[];
   scheduleConfig: ScheduleConfig;
@@ -1866,7 +1857,7 @@ const clearImageBlobMemoryCache = (): void => {
 
 const createImageBlobCacheKey = (image: ProductImage): string => {
   const identity = image.publicId.trim() || `draft-${image.id}`;
-  const revision = String(image.version || image.etag || image.sha256 || "");
+  const revision = image.version > 0 ? String(image.version) : image.dataUrl;
   return `${identity}::${revision}`;
 };
 
@@ -1894,21 +1885,12 @@ const createLocalDraftImage = (file: File): ProductImage => {
   return {
     id: crypto.randomUUID(),
     name: file.name,
-    originalName: file.name,
     dataUrl: URL.createObjectURL(file),
     size: file.size,
     type: file.type || "image/jpeg",
     createdAt: now,
     publicId: "",
-    assetId: "",
     version: 0,
-    format: file.type.split("/").at(-1) || "",
-    width: 0,
-    height: 0,
-    bytes: file.size,
-    etag: "",
-    sha256: "",
-    resourceType: "image",
   };
 };
 
@@ -2926,24 +2908,9 @@ type CloudinarySignaturePayload = {
 
 type CloudinaryUploadPayload = {
   public_id: string;
-  asset_id: string;
   secure_url: string;
   version: number;
   format: string;
-  width: number;
-  height: number;
-  bytes: number;
-  etag?: string;
-  resource_type: string;
-};
-
-const bytesToHex = (bytes: Uint8Array): string => {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-};
-
-const createFileSha256 = async (file: Blob): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return bytesToHex(new Uint8Array(digest));
 };
 
 const deleteUnattachedCloudinaryImages = async (publicIds: string[]): Promise<void> => {
@@ -2963,10 +2930,10 @@ const uploadOriginalImageToCloudinary = async (
     throw new Error(`Ảnh ${file.name} vượt giới hạn ${formatFileSize(maxBytes)}`);
   }
 
-  const [signature, sha256] = await Promise.all([
-    apiRequest<CloudinarySignaturePayload>("/cloudinary/sign", { method: "POST" }),
-    createFileSha256(file),
-  ]);
+  const signature = await apiRequest<CloudinarySignaturePayload>(
+    "/cloudinary/sign",
+    { method: "POST" },
+  );
   const formData = new FormData();
   formData.append("file", file, file.name);
   formData.append("api_key", signature.apiKey);
@@ -2990,21 +2957,12 @@ const uploadOriginalImageToCloudinary = async (
   return {
     id: sourceImage?.id || crypto.randomUUID(),
     name: sourceImage?.name || file.name,
-    originalName: sourceImage?.originalName || file.name,
     dataUrl: result.secure_url,
     size: file.size,
     type: file.type || `image/${result.format}`,
     createdAt: sourceImage?.createdAt || new Date().toISOString(),
     publicId: result.public_id,
-    assetId: result.asset_id,
     version: result.version,
-    format: result.format,
-    width: result.width,
-    height: result.height,
-    bytes: result.bytes,
-    etag: result.etag || "",
-    sha256,
-    resourceType: "image",
   };
 };
 
@@ -3029,22 +2987,12 @@ const normalizeImages = (value: unknown): ProductImage[] => {
     images.push({
       id: record.id,
       name: record.name,
-      originalName:
-        typeof record.originalName === "string" ? record.originalName : record.name,
       dataUrl: record.dataUrl,
       size: record.size,
       type: record.type,
       createdAt: record.createdAt,
       publicId: typeof record.publicId === "string" ? record.publicId : "",
-      assetId: typeof record.assetId === "string" ? record.assetId : "",
       version: typeof record.version === "number" ? record.version : 0,
-      format: typeof record.format === "string" ? record.format : "",
-      width: typeof record.width === "number" ? record.width : 0,
-      height: typeof record.height === "number" ? record.height : 0,
-      bytes: typeof record.bytes === "number" ? record.bytes : record.size,
-      etag: typeof record.etag === "string" ? record.etag : "",
-      sha256: typeof record.sha256 === "string" ? record.sha256 : "",
-      resourceType: "image",
     });
     return images;
   }, []);
@@ -3472,9 +3420,7 @@ const createImageFilenameSuffix = (imageId: string): string => {
   return String(Math.floor(Math.random() * 900) + 100);
 };
 
-const normalizeImageExtension = (image: Pick<ProductImage, "format" | "type" | "name">): string => {
-  const fromFormat = image.format.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
-  if (fromFormat) return fromFormat === "jpeg" ? "jpg" : fromFormat;
+const normalizeImageExtension = (image: Pick<ProductImage, "type" | "name">): string => {
   const fromType = image.type.split("/").at(-1)?.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
   if (fromType) return fromType === "jpeg" ? "jpg" : fromType;
   const fromName = image.name.split(".").at(-1)?.replace(/[^a-zA-Z0-9]/gu, "").toLowerCase();
@@ -3986,7 +3932,7 @@ const createExportPayload = (params: {
   postedRecords: PostedRecord[];
 }): ExportPayload => {
   return {
-    version: 21,
+    version: 22,
     settings: params.settings,
     products: params.products,
     scheduleConfig: params.scheduleConfig,
@@ -8389,9 +8335,7 @@ export default function LocalPage({
       ...record.image,
       dataUrl: objectUrl,
       size: record.image.size || record.file.size,
-      bytes: record.image.bytes || record.file.size,
       type: record.image.type || record.file.type || "image/jpeg",
-      originalName: record.image.originalName || record.fileName,
       name: record.image.name || record.fileName,
     };
   };
@@ -13722,7 +13666,7 @@ export default function LocalPage({
                 <FiMenu aria-hidden="true" className={iconClassName} />
                 Nav
               </button>
-              
+
               <button
                 type="button"
                 data-luxury-accent="sapphire"
@@ -15138,58 +15082,58 @@ export default function LocalPage({
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
               {activeModal === "contentNavigation" ? (
-                    <section className="mx-auto flex w-full max-w-xl flex-col gap-3 py-2">
-                      <div className="border border-[#d8c99f]/15 bg-white/[0.018] p-3 text-center">
-                        <p className="text-[8px] font-black uppercase tracking-[0.16em] text-[#d8c99f]/60">
-                          Chọn khu vực làm việc
-                        </p>
-                        <h3 className="mt-1 text-sm font-black text-white">
-                          {scopedContentType === "realEstate" ? "Bất động sản" : "Sản phẩm"}
-                        </h3>
-                      </div>
+                <section className="mx-auto flex w-full max-w-xl flex-col gap-3 py-2">
+                  <div className="border border-[#d8c99f]/15 bg-white/[0.018] p-3 text-center">
+                    <p className="text-[8px] font-black uppercase tracking-[0.16em] text-[#d8c99f]/60">
+                      Chọn khu vực làm việc
+                    </p>
+                    <h3 className="mt-1 text-sm font-black text-white">
+                      {scopedContentType === "realEstate" ? "Bất động sản" : "Sản phẩm"}
+                    </h3>
+                  </div>
 
-                      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-                        <Link
-                          href="/"
-                          onClick={() => closeModal()}
-                          className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "technology"
-                              ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
-                              : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
-                            }`}
-                        >
-                          <span className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-cyan-200/25 bg-cyan-300/[0.08] text-cyan-100 transition group-hover:scale-105">
-                              <FiMonitor aria-hidden="true" className="h-3.5 w-3.5" />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-black">Sản phẩm</span>
-                              <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">Trang chủ</span>
-                            </span>
-                          </span>
-                          <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
-                        </Link>
+                  <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                    <Link
+                      href="/"
+                      onClick={() => closeModal()}
+                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "technology"
+                        ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
+                        }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-cyan-200/25 bg-cyan-300/[0.08] text-cyan-100 transition group-hover:scale-105">
+                          <FiMonitor aria-hidden="true" className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[10px] font-black">Sản phẩm</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">Trang chủ</span>
+                        </span>
+                      </span>
+                      <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
 
-                        <Link
-                          href="/bds"
-                          onClick={() => closeModal()}
-                          className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "realEstate"
-                              ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
-                              : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
-                            }`}
-                        >
-                          <span className="flex min-w-0 items-center gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-amber-200/25 bg-amber-300/[0.08] text-amber-100 transition group-hover:scale-105">
-                              <FiDatabase aria-hidden="true" className="h-3.5 w-3.5" />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-black">Bất động sản</span>
-                              <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/bds</span>
-                            </span>
-                          </span>
-                          <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
-                        </Link>
-                      </div>
-                    </section>
+                    <Link
+                      href="/bds"
+                      onClick={() => closeModal()}
+                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "realEstate"
+                        ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
+                        }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-amber-200/25 bg-amber-300/[0.08] text-amber-100 transition group-hover:scale-105">
+                          <FiDatabase aria-hidden="true" className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[10px] font-black">Bất động sản</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/bds</span>
+                        </span>
+                      </span>
+                      <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  </div>
+                </section>
               ) : null}
               {activeModal === "facebookLinkSettings" ? (
                 <section className="mx-auto flex w-full max-w-3xl flex-col gap-3">

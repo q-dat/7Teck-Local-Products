@@ -1,21 +1,12 @@
 export type CloudinaryProductImage = {
   id: string;
   name: string;
-  originalName: string;
   dataUrl: string;
   size: number;
   type: string;
   createdAt: string;
   publicId: string;
-  assetId: string;
   version: number;
-  format: string;
-  width: number;
-  height: number;
-  bytes: number;
-  etag: string;
-  sha256: string;
-  resourceType: "image";
 };
 
 export type ProductRecord = {
