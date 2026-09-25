@@ -69,8 +69,52 @@ type ImageBlobCacheRecord = {
   sourceUrl: string;
 };
 
-type ProductContentType = "technology" | "realEstate";
+type ProductContentType =
+  | "technology"
+  | "realEstate"
+  | "rental"
+  | "nnc";
+
 type LocalPageScope = ProductContentType;
+type PropertyContentType = Exclude<ProductContentType, "technology">;
+
+const isPropertyContentType = (
+  contentType: ProductContentType,
+): contentType is PropertyContentType => contentType !== "technology";
+
+const isProductContentType = (
+  value: unknown,
+): value is ProductContentType =>
+  value === "technology" ||
+  value === "realEstate" ||
+  value === "rental" ||
+  value === "nnc";
+
+const getContentTypeTag = (contentType: ProductContentType): string => {
+  switch (contentType) {
+    case "realEstate":
+      return "BĐS";
+    case "rental":
+      return "CHDV/Phòng trọ";
+    case "nnc":
+      return "NNC/CC/MB";
+    default:
+      return "Sản phẩm";
+  }
+};
+
+const getContentTypeLabel = (contentType: LocalPageScope): string => {
+  switch (contentType) {
+    case "realEstate":
+      return "Bất động sản";
+    case "rental":
+      return "Cho Thuê";
+    case "nnc":
+      return "NNC/CC/MB";
+    default:
+      return "Sản phẩm";
+  }
+};
 
 type LocalProduct = {
   id: string;
@@ -2675,7 +2719,7 @@ const parsePriceNumber = (
     return Number.isFinite(value) ? Math.round(value * 1_000_000_000) : 0;
   }
 
-  if (contentType === "realEstate" && normalized.endsWith("đ")) {
+  if (isPropertyContentType(contentType) && normalized.endsWith("đ")) {
     const value = Number(normalized.slice(0, -1));
     return Number.isFinite(value) ? Math.round(value * 1_000_000_000) : 0;
   }
@@ -3013,8 +3057,9 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
   const pin = typeof record.pin === "string" ? record.pin : "";
   const status = typeof record.status === "string" ? record.status : "";
   const category = typeof record.category === "string" ? record.category : "";
-  const contentType: ProductContentType =
-    record.contentType === "realEstate" ? "realEstate" : "technology";
+  const contentType: ProductContentType = isProductContentType(record.contentType)
+    ? record.contentType
+    : "technology";
   const realEstateComment =
     typeof record.realEstateComment === "string"
       ? record.realEstateComment
@@ -3306,7 +3351,7 @@ const buildPostText = (
 ): string => {
   const description = product.description.trim() || commonDescription.trim();
 
-  if (product.contentType === "realEstate") {
+  if (isPropertyContentType(product.contentType)) {
     return composeCopyText(
       description,
       contactText,
@@ -3364,7 +3409,7 @@ const buildCommentContentText = (
 ): string => {
   const cleanTitle = title.trim();
 
-  if (contentType === "realEstate") {
+  if (isPropertyContentType(contentType)) {
     const realEstatePrice = normalizeRealEstateCommentPrice(priceText);
     const heading = [
       cleanTitle,
@@ -5880,7 +5925,7 @@ export default function LocalPage({
     try {
       const nextWindow = await pictureInPictureApi.requestWindow();
 
-      nextWindow.document.title = scopedContentType === "realEstate" ? "Bất động sản" : "Sản phẩm";
+      nextWindow.document.title = getContentTypeLabel(scopedContentType);
       nextWindow.document.body.replaceChildren();
       copyStylesToDocument(document, nextWindow.document);
 
@@ -9111,11 +9156,12 @@ export default function LocalPage({
     const now = new Date().toISOString();
     const rawName = draft.name.trim();
     const description = draft.description.trim();
-    const pin = draft.pin.trim();
-    const status = draft.status.trim();
+    const contentType = scopedContentType;
+    const isProperty = isPropertyContentType(contentType);
+    const pin = isProperty ? "" : draft.pin.trim();
+    const status = isProperty ? "" : draft.status.trim();
     const priceText = draft.priceText.trim();
-    const category = draft.category.trim();
-    const contentType = draft.contentType;
+    const category = isProperty ? "" : draft.category.trim();
     const realEstateComment = draft.realEstateComment.trim();
 
     if (!rawName) {
@@ -14671,11 +14717,11 @@ export default function LocalPage({
 
                       <div className="flex min-w-0 flex-col gap-2 p-2">
                         <div className="">
-                          {product.contentType === "realEstate" || product.category ? (
+                          {isPropertyContentType(product.contentType) || product.category ? (
                             <div className="mb-1 flex min-w-0 items-center gap-1.5">
-                              {product.contentType === "realEstate" ? (
+                              {isPropertyContentType(product.contentType) ? (
                                 <span className="shrink-0 border border-amber-300/40 bg-amber-300/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-amber-100">
-                                  BĐS
+                                  {getContentTypeTag(product.contentType)}
                                 </span>
                               ) : null}
                               {product.category ? (
@@ -15088,7 +15134,7 @@ export default function LocalPage({
                       Chọn khu vực làm việc
                     </p>
                     <h3 className="mt-1 text-sm font-black text-white">
-                      {scopedContentType === "realEstate" ? "Bất động sản" : "Sản phẩm"}
+                      {getContentTypeLabel(scopedContentType)}
                     </h3>
                   </div>
 
@@ -15097,8 +15143,8 @@ export default function LocalPage({
                       href="/"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "technology"
-                        ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
-                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
+                          ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
+                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15107,7 +15153,9 @@ export default function LocalPage({
                         </span>
                         <span className="min-w-0">
                           <span className="block text-[10px] font-black">Sản phẩm</span>
-                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">Trang chủ</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">
+                            Trang chủ
+                          </span>
                         </span>
                       </span>
                       <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
@@ -15117,8 +15165,8 @@ export default function LocalPage({
                       href="/bds"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "realEstate"
-                        ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
-                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
+                          ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
+                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15126,8 +15174,48 @@ export default function LocalPage({
                           <FiDatabase aria-hidden="true" className="h-3.5 w-3.5" />
                         </span>
                         <span className="min-w-0">
-                          <span className="block text-[10px] font-black">Bất động sản</span>
+                          <span className="block text-[10px] font-black">BĐS</span>
                           <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/bds</span>
+                        </span>
+                      </span>
+                      <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+
+                    <Link
+                      href="/cho-thue"
+                      onClick={() => closeModal()}
+                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "rental"
+                          ? "border-emerald-200/55 bg-emerald-300/[0.07] text-emerald-50 shadow-[0_14px_38px_rgba(16,185,129,0.08)]"
+                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-emerald-200/35 hover:bg-emerald-300/[0.045]"
+                        }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-emerald-200/25 bg-emerald-300/[0.08] text-emerald-100 transition group-hover:scale-105">
+                          <FiPhone aria-hidden="true" className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[10px] font-black">CHDV/Phòng trọ</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/cho-thue</span>
+                        </span>
+                      </span>
+                      <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+
+                    <Link
+                      href="/nnc"
+                      onClick={() => closeModal()}
+                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "nnc"
+                          ? "border-violet-200/55 bg-violet-300/[0.07] text-violet-50 shadow-[0_14px_38px_rgba(139,92,246,0.08)]"
+                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-violet-200/35 hover:bg-violet-300/[0.045]"
+                        }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-violet-200/25 bg-violet-300/[0.08] text-violet-100 transition group-hover:scale-105">
+                          <FiArchive aria-hidden="true" className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[10px] font-black">NNC/CC/MB</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/nnc</span>
                         </span>
                       </span>
                       <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />
@@ -15563,9 +15651,9 @@ export default function LocalPage({
                                       }}
                                     >
                                       <div className="flex  items-center gap-2">
-                                        {product.contentType === "realEstate" ? (
+                                        {isPropertyContentType(product.contentType) ? (
                                           <span className="shrink-0 rounded-md border border-amber-300/40 bg-amber-300/15 px-1.5 py-0.5 text-[9px] font-black text-amber-100">
-                                            BĐS
+                                            {getContentTypeTag(product.contentType)}
                                           </span>
                                         ) : null}
                                         {product.isDone ? (
@@ -15661,45 +15749,22 @@ export default function LocalPage({
                       <section className="order-2 flex min-h-0 min-w-0 flex-col gap-3 xl:order-1">
                         <div className="grid min-w-0 gap-1.5 rounded-md border border-white/10 bg-slate-950/70 p-2">
                           <span className="text-xs font-bold text-slate-300">
-                            Mác dữ liệu
+                            Thẻ
                           </span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              aria-pressed={draft.contentType === "technology"}
-                              className={`flex items-center justify-center rounded-md border px-3 py-2 text-xs font-black transition ${draft.contentType === "technology"
-                                ? "border-cyan-300/60 bg-cyan-300/15 text-cyan-100"
-                                : "border-white/10 bg-slate-900 text-slate-400 hover:border-white/25 hover:text-white"
-                                }`}
-                              onClick={() =>
-                                updateDraftField("contentType", "technology")
-                              }
-                            >
-                              Công nghệ
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={draft.contentType === "realEstate"}
-                              className={`flex items-center justify-center rounded-md border px-3 py-2 text-xs font-black transition ${draft.contentType === "realEstate"
-                                ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
-                                : "border-white/10 bg-slate-900 text-slate-400 hover:border-white/25 hover:text-white"
-                                }`}
-                              onClick={() =>
-                                updateDraftField("contentType", "realEstate")
-                              }
-                            >
-                              Bất động sản
-                            </button>
+                          <div className="flex min-h-10 items-center justify-between gap-2 rounded-md border border-amber-300/25 bg-amber-300/[0.06] px-3 py-2">
+                            <span className="text-xs font-black text-amber-100">
+                              {getContentTypeTag(scopedContentType)}
+                            </span>
+                            <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-500">
+                              Theo trang hiện tại
+                            </span>
                           </div>
-                          <span className="text-[10px] leading-4 text-slate-500">
-                            Chỉ dữ liệu Bất động sản mới hiện mác BĐS và dùng CMT riêng.
-                          </span>
                         </div>
 
                         <label className="flex min-w-0 flex-col gap-1.5">
                           <span className="text-xs font-bold text-slate-300">
-                            {draft.contentType === "realEstate"
-                              ? "Tên BĐS dùng cho tiêu đề CMT"
+                            {isPropertyContentType(scopedContentType)
+                              ? "Tên bất động sản"
                               : "Tên sản phẩm"}
                           </span>
                           <input
@@ -15709,7 +15774,7 @@ export default function LocalPage({
                             }
                             className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
                             placeholder={
-                              draft.contentType === "realEstate"
+                              isPropertyContentType(scopedContentType)
                                 ? "PHÚ NHUẬN - 28.1M2 - CÔ BẮC P1 - CÁCH Ô TÔ 1 CĂN"
                                 : "Dell Latitude 7440 i5 13th"
                             }
@@ -15731,125 +15796,132 @@ export default function LocalPage({
                               }
                               className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
                               placeholder={
-                                draft.contentType === "realEstate"
-                                  ? "4.6 Đ hoặc 4.6 Tỷ"
+                                isPropertyContentType(scopedContentType)
+                                  ? "Giá bán / giá thuê"
                                   : "13tr8"
                               }
                             />
                           </label>
 
-                          <div className="flex min-w-0 flex-col gap-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-bold text-slate-300">
-                                Danh mục
-                              </span>
-                              <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-500">
-                                Màu nhận diện
-                              </span>
-                            </div>
+                          {!isPropertyContentType(scopedContentType) ? (
+                            <div className="flex min-w-0 flex-col gap-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-slate-300">
+                                  Danh mục
+                                </span>
+                                <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-500">
+                                  Màu nhận diện
+                                </span>
+                              </div>
 
-                            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_42px_66px] gap-1.5">
-                              <input
-                                value={draft.category}
-                                list="local-product-category-options"
-                                onChange={(event) =>
-                                  updateDraftField(
-                                    "category",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
-                                placeholder="Laptop Dell"
-                              />
-
-                              <label
-                                title={
-                                  draft.category.trim()
-                                    ? `Chọn màu cho ${normalizeCategoryName(draft.category)}`
-                                    : "Nhập danh mục trước khi chọn màu"
-                                }
-                                className={`flex min-h-9 items-center justify-center overflow-hidden rounded-md border border-white/15 bg-slate-950 p-1 transition ${draft.category.trim()
-                                  ? "cursor-pointer hover:border-white/35"
-                                  : "cursor-not-allowed opacity-40"
-                                  }`}
-                              >
+                              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_42px_66px] gap-1.5">
                                 <input
-                                  type="color"
-                                  aria-label="Chọn màu danh mục"
-                                  disabled={!draft.category.trim()}
-                                  value={getCategoryColor(
-                                    draft.category,
-                                    settings.categoryColors,
-                                  )}
+                                  value={draft.category}
+                                  list="local-product-category-options"
                                   onChange={(event) =>
-                                    updateDraftCategoryColor(
+                                    updateDraftField(
+                                      "category",
                                       event.target.value,
                                     )
                                   }
-                                  className="h-7 w-full cursor-pointer border-0 bg-transparent p-0 disabled:cursor-not-allowed"
+                                  className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
+                                  placeholder="Laptop Dell"
                                 />
-                              </label>
 
-                              <button
-                                type="button"
-                                disabled={
-                                  !draft.category.trim() ||
-                                  !(
-                                    normalizeTextKey(draft.category) in
-                                    settings.categoryColors
+                                <label
+                                  title={
+                                    draft.category.trim()
+                                      ? `Chọn màu cho ${normalizeCategoryName(draft.category)}`
+                                      : "Nhập danh mục trước khi chọn màu"
+                                  }
+                                  className={`flex min-h-9 items-center justify-center overflow-hidden rounded-md border border-white/15 bg-slate-950 p-1 transition ${draft.category.trim()
+                                      ? "cursor-pointer hover:border-white/35"
+                                      : "cursor-not-allowed opacity-40"
+                                    }`}
+                                >
+                                  <input
+                                    type="color"
+                                    aria-label="Chọn màu danh mục"
+                                    disabled={!draft.category.trim()}
+                                    value={getCategoryColor(
+                                      draft.category,
+                                      settings.categoryColors,
+                                    )}
+                                    onChange={(event) =>
+                                      updateDraftCategoryColor(
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="h-7 w-full cursor-pointer border-0 bg-transparent p-0 disabled:cursor-not-allowed"
+                                  />
+                                </label>
+
+                                <button
+                                  type="button"
+                                  disabled={
+                                    !draft.category.trim() ||
+                                    !(
+                                      normalizeTextKey(draft.category) in
+                                      settings.categoryColors
+                                    )
+                                  }
+                                  className="min-h-9 rounded-md border border-white/10 bg-slate-900 px-1 text-[9px] font-black text-slate-400 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                  onClick={resetDraftCategoryColor}
+                                >
+                                  Mặc định
+                                </button>
+                              </div>
+
+                              <datalist id="local-product-category-options">
+                                {categories.map((category) => (
+                                  <option key={category} value={category} />
+                                ))}
+                              </datalist>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {!isPropertyContentType(scopedContentType) ? (
+                          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="flex min-w-0 flex-col gap-1.5">
+                              <span className="text-xs font-bold text-slate-300">
+                                Pin
+                              </span>
+                              <input
+                                value={draft.pin}
+                                maxLength={20}
+                                onChange={(event) =>
+                                  updateDraftField("pin", event.target.value)
+                                }
+                                className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-300/60"
+                                placeholder="8x%, 9x%, New"
+                              />
+                            </label>
+
+                            <label className="flex min-w-0 flex-col gap-1.5">
+                              <span className="text-xs font-bold text-slate-300">
+                                Trạng thái
+                              </span>
+                              <input
+                                value={draft.status}
+                                maxLength={40}
+                                onChange={(event) =>
+                                  updateDraftField(
+                                    "status",
+                                    event.target.value,
                                   )
                                 }
-                                className="min-h-9 rounded-md border border-white/10 bg-slate-900 px-1 text-[9px] font-black text-slate-400 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                                onClick={resetDraftCategoryColor}
-                              >
-                                Mặc định
-                              </button>
-                            </div>
-
-                            <datalist id="local-product-category-options">
-                              {categories.map((category) => (
-                                <option key={category} value={category} />
-                              ))}
-                            </datalist>
+                                className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60"
+                                placeholder="Nguyên zin"
+                              />
+                            </label>
                           </div>
-                        </div>
-
-                        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-                          <label className="flex min-w-0 flex-col gap-1.5">
-                            <span className="text-xs font-bold text-slate-300">
-                              Pin
-                            </span>
-                            <input
-                              value={draft.pin}
-                              maxLength={20}
-                              onChange={(event) =>
-                                updateDraftField("pin", event.target.value)
-                              }
-                              className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-300/60"
-                              placeholder="8x%, 9x%, New"
-                            />
-                          </label>
-
-                          <label className="flex min-w-0 flex-col gap-1.5">
-                            <span className="text-xs font-bold text-slate-300">
-                              Trạng thái
-                            </span>
-                            <input
-                              value={draft.status}
-                              maxLength={40}
-                              onChange={(event) =>
-                                updateDraftField("status", event.target.value)
-                              }
-                              className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60"
-                              placeholder="Nguyên zin"
-                            />
-                          </label>
-                        </div>
+                        ) : null}
 
                         <label className="flex min-h-0 min-w-0 flex-col gap-1.5">
                           <span className="text-xs font-bold text-slate-300">
-                            {draft.contentType === "realEstate"
-                              ? "Post bất động sản"
+                            {isPropertyContentType(scopedContentType)
+                              ? "Nội dung bài đăng"
                               : "Mô tả sản phẩm"}
                           </span>
                           <textarea
@@ -15861,22 +15933,22 @@ export default function LocalPage({
                               )
                             }
                             rows={8}
-                            className={`min-h-[220px] w-full min-w-0 resize-y rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 sm:min-h-[260px] ${draft.contentType === "realEstate"
-                              ? "xl:min-h-[260px]"
-                              : "xl:min-h-[calc(90dvh-260px)] xl:resize-none"
+                            className={`min-h-[220px] w-full min-w-0 resize-y rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 sm:min-h-[260px] ${isPropertyContentType(scopedContentType)
+                                ? "xl:min-h-[260px]"
+                                : "xl:min-h-[calc(90dvh-260px)] xl:resize-none"
                               }`}
                             placeholder={
-                              draft.contentType === "realEstate"
-                                ? "Nhập toàn bộ nội dung Post BĐS..."
+                              isPropertyContentType(scopedContentType)
+                                ? `Nhập nội dung ${getContentTypeTag(scopedContentType)}...`
                                 : "Để trống nếu muốn dùng mô tả chung..."
                             }
                           />
                         </label>
 
-                        {draft.contentType === "realEstate" ? (
+                        {isPropertyContentType(scopedContentType) ? (
                           <label className="flex min-h-0 min-w-0 flex-col gap-1.5">
                             <span className="text-xs font-bold text-amber-100">
-                              CMT riêng cho bất động sản
+                              CMT riêng cho {getContentTypeTag(scopedContentType)}
                             </span>
                             <textarea
                               value={draft.realEstateComment}
@@ -15888,7 +15960,9 @@ export default function LocalPage({
                               }
                               rows={7}
                               className="min-h-[210px] w-full min-w-0 resize-y rounded-md border border-amber-300/25 bg-slate-950/80 p-2 text-xs leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60"
-                              placeholder={"✅ Vị trí: ...\n✅ Diện tích: ...\n✅ Hiện trạng: ...\n✅ Ưu điểm: ..."}
+                              placeholder={
+                                "✅ Vị trí: ...\n✅ Diện tích: ...\n✅ Hiện trạng: ...\n✅ Ưu điểm: ..."
+                              }
                             />
                             <span className="text-[10px] leading-4 text-slate-500">
                               Khi copy Cmt, hệ thống tự ghép Tên - GIÁ theo giá nhập nguyên bản rồi thêm nội dung này và Liên hệ đang chọn.
@@ -16691,9 +16765,9 @@ export default function LocalPage({
                                 </div>
                               </div>
                               <div className="mt-1 flex flex-wrap gap-1">
-                                {product.contentType === "realEstate" ? (
+                                {isPropertyContentType(product.contentType) ? (
                                   <span className="rounded-md border border-amber-300/40 bg-amber-300/15 px-1.5 py-0.5 text-[9px] font-black text-amber-100">
-                                    BĐS
+                                    {getContentTypeTag(product.contentType)}
                                   </span>
                                 ) : null}
                                 {active ? (
@@ -19806,7 +19880,7 @@ export default function LocalPage({
             <FiMonitor aria-hidden="true" className="h-5 w-5" />
           </div>
           <h1 className="mt-3 text-sm font-black text-white">
-            {scopedContentType === "realEstate" ? "Bất động sản" : "Sản phẩm"} đang mở dạng cửa sổ nổi
+            {getContentTypeLabel(scopedContentType)} đang mở dạng cửa sổ nổi
           </h1>
           <p className="mt-2 text-xs leading-5 text-slate-400">
             Chuyển sang Facebook để tiếp tục thao tác trong cửa sổ nổi.
