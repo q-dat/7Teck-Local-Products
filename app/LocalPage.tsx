@@ -9159,9 +9159,9 @@ export default function LocalPage({
     const contentType = scopedContentType;
     const isProperty = isPropertyContentType(contentType);
     const pin = isProperty ? "" : draft.pin.trim();
-    const status = isProperty ? "" : draft.status.trim();
+    const status = draft.status.trim();
     const priceText = draft.priceText.trim();
-    const category = isProperty ? "" : draft.category.trim();
+    const category = draft.category.trim();
     const realEstateComment = draft.realEstateComment.trim();
 
     if (!rawName) {
@@ -15143,8 +15143,8 @@ export default function LocalPage({
                       href="/"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "technology"
-                          ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
-                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
+                        ? "border-cyan-200/55 bg-cyan-300/[0.07] text-cyan-50 shadow-[0_14px_38px_rgba(34,211,238,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-cyan-200/35 hover:bg-cyan-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15165,8 +15165,8 @@ export default function LocalPage({
                       href="/bds"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "realEstate"
-                          ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
-                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
+                        ? "border-amber-200/55 bg-amber-300/[0.07] text-amber-50 shadow-[0_14px_38px_rgba(245,158,11,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-200/35 hover:bg-amber-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15185,8 +15185,8 @@ export default function LocalPage({
                       href="/cho-thue"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "rental"
-                          ? "border-emerald-200/55 bg-emerald-300/[0.07] text-emerald-50 shadow-[0_14px_38px_rgba(16,185,129,0.08)]"
-                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-emerald-200/35 hover:bg-emerald-300/[0.045]"
+                        ? "border-emerald-200/55 bg-emerald-300/[0.07] text-emerald-50 shadow-[0_14px_38px_rgba(16,185,129,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-emerald-200/35 hover:bg-emerald-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15205,8 +15205,8 @@ export default function LocalPage({
                       href="/nnc"
                       onClick={() => closeModal()}
                       className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "nnc"
-                          ? "border-violet-200/55 bg-violet-300/[0.07] text-violet-50 shadow-[0_14px_38px_rgba(139,92,246,0.08)]"
-                          : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-violet-200/35 hover:bg-violet-300/[0.045]"
+                        ? "border-violet-200/55 bg-violet-300/[0.07] text-violet-50 shadow-[0_14px_38px_rgba(139,92,246,0.08)]"
+                        : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-violet-200/35 hover:bg-violet-300/[0.045]"
                         }`}
                     >
                       <span className="flex min-w-0 items-center gap-3">
@@ -15803,86 +15803,84 @@ export default function LocalPage({
                             />
                           </label>
 
-                          {!isPropertyContentType(scopedContentType) ? (
-                            <div className="flex min-w-0 flex-col gap-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-bold text-slate-300">
-                                  Danh mục
-                                </span>
-                                <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-500">
-                                  Màu nhận diện
-                                </span>
-                              </div>
+                          <div className="flex min-w-0 flex-col gap-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-300">
+                                Danh mục
+                              </span>
+                              <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-slate-500">
+                                Màu nhận diện
+                              </span>
+                            </div>
 
-                              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_42px_66px] gap-1.5">
+                            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_42px_66px] gap-1.5">
+                              <input
+                                value={draft.category}
+                                list="local-product-category-options"
+                                onChange={(event) =>
+                                  updateDraftField(
+                                    "category",
+                                    event.target.value,
+                                  )
+                                }
+                                className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
+                                placeholder="Laptop Dell"
+                              />
+
+                              <label
+                                title={
+                                  draft.category.trim()
+                                    ? `Chọn màu cho ${normalizeCategoryName(draft.category)}`
+                                    : "Nhập danh mục trước khi chọn màu"
+                                }
+                                className={`flex min-h-9 items-center justify-center overflow-hidden rounded-md border border-white/15 bg-slate-950 p-1 transition ${draft.category.trim()
+                                  ? "cursor-pointer hover:border-white/35"
+                                  : "cursor-not-allowed opacity-40"
+                                  }`}
+                              >
                                 <input
-                                  value={draft.category}
-                                  list="local-product-category-options"
+                                  type="color"
+                                  aria-label="Chọn màu danh mục"
+                                  disabled={!draft.category.trim()}
+                                  value={getCategoryColor(
+                                    draft.category,
+                                    settings.categoryColors,
+                                  )}
                                   onChange={(event) =>
-                                    updateDraftField(
-                                      "category",
+                                    updateDraftCategoryColor(
                                       event.target.value,
                                     )
                                   }
-                                  className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
-                                  placeholder="Laptop Dell"
+                                  className="h-7 w-full cursor-pointer border-0 bg-transparent p-0 disabled:cursor-not-allowed"
                                 />
+                              </label>
 
-                                <label
-                                  title={
-                                    draft.category.trim()
-                                      ? `Chọn màu cho ${normalizeCategoryName(draft.category)}`
-                                      : "Nhập danh mục trước khi chọn màu"
-                                  }
-                                  className={`flex min-h-9 items-center justify-center overflow-hidden rounded-md border border-white/15 bg-slate-950 p-1 transition ${draft.category.trim()
-                                      ? "cursor-pointer hover:border-white/35"
-                                      : "cursor-not-allowed opacity-40"
-                                    }`}
-                                >
-                                  <input
-                                    type="color"
-                                    aria-label="Chọn màu danh mục"
-                                    disabled={!draft.category.trim()}
-                                    value={getCategoryColor(
-                                      draft.category,
-                                      settings.categoryColors,
-                                    )}
-                                    onChange={(event) =>
-                                      updateDraftCategoryColor(
-                                        event.target.value,
-                                      )
-                                    }
-                                    className="h-7 w-full cursor-pointer border-0 bg-transparent p-0 disabled:cursor-not-allowed"
-                                  />
-                                </label>
-
-                                <button
-                                  type="button"
-                                  disabled={
-                                    !draft.category.trim() ||
-                                    !(
-                                      normalizeTextKey(draft.category) in
-                                      settings.categoryColors
-                                    )
-                                  }
-                                  className="min-h-9 rounded-md border border-white/10 bg-slate-900 px-1 text-[9px] font-black text-slate-400 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                                  onClick={resetDraftCategoryColor}
-                                >
-                                  Mặc định
-                                </button>
-                              </div>
-
-                              <datalist id="local-product-category-options">
-                                {categories.map((category) => (
-                                  <option key={category} value={category} />
-                                ))}
-                              </datalist>
+                              <button
+                                type="button"
+                                disabled={
+                                  !draft.category.trim() ||
+                                  !(
+                                    normalizeTextKey(draft.category) in
+                                    settings.categoryColors
+                                  )
+                                }
+                                className="min-h-9 rounded-md border border-white/10 bg-slate-900 px-1 text-[9px] font-black text-slate-400 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                onClick={resetDraftCategoryColor}
+                              >
+                                Mặc định
+                              </button>
                             </div>
-                          ) : null}
+
+                            <datalist id="local-product-category-options">
+                              {categories.map((category) => (
+                                <option key={category} value={category} />
+                              ))}
+                            </datalist>
+                          </div>
                         </div>
 
-                        {!isPropertyContentType(scopedContentType) ? (
-                          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                          {!isPropertyContentType(scopedContentType) ? (
                             <label className="flex min-w-0 flex-col gap-1.5">
                               <span className="text-xs font-bold text-slate-300">
                                 Pin
@@ -15897,26 +15895,26 @@ export default function LocalPage({
                                 placeholder="8x%, 9x%, New"
                               />
                             </label>
+                          ) : null}
 
-                            <label className="flex min-w-0 flex-col gap-1.5">
-                              <span className="text-xs font-bold text-slate-300">
-                                Trạng thái
-                              </span>
-                              <input
-                                value={draft.status}
-                                maxLength={40}
-                                onChange={(event) =>
-                                  updateDraftField(
-                                    "status",
-                                    event.target.value,
-                                  )
-                                }
-                                className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60"
-                                placeholder="Nguyên zin"
-                              />
-                            </label>
-                          </div>
-                        ) : null}
+                          <label className="flex min-w-0 flex-col gap-1.5">
+                            <span className="text-xs font-bold text-slate-300">
+                              Trạng thái
+                            </span>
+                            <input
+                              value={draft.status}
+                              maxLength={40}
+                              onChange={(event) =>
+                                updateDraftField(
+                                  "status",
+                                  event.target.value,
+                                )
+                              }
+                              className="w-full min-w-0 rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60"
+                              placeholder="Nguyên zin"
+                            />
+                          </label>
+                        </div>
 
                         <label className="flex min-h-0 min-w-0 flex-col gap-1.5">
                           <span className="text-xs font-bold text-slate-300">
@@ -15934,8 +15932,8 @@ export default function LocalPage({
                             }
                             rows={8}
                             className={`min-h-[220px] w-full min-w-0 resize-y rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 sm:min-h-[260px] ${isPropertyContentType(scopedContentType)
-                                ? "xl:min-h-[260px]"
-                                : "xl:min-h-[calc(90dvh-260px)] xl:resize-none"
+                              ? "xl:min-h-[260px]"
+                              : "xl:min-h-[calc(90dvh-260px)] xl:resize-none"
                               }`}
                             placeholder={
                               isPropertyContentType(scopedContentType)
