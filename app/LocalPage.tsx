@@ -519,7 +519,7 @@ const API_BASE_URL = "/api/local-products";
 const DEVICE_PREFERENCES_STORAGE_KEY =
   "local-products-device-preferences-v1";
 const defaultDevicePreferences: DevicePreferences = {
-  includeSocialTags: false,
+  includeSocialTags: true,
   autoCopyShareMode: "post",
   isCopyNfkcEnabled: false,
   selectedContactId: "",
