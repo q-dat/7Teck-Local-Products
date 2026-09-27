@@ -73,10 +73,31 @@ type ProductContentType =
   | "technology"
   | "realEstate"
   | "rental"
-  | "nnc";
+  | "propertyRental";
 
 type LocalPageScope = ProductContentType;
 type PropertyContentType = Exclude<ProductContentType, "technology">;
+
+const CONTENT_TYPE_ROUTES: Record<ProductContentType, string> = {
+  technology: "/",
+  realEstate: "/bds",
+  rental: "/cho-thue",
+  propertyRental: "/nnc",
+};
+
+const CONTENT_TYPE_LABELS: Record<ProductContentType, string> = {
+  technology: "Sản phẩm",
+  realEstate: "Bất động sản",
+  rental: "CHDV/Phòng trọ",
+  propertyRental: "Nhà nguyên căn / Mặt bằng",
+};
+
+const CONTENT_TYPE_TAGS: Record<ProductContentType, string> = {
+  technology: "Sản phẩm",
+  realEstate: "BĐS",
+  rental: "CHDV/Phòng trọ",
+  propertyRental: "Nhà nguyên căn / Mặt bằng",
+};
 
 const isPropertyContentType = (
   contentType: ProductContentType,
@@ -88,33 +109,24 @@ const isProductContentType = (
   value === "technology" ||
   value === "realEstate" ||
   value === "rental" ||
-  value === "nnc";
+  value === "propertyRental";
 
-const getContentTypeTag = (contentType: ProductContentType): string => {
-  switch (contentType) {
-    case "realEstate":
-      return "BĐS";
-    case "rental":
-      return "CHDV/Phòng trọ";
-    case "nnc":
-      return "NNC/CC/MB";
-    default:
-      return "Sản phẩm";
-  }
+const normalizeProductContentType = (
+  value: unknown,
+): ProductContentType => {
+  if (isProductContentType(value)) return value;
+
+  return "technology";
 };
 
-const getContentTypeLabel = (contentType: LocalPageScope): string => {
-  switch (contentType) {
-    case "realEstate":
-      return "Bất động sản";
-    case "rental":
-      return "Cho Thuê";
-    case "nnc":
-      return "NNC/CC/MB";
-    default:
-      return "Sản phẩm";
-  }
-};
+const getContentTypeTag = (contentType: ProductContentType): string =>
+  CONTENT_TYPE_TAGS[contentType];
+
+const getContentTypeLabel = (contentType: LocalPageScope): string =>
+  CONTENT_TYPE_LABELS[contentType];
+
+const getContentTypeRoute = (contentType: ProductContentType): string =>
+  CONTENT_TYPE_ROUTES[contentType];
 
 type LocalProduct = {
   id: string;
@@ -3057,9 +3069,7 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
   const pin = typeof record.pin === "string" ? record.pin : "";
   const status = typeof record.status === "string" ? record.status : "";
   const category = typeof record.category === "string" ? record.category : "";
-  const contentType: ProductContentType = isProductContentType(record.contentType)
-    ? record.contentType
-    : "technology";
+  const contentType = normalizeProductContentType(record.contentType);
   const realEstateComment =
     typeof record.realEstateComment === "string"
       ? record.realEstateComment
@@ -15202,9 +15212,9 @@ export default function LocalPage({
                     </Link>
 
                     <Link
-                      href="/nnc"
+                      href={getContentTypeRoute("propertyRental")}
                       onClick={() => closeModal()}
-                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "nnc"
+                      className={`group flex min-h-20 items-center justify-between gap-2 border p-2.5 text-left transition hover:-translate-y-0.5 ${scopedContentType === "propertyRental"
                         ? "border-violet-200/55 bg-violet-300/[0.07] text-violet-50 shadow-[0_14px_38px_rgba(139,92,246,0.08)]"
                         : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-violet-200/35 hover:bg-violet-300/[0.045]"
                         }`}
@@ -15214,8 +15224,8 @@ export default function LocalPage({
                           <FiArchive aria-hidden="true" className="h-3.5 w-3.5" />
                         </span>
                         <span className="min-w-0">
-                          <span className="block text-[10px] font-black">NNC/CC/MB</span>
-                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">/nnc</span>
+                          <span className="block text-[10px] font-black">Nhà nguyên căn / Mặt bằng</span>
+                          <span className="mt-0.5 block text-[8px] leading-3.5 text-slate-500">{getContentTypeRoute("propertyRental")}</span>
                         </span>
                       </span>
                       <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform group-hover:translate-x-0.5" />

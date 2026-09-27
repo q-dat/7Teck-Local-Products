@@ -1,3 +1,6 @@
+export type ProductContentType =
+  "technology" | "realEstate" | "rental" | "propertyRental";
+
 export type CloudinaryProductImage = {
   id: string;
   name: string;
@@ -18,7 +21,7 @@ export type ProductRecord = {
   price: number;
   priceText: string;
   category: string;
-  contentType: "technology" | "realEstate";
+  contentType: ProductContentType;
   realEstateComment: string;
   images: CloudinaryProductImage[];
   internalImages: CloudinaryProductImage[];
