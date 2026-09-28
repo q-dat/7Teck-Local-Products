@@ -4982,6 +4982,7 @@ export default function LocalPage({
   const previousContactOptionCountRef = useRef<number>(0);
   const systemDeleteTapCountRef = useRef<number>(0);
   const systemDeleteLastTapAtRef = useRef<number>(0);
+  const systemDeleteLogRef = useRef<HTMLParagraphElement | null>(null);
   const persistedAppStateSignaturesRef = useRef<{
     settings: string;
     scheduleConfig: string;
@@ -9717,27 +9718,100 @@ export default function LocalPage({
     }
   };
 
-  const handleClearAllLocalData = (): void => {
-    if (!requestWriteAccess()) return;
+  const SYSTEM_DELETE_REQUIRED_CLICKS = 5;
+  const SYSTEM_DELETE_CLICK_WINDOW_MS = 1000;
 
-    if (pendingConfirm || isConfirmExecuting || pageLoadingText) return;
+  const handleClearAllLocalData = (): void => {
+    const updateSystemDeleteLog = (
+      message: string,
+      tone: "info" | "success" | "warning" | "error" = "info",
+    ): void => {
+      const logElement = systemDeleteLogRef.current;
+
+      if (!logElement) return;
+
+      const toneClassName =
+        tone === "success"
+          ? "border-emerald-300/20 bg-emerald-300/[0.05] text-emerald-200"
+          : tone === "warning"
+            ? "border-amber-300/20 bg-amber-300/[0.05] text-amber-200"
+            : tone === "error"
+              ? "border-rose-300/20 bg-rose-300/[0.05] text-rose-200"
+              : "border-white/10 bg-slate-950/70 text-slate-400";
+
+      logElement.className = `mt-2 w-full rounded-md border px-2.5 py-1.5 text-center text-[10px] font-bold leading-4 transition-colors duration-200 ${toneClassName}`;
+      logElement.textContent = message;
+    };
+
+    if (!requestWriteAccess()) {
+      updateSystemDeleteLog(
+        "🔒 Không có quyền thực hiện thao tác.",
+        "error",
+      );
+      return;
+    }
+
+    if (pendingConfirm || isConfirmExecuting || pageLoadingText) {
+      updateSystemDeleteLog(
+        "⏳ Hệ thống đang xử lý, vui lòng chờ.",
+        "warning",
+      );
+      return;
+    }
 
     const now = Date.now();
-    const lastTapAt = systemDeleteLastTapAtRef.current;
+    const firstTapAt = systemDeleteLastTapAtRef.current;
 
-    if (lastTapAt > 0 && now - lastTapAt < 1000) {
+    // Bắt đầu một chu kỳ click mới
+    if (firstTapAt === 0) {
+      systemDeleteLastTapAtRef.current = now;
+      systemDeleteTapCountRef.current = 1;
+
+      updateSystemDeleteLog(
+        `🗑️ Lần 1/${SYSTEM_DELETE_REQUIRED_CLICKS} · Cần đủ trong ${SYSTEM_DELETE_CLICK_WINDOW_MS}ms.`,
+      );
       return;
     }
 
-    systemDeleteLastTapAtRef.current = now;
+    const elapsed = now - firstTapAt;
+
+    // Nếu đã quá thời gian cho phép thì reset và tính click hiện tại là lần đầu
+    if (elapsed > SYSTEM_DELETE_CLICK_WINDOW_MS) {
+      systemDeleteLastTapAtRef.current = now;
+      systemDeleteTapCountRef.current = 1;
+
+      updateSystemDeleteLog(
+        `⏱️ Hết ${SYSTEM_DELETE_CLICK_WINDOW_MS}ms · Reset → 1/${SYSTEM_DELETE_REQUIRED_CLICKS}.`,
+        "warning",
+      );
+      return;
+    }
+
+    // Click vẫn nằm trong khoảng thời gian cho phép
     systemDeleteTapCountRef.current += 1;
 
-    if (systemDeleteTapCountRef.current < 3) {
+    const clickCount = systemDeleteTapCountRef.current;
+    const remainingTime = Math.max(
+      0,
+      SYSTEM_DELETE_CLICK_WINDOW_MS - elapsed,
+    );
+
+    // Chưa đủ số lần click
+    if (clickCount < SYSTEM_DELETE_REQUIRED_CLICKS) {
+      updateSystemDeleteLog(
+        `🗑️ Lần ${clickCount}/${SYSTEM_DELETE_REQUIRED_CLICKS} · Còn ${remainingTime}ms.`,
+      );
       return;
     }
 
+    // Đủ số lần click
     systemDeleteTapCountRef.current = 0;
     systemDeleteLastTapAtRef.current = 0;
+
+    updateSystemDeleteLog(
+      `✅ Đủ ${SYSTEM_DELETE_REQUIRED_CLICKS} lần · ${elapsed}ms · Mở xác nhận.`,
+      "success",
+    );
 
     requestConfirm({
       title: "Xác nhận xóa dữ liệu hệ thống?",
@@ -9749,8 +9823,17 @@ export default function LocalPage({
       onCancel: () => {
         systemDeleteTapCountRef.current = 0;
         systemDeleteLastTapAtRef.current = 0;
+        updateSystemDeleteLog(
+          "↩️ Đã hủy xác nhận xóa dữ liệu.",
+          "warning",
+        );
       },
       onConfirm: () => {
+        updateSystemDeleteLog(
+          "✅ Đã xác nhận lần 1 · Yêu cầu xác nhận lần cuối.",
+          "success",
+        );
+
         requestConfirm({
           title: "Xóa dữ liệu hệ thống lần cuối?",
           description:
@@ -9761,8 +9844,18 @@ export default function LocalPage({
           onCancel: () => {
             systemDeleteTapCountRef.current = 0;
             systemDeleteLastTapAtRef.current = 0;
+            updateSystemDeleteLog(
+              "↩️ Đã hủy xác nhận xóa lần cuối.",
+              "warning",
+            );
           },
-          onConfirm: executeClearAllLocalData,
+          onConfirm: () => {
+            updateSystemDeleteLog(
+              "⚠️ Đã xác nhận lần cuối · Bắt đầu xóa dữ liệu hệ thống.",
+              "error",
+            );
+            void executeClearAllLocalData();
+          },
         });
       },
     });
@@ -13965,6 +14058,18 @@ export default function LocalPage({
               <button
                 type="button"
                 data-luxury-accent="sapphire"
+                title="Cài đặt cách mở link Meta, Fanpage và Group"
+                aria-label="Cài đặt cách mở link Meta, Fanpage và Group"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => openModal("facebookLinkSettings")}
+              >
+                <FiSettings aria-hidden="true" className={iconClassName} />
+                Link
+              </button>
+
+              <button
+                type="button"
+                data-luxury-accent="sapphire"
                 title="Quản lý Fanpage, Asset ID và Group"
                 aria-label="Quản lý Fanpage, Asset ID và Group"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
@@ -13974,17 +14079,7 @@ export default function LocalPage({
                 Facebook
               </button>
 
-              <button
-                type="button"
-                data-luxury-accent="sapphire"
-                title="Cài đặt cách mở link Meta, Fanpage và Group"
-                aria-label="Cài đặt cách mở link Meta, Fanpage và Group"
-                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
-                onClick={() => openModal("facebookLinkSettings")}
-              >
-                <FiSettings aria-hidden="true" className={iconClassName} />
-                Link
-              </button>
+
 
               <button
                 type="button"
@@ -14080,7 +14175,7 @@ export default function LocalPage({
                   ? `Ảnh nền ${pendingImageUploadCount}`
                   : availableRemoteSyncVersion !== null &&
                     availableRemoteSyncVersion > cacheSyncVersion
-                    ? "Đồng bộ Dữ liệu mới"
+                    ? "DLiệu mới"
                     : "Đồng bộ"}
               </button>
 
@@ -18272,18 +18367,18 @@ export default function LocalPage({
                       </button>
                     </article>
 
-                    <article className="flex min-w-0 flex-col rounded-md border border-rose-300/20 bg-rose-300/[0.05] p-3">
-                      <div className="flex items-center gap-2">
+                    <article className="flex min-w-0 flex-col rounded-md border border-rose-300/20 bg-rose-300/[0.05] p-3 ">
+                      <div className="flex items-center gap-2 ">
                         <FiTrash2
                           aria-hidden="true"
                           className="h-4 w-4 shrink-0 text-rose-200"
                         />
                         <div className="min-w-0">
                           <h3 className="text-xs font-black text-white">
-                            Xóa dữ liệu hệ thống
+                            Tự hủy hệ thống
                           </h3>
                           <p className="mt-0.5 text-[10px] text-slate-400">
-                            Xóa MongoDB và ảnh Cloudinary
+                            Tự hủy hệ thống
                           </p>
                         </div>
                       </div>
@@ -18291,16 +18386,24 @@ export default function LocalPage({
                       <button
                         type="button"
                         aria-disabled="true"
-                        className="mt-3 flex min-h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] font-black text-slate-500 opacity-70 transition hover:bg-slate-800 active:opacity-70 xl:mt-auto"
+                        className="mt-3 hidden 2xl:flex flex-col min-h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] font-black text-slate-500 opacity-70 transition hover:bg-slate-800 active:opacity-70 xl:mt-auto"
                         onClick={handleClearAllLocalData}
-                        title="Xóa dữ liệu hệ thống"
+                        title="Tự hủy hệ thống"
                       >
                         <FiTrash2
                           aria-hidden="true"
                           className={iconClassName}
                         />
-                        <span>Xóa toàn bộ dữ liệu</span>
+                        <span>Tự hủy hệ thống</span>
                       </button>
+                      <p
+                        ref={systemDeleteLogRef}
+                        aria-live="polite"
+                        className="hidden 2xl:block mt-2 w-full rounded-md border border-white/10 bg-slate-950/70 px-2.5 py-1.5 text-center text-[10px] font-bold leading-4 text-slate-400"
+                      >
+                        Cần {SYSTEM_DELETE_REQUIRED_CLICKS} lần click trong {SYSTEM_DELETE_CLICK_WINDOW_MS}ms để kích hoạt.
+                      </p>
+
                     </article>
                   </div>
 
@@ -18336,7 +18439,6 @@ export default function LocalPage({
                       onClick={toggleWriteAccess}
                     >
                       {isWriteAccessUnlocked ? <FiLock aria-hidden="true" className="h-3 w-3" /> : <FiUnlock aria-hidden="true" className="h-3 w-3" />}
-                      {isWriteAccessUnlocked ? "Khóa" : "Mở khóa"}
                     </button>
                   </div>
                 </section>
