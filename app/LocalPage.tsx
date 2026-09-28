@@ -5107,9 +5107,6 @@ export default function LocalPage({
     useState<LocalManagedImage[]>([]);
   const [localImageView, setLocalImageView] =
     useState<"active" | "trash">("active");
-  const [selectedLocalImageNames, setSelectedLocalImageNames] = useState<
-    Set<string>
-  >(() => new Set<string>());
   const [isLocalImageManagerBusy, setIsLocalImageManagerBusy] =
     useState<boolean>(false);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -8747,7 +8744,6 @@ export default function LocalPage({
 
       if (closingModal === "localImageManager") {
         setLocalImageView("active");
-        setSelectedLocalImageNames(new Set<string>());
       }
 
       if (closingModal === "contact") {
@@ -8783,7 +8779,6 @@ export default function LocalPage({
     setAlbumSource(null);
     setImageDownloadCategory("all");
     setLocalImageView("active");
-    setSelectedLocalImageNames(new Set<string>());
     setPendingConfirm(null);
     setPendingBackup(null);
     setPendingDownload(null);
@@ -9940,14 +9935,6 @@ export default function LocalPage({
 
     setLocalImageFiles(snapshot.active);
     setLocalTrashImageFiles(snapshot.trash);
-    setSelectedLocalImageNames(
-      new Set<string>(
-        (view === "trash" ? snapshot.trash : snapshot.active).map(
-          (file) => file.name,
-        ),
-      ),
-    );
-
     return snapshot;
   };
 
@@ -10017,38 +10004,9 @@ export default function LocalPage({
         setLocalImageDirectoryPermission("prompt");
         setLocalImageFiles([]);
         setLocalTrashImageFiles([]);
-        setSelectedLocalImageNames(new Set<string>());
         Toastify("Đã bỏ liên kết thư mục ảnh", 200);
       },
     });
-  };
-
-  const handleMoveSelectedLocalImagesToTrash = async (): Promise<void> => {
-    const names = Array.from(selectedLocalImageNames);
-
-    if (names.length === 0) {
-      Toastify("Chưa chọn ảnh cần đưa vào _trash", 300);
-      return;
-    }
-
-    const handle = await getWritableLocalImageDirectory();
-
-    if (!handle) return;
-
-    setIsLocalImageManagerBusy(true);
-
-    try {
-      const result = await moveLocalImagesToTrash(handle, names);
-      await applyLocalImageDirectorySnapshot(handle);
-      Toastify(
-        result.failed > 0
-          ? `Đã chuyển ${result.moved} ảnh, ${result.failed} ảnh lỗi`
-          : `Đã chuyển ${result.moved} ảnh vào _trash`,
-        result.failed > 0 ? 300 : 200,
-      );
-    } finally {
-      setIsLocalImageManagerBusy(false);
-    }
   };
 
   const handleHeaderLocalImageShortcut = async (): Promise<void> => {
@@ -10056,7 +10014,6 @@ export default function LocalPage({
 
     setIsHeaderActionsMenuOpen(false);
     setLocalImageView("trash");
-    setSelectedLocalImageNames(new Set<string>());
     setIsLocalImageManagerBusy(true);
     setPageLoadingText("Đang cập nhật danh sách ảnh trên máy...");
     await waitForUiPaint();
@@ -10115,11 +10072,11 @@ export default function LocalPage({
     }
   };
 
-  const handleRestoreSelectedLocalImages = (): void => {
-    const names = Array.from(selectedLocalImageNames);
+  const handleRestoreLocalTrashImages = (): void => {
+    const names = localTrashImageFiles.map((file) => file.name);
 
     if (names.length === 0) {
-      Toastify("Chưa chọn ảnh cần khôi phục", 300);
+      Toastify("_trash hiện không có ảnh để khôi phục", 300);
       return;
     }
 
@@ -10152,11 +10109,11 @@ export default function LocalPage({
     });
   };
 
-  const handlePermanentlyDeleteSelectedLocalImages = (): void => {
-    const names = Array.from(selectedLocalImageNames);
+  const handlePermanentlyDeleteLocalTrashImages = (): void => {
+    const names = localTrashImageFiles.map((file) => file.name);
 
     if (names.length === 0) {
-      Toastify("Chưa chọn ảnh cần xóa vĩnh viễn", 300);
+      Toastify("_trash hiện không có ảnh để xóa vĩnh viễn", 300);
       return;
     }
 
@@ -15355,12 +15312,17 @@ export default function LocalPage({
 
                   <article className="min-w-0 border border-white/10 bg-slate-900/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <div><h3 className="text-xs font-black text-white">Ảnh trong _trash</h3><p className="mt-0.5 text-[9px] text-slate-500">Chọn ảnh để khôi phục hoặc xóa vĩnh viễn.</p></div>
-                      <button type="button" disabled={localTrashImageFiles.length === 0 || isLocalImageManagerBusy} className="border border-white/10 bg-slate-800 px-2.5 py-1.5 text-[9px] font-black text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => setSelectedLocalImageNames(new Set<string>(localTrashImageFiles.map((file) => file.name)))}>Chọn tất cả</button>
+                      <div>
+                        <h3 className="text-xs font-black text-white">Ảnh trong _trash</h3>
+                        <p className="mt-0.5 text-[9px] text-slate-500">Các thao tác bên dưới áp dụng cho toàn bộ ảnh đang có trong _trash.</p>
+                      </div>
+                      <span className="shrink-0 border border-white/10 bg-slate-800 px-2 py-1 text-[9px] font-black text-slate-300">
+                        {localTrashImageFiles.length} ảnh
+                      </span>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-1.5">
-                      <button type="button" disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy} className="border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handleRestoreSelectedLocalImages}>Khôi phục</button>
-                      <button type="button" disabled={selectedLocalImageNames.size === 0 || isLocalImageManagerBusy} className="border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handlePermanentlyDeleteSelectedLocalImages}>Xóa vĩnh viễn</button>
+                      <button type="button" disabled={localTrashImageFiles.length === 0 || isLocalImageManagerBusy} className="border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handleRestoreLocalTrashImages}>Khôi phục tất cả</button>
+                      <button type="button" disabled={localTrashImageFiles.length === 0 || isLocalImageManagerBusy} className="border border-rose-300/35 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-40" onClick={handlePermanentlyDeleteLocalTrashImages}>Xóa vĩnh viễn tất cả</button>
                     </div>
                     <div className="mt-2 max-h-[42dvh] min-w-0 overflow-y-auto border border-white/10 bg-slate-950/70">
                       {localTrashImageFiles.length === 0 ? (
