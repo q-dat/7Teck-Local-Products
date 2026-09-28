@@ -10710,11 +10710,10 @@ export default function LocalPage({
     });
   };
 
-  const executeOpenMetaBusinessComposer = async (
+  const executeOpenMetaBusinessPost = async (
     openerWindow: Window,
     request: ShareRequest,
     page: FacebookPageOption,
-    mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
     const composerUrl = createMetaBusinessComposerUrl(page.assetId);
@@ -10724,41 +10723,41 @@ export default function LocalPage({
       return;
     }
 
-    const isNativeTab = facebookLinkOpenSettings.pagePost === "tab";
-    const composerOpenResult: FacebookWindowOpenResult = isNativeTab
-      ? { window: null, mode: "tab", usedPopupFallback: false }
-      : openFacebookWindow(
-        openerWindow,
-        composerUrl,
-        `composer-${page.id}`,
-        facebookLinkOpenSettings.pagePost,
-      );
+    openFacebookWindow(
+      openerWindow,
+      composerUrl,
+      `composer-${page.id}`,
+      facebookLinkOpenSettings.pagePost,
+    );
 
     setIsShareExecuting(true);
+
     const imageDownloadLabel = prepareMetaImageDownload(
       request,
       shouldDownload,
     );
 
-    Toastify(imageDownloadLabel, imageDownloadLabel.startsWith("đang tải") ? 200 : 300);
+    Toastify(
+      imageDownloadLabel,
+      imageDownloadLabel.startsWith("đang tải") ? 200 : 300,
+    );
+
     setIsShareExecuting(false);
   };
 
-  const handleOpenMetaBusinessComposer = (
+  const handleOpenMetaBusinessPost = (
     openerWindow: Window,
     page: FacebookPageOption,
-    mode: Exclude<ShareContentMode, "imagesOnly">,
   ): void => {
     if (!pendingShare || isShareExecuting) return;
 
     const request = pendingShare;
 
     requestMetaImageDownloadDecision(request, (shouldDownload) =>
-      executeOpenMetaBusinessComposer(
+      executeOpenMetaBusinessPost(
         openerWindow,
         request,
         page,
-        mode,
         shouldDownload,
       ),
     );
@@ -10769,7 +10768,6 @@ export default function LocalPage({
     request: ShareRequest,
     group: FacebookGroupOption,
     groupIndex: number,
-    mode: Exclude<ShareContentMode, "imagesOnly">,
     shouldDownload: boolean,
   ): Promise<void> => {
     const isNativeTab = facebookLinkOpenSettings.group === "tab";
@@ -10796,7 +10794,6 @@ export default function LocalPage({
   const handleOpenFacebookGroup = (
     openerWindow: Window,
     groupIndex: number,
-    mode: Exclude<ShareContentMode, "imagesOnly">,
   ): void => {
     if (!pendingShare || isShareExecuting) return;
 
@@ -10816,7 +10813,6 @@ export default function LocalPage({
         request,
         group,
         groupIndex,
-        mode,
         shouldDownload,
       ),
     );
@@ -19069,7 +19065,7 @@ export default function LocalPage({
       </AnimatePresence>
 
       {pendingConfirm ? (
-        <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center p-2">
+        <div className="luxury-modal-overlay fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center p-2">
           <div className={compactLuxuryDialogClassName}>
             <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-2">
               <div className="">
@@ -19556,7 +19552,7 @@ export default function LocalPage({
                           Fanpage Facebook
                         </p>
                         <p className="mt-0.5 text-[9px] text-slate-500">
-                          Copy nội dung, tải ảnh chính và mở Meta Business
+                          Tải ảnh chính và mở Meta Business
                           Composer
                         </p>
                       </div>
@@ -19579,105 +19575,30 @@ export default function LocalPage({
                             </p>
                           </div>
 
-                          {facebookLinkOpenSettings.pagePost === "tab" ? (
-                            <>
-                              <a
-                                href={createMetaBusinessComposerUrl(option.assetId)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-disabled={isShareExecuting}
-                                className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 p-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
-                                onClick={(event) => {
-                                  if (isShareExecuting) {
-                                    event.preventDefault();
-                                    return;
-                                  }
+                          <button
+                            type="button"
+                            disabled={isShareExecuting}
+                            className="col-span-2 min-h-9 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                            onClick={(event) => {
+                              if (isShareExecuting) return;
 
-                                  const openerWindow =
-                                    event.currentTarget.ownerDocument.defaultView ??
-                                    window;
+                              const openerWindow =
+                                event.currentTarget.ownerDocument.defaultView ??
+                                window;
 
-                                  handleOpenMetaBusinessComposer(
-                                    openerWindow,
-                                    option,
-                                    "post",
-                                  );
-                                }}
-                              >
-                                Meta Post
-                              </a>
-
-                              <a
-                                href={createMetaBusinessComposerUrl(option.assetId)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-disabled={isShareExecuting}
-                                className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 p-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
-                                onClick={(event) => {
-                                  if (isShareExecuting) {
-                                    event.preventDefault();
-                                    return;
-                                  }
-
-                                  const openerWindow =
-                                    event.currentTarget.ownerDocument.defaultView ??
-                                    window;
-
-                                  handleOpenMetaBusinessComposer(
-                                    openerWindow,
-                                    option,
-                                    "comment",
-                                  );
-                                }}
-                              >
-                                Meta Cmt
-                              </a>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                disabled={isShareExecuting}
-                                className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                onClick={(event) => {
-                                  const openerWindow =
-                                    event.currentTarget.ownerDocument.defaultView ??
-                                    window;
-
-                                  handleOpenMetaBusinessComposer(
-                                    openerWindow,
-                                    option,
-                                    "post",
-                                  );
-                                }}
-                              >
-                                Meta Post
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={isShareExecuting}
-                                className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                onClick={(event) => {
-                                  const openerWindow =
-                                    event.currentTarget.ownerDocument.defaultView ??
-                                    window;
-
-                                  handleOpenMetaBusinessComposer(
-                                    openerWindow,
-                                    option,
-                                    "comment",
-                                  );
-                                }}
-                              >
-                                Meta Cmt
-                              </button>
-                            </>)}
+                              handleOpenMetaBusinessPost(
+                                openerWindow,
+                                option,
+                              );
+                            }}
+                          >
+                            Mở Post
+                          </button>
                         </article>
                       ))}
                     </div>
                     <p className="mt-auto pt-3 text-[9px] leading-4 text-slate-400">
-                      Meta Post/Cmt luôn tự tải ảnh chính và bỏ qua ảnh nội bộ. Mobile có thể dùng các nút chia sẻ bên dưới để gửi ảnh qua Share Sheet.
+                      Mở Post sẽ tải ảnh chính và mở Meta Business Composer. Nội dung đã được tự động copy từ thao tác Chia sẻ; Mobile có thể dùng các nút chia sẻ bên dưới để gửi ảnh qua Share Sheet.
                     </p>
                   </>
                 ) : (
@@ -19807,7 +19728,6 @@ export default function LocalPage({
                                           handleOpenFacebookGroup(
                                             openerWindow,
                                             groupIndex,
-                                            "post",
                                           );
                                         }}
                                       >
@@ -19828,7 +19748,6 @@ export default function LocalPage({
                                           handleOpenFacebookGroup(
                                             openerWindow,
                                             groupIndex,
-                                            "post",
                                           );
                                         }}
                                       >
