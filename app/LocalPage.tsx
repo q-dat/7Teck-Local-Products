@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import {
   useCallback,
@@ -249,6 +249,7 @@ type DevicePreferences = {
   isCopyNfkcEnabled: boolean;
   selectedContactId: string;
   isHeaderVisible: boolean;
+  isRemoteSyncReminderEnabled: boolean;
 };
 
 type FacebookLinkOpenKey =
@@ -536,6 +537,7 @@ const defaultDevicePreferences: DevicePreferences = {
   isCopyNfkcEnabled: false,
   selectedContactId: "",
   isHeaderVisible: false,
+  isRemoteSyncReminderEnabled: true,
 };
 
 const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
@@ -553,6 +555,8 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
         ? record.selectedContactId.trim()
         : "",
     isHeaderVisible: record.isHeaderVisible === true,
+    isRemoteSyncReminderEnabled:
+      record.isRemoteSyncReminderEnabled !== false,
   };
 };
 
@@ -5093,6 +5097,8 @@ export default function LocalPage({
   const [autoCopyShareMode, setAutoCopyShareMode] =
     useState<AutoCopyShareMode>("post");
   const [selectedContactId, setSelectedContactId] = useState<string>("");
+  const [isRemoteSyncReminderEnabled, setIsRemoteSyncReminderEnabled] =
+    useState<boolean>(true);
   const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
   const prefersReducedMotion = useReducedMotion();
@@ -5277,6 +5283,7 @@ export default function LocalPage({
       setIsCopyNfkcEnabled(preferences.isCopyNfkcEnabled);
       setSelectedContactId(preferences.selectedContactId);
       setIsHeaderVisible(preferences.isHeaderVisible);
+      setIsRemoteSyncReminderEnabled(preferences.isRemoteSyncReminderEnabled);
     };
 
     applyPreferences(loadDevicePreferences());
@@ -5312,6 +5319,7 @@ export default function LocalPage({
       isCopyNfkcEnabled,
       selectedContactId,
       isHeaderVisible,
+      isRemoteSyncReminderEnabled,
     });
   }, [
     includeSocialTags,
@@ -5319,6 +5327,7 @@ export default function LocalPage({
     isCopyNfkcEnabled,
     isDevicePreferencesReady,
     isHeaderVisible,
+    isRemoteSyncReminderEnabled,
     selectedContactId,
   ]);
 
@@ -7145,6 +7154,24 @@ export default function LocalPage({
     }
   }, [isSettingsReady, registerRemoteSyncVersion]);
 
+  const handleToggleRemoteSyncReminder = useCallback((): void => {
+    const nextEnabled = !isRemoteSyncReminderEnabled;
+
+    setIsRemoteSyncReminderEnabled(nextEnabled);
+
+    if (nextEnabled) {
+      remoteSyncPromptedVersionRef.current = 0;
+      remoteSyncDismissedVersionRef.current = 0;
+    }
+
+    Toastify(
+      nextEnabled
+        ? "Đã bật nhắc khi có dữ liệu mới cần đồng bộ"
+        : "Đã tắt nhắc khi có dữ liệu mới cần đồng bộ",
+      200,
+    );
+  }, [isRemoteSyncReminderEnabled]);
+
   const handleReloadPage = async (): Promise<void> => {
     setPageLoadingText("Đang lưu cache và làm mới trang...");
     await waitForUiPaint();
@@ -7261,6 +7288,7 @@ export default function LocalPage({
 
     if (
       !isSettingsReady ||
+      !isRemoteSyncReminderEnabled ||
       remoteVersion === null ||
       remoteVersion <= syncVersionRef.current ||
       remoteSyncPromptedVersionRef.current === remoteVersion ||
@@ -7285,9 +7313,14 @@ export default function LocalPage({
         "Dữ liệu đã được cập nhật ở thiết bị khác. Đồng bộ chỉ lấy phần thay đổi, không xóa Blob cache ảnh đang có trên thiết bị này.",
       confirmLabel: "Đồng bộ ngay",
       cancelLabel: "Để sau",
+      secondaryLabel: "Không nhắc lại",
       tone: "default",
       onCancel: () => {
         remoteSyncDismissedVersionRef.current = remoteVersion;
+      },
+      onSecondary: () => {
+        remoteSyncDismissedVersionRef.current = remoteVersion;
+        setIsRemoteSyncReminderEnabled(false);
       },
       onConfirm: async () => {
         const synchronized = await handleRefreshCloudData({
@@ -7308,6 +7341,7 @@ export default function LocalPage({
     isBackupSaving,
     isConfirmExecuting,
     isFacebookSearchDialogOpen,
+    isRemoteSyncReminderEnabled,
     isSettingsReady,
     isShareExecuting,
     pendingBackup,
@@ -13626,7 +13660,7 @@ export default function LocalPage({
               data-expanded={isHeaderActionsMenuOpen ? "true" : undefined}
               className={`${isHeaderActionsMenuOpen
                 ? "header-actions-menu-open pointer-events-auto fixed left-1/2 top-1/2 z-[1201] grid max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-3rem)] xl:max-w-5xl xl:grid-cols-4 xl:gap-3 xl:p-4"
-                : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] xl:grid-cols-[repeat(18,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
+                : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] xl:grid-cols-[repeat(19,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
                 }`}
               onClick={() => {
                 if (isHeaderActionsMenuOpen) {
@@ -14046,8 +14080,32 @@ export default function LocalPage({
                   ? `Ảnh nền ${pendingImageUploadCount}`
                   : availableRemoteSyncVersion !== null &&
                     availableRemoteSyncVersion > cacheSyncVersion
-                    ? "Dữ liệu mới"
+                    ? "Đồng bộ Dữ liệu mới"
                     : "Đồng bộ"}
+              </button>
+
+              <button
+                type="button"
+                data-luxury-accent="amber"
+                title={
+                  isRemoteSyncReminderEnabled
+                    ? "Tắt nhắc tự động khi có dữ liệu mới cần đồng bộ"
+                    : "Bật lại nhắc tự động khi có dữ liệu mới cần đồng bộ"
+                }
+                aria-label={
+                  isRemoteSyncReminderEnabled
+                    ? "Tắt nhắc đồng bộ"
+                    : "Bật nhắc đồng bộ"
+                }
+                aria-pressed={isRemoteSyncReminderEnabled}
+                className={`${headerActionButtonBaseClassName} ${isRemoteSyncReminderEnabled
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName
+                  }`}
+                onClick={handleToggleRemoteSyncReminder}
+              >
+                <FiBell aria-hidden="true" className={iconClassName} />
+                {isRemoteSyncReminderEnabled ? "Nhắc: Bật" : "Nhắc: Tắt"}
               </button>
 
             </div>
