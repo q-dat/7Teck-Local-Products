@@ -19195,7 +19195,7 @@ export default function LocalPage({
         <div className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5">
           <div
             data-share-dialog="true"
-            className="luxury-dialog flex h-[calc(100dvh-1rem)] w-full min-w-0 max-w-6xl flex-col overflow-hidden border p-3 xl:h-[calc(100dvh-2.5rem)] xl:p-4"
+            className="luxury-dialog max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-6xl overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-2.5rem)] xl:overflow-y-auto xl:p-4"
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d8c99f]/20 pb-3">
               <div className="min-w-0">
@@ -19222,6 +19222,7 @@ export default function LocalPage({
                   setIncludeInternalShareImages(true);
                   setShareDialogStep("share");
                   setFacebookGroupActiveIndex(0);
+                  setIsShareMoreOpen(false);
                 }}
                 aria-label="Đóng chọn nội dung chia sẻ"
               >
@@ -19328,6 +19329,9 @@ export default function LocalPage({
                       <p className="text-[9px] font-black uppercase tracking-[0.12em] text-emerald-200/80">
                         Liên hệ cho lượt share này
                       </p>
+                      <p className="mt-0.5 text-[8px] leading-4 text-slate-500">
+                        Mặc định lấy liên hệ đang chọn trong Setting. Chọn mục khác chỉ thay nội dung đã copy của lượt Share này, không đổi liên hệ mặc định.
+                      </p>
                     </div>
                     <span className="shrink-0 border border-emerald-200/30 bg-emerald-200/10 px-2 py-1 text-[8px] font-black text-emerald-100">
                       {shareContactOption ? "TẠM THỜI" : "CHƯA CÓ"}
@@ -19375,424 +19379,442 @@ export default function LocalPage({
             </section>
 
             {shareDialogStep === "share" ? (
-              <>
-                <button
-                  type="button"
-                  disabled={isShareExecuting}
-                  aria-expanded={isShareMoreOpen}
-                  aria-controls="share-more-sections"
-                  className={`mt-2 flex min-h-10 shrink-0 w-full items-center justify-between gap-3 border px-3 py-2 text-left text-[10px] font-black transition active:opacity-80 disabled:cursor-wait disabled:opacity-50 ${isShareMoreOpen
-                    ? "border-[#d8c99f]/45 bg-[#d8c99f]/[0.08] text-[#f4e8c7]"
-                    : "border-white/10 bg-slate-950/55 text-slate-300 hover:border-[#d8c99f]/30 hover:bg-[#d8c99f]/[0.05]"
-                    }`}
-                  onClick={() => setIsShareMoreOpen((current) => !current)}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0">Khác</span>
-                    <span className="min-w-0 truncate text-[9px] font-medium text-slate-500">
-                      Fanpage và Group Facebook
-                    </span>
-                  </span>
-                  <FiChevronRight
-                    aria-hidden="true"
-                    className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${isShareMoreOpen ? "rotate-90" : ""
-                      }`}
-                  />
-                </button>
-
-                <div className="min-h-0 flex-1">
-                  <AnimatePresence initial={false}>
-                    {isShareMoreOpen ? (
-                      <motion.div
-                        id="share-more-sections"
-                        initial={{ height: 0, opacity: 0, y: -4 }}
-                        animate={{ height: "100%", opacity: 1, y: 0 }}
-                        exit={{ height: 0, opacity: 0, y: -4 }}
-                        transition={{ duration: 0.2, ease: "easeOut" }}
-                        className="mt-2 h-full min-h-0 overflow-hidden"
-                      >
-                        <div className="grid h-full min-h-0 min-w-0 grid-cols-2 gap-2">
-                          <section className="flex min-h-0 min-w-0 flex-col border border-sky-300/25 bg-sky-300/[0.055] p-2.5">
-                            {settings.facebookPages.length > 0 ? (
-                              <>
-                                <div className="mb-3 flex items-center justify-between gap-2 border-b border-sky-300/15 pb-2">
-                                  <div>
-                                    <p className="text-[10px] font-black text-sky-100">
-                                      Fanpage Facebook
-                                    </p>
-                                  </div>
-                                  <span className="border border-sky-200/30 bg-sky-200/10 px-2 py-1 text-[9px] font-black text-sky-100">
-                                    Page
-                                  </span>
-                                </div>
-                                <div className="min-h-0 flex-1 space-y-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
-                                  {settings.facebookPages.map((option) => (
-                                    <article
-                                      key={option.id}
-                                      className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-stretch gap-1.5 border border-white/10 bg-slate-950/55 p-1.5"
-                                    >
-                                      <div className="min-w-0 px-1.5 py-1">
-                                        <p className="truncate text-[10px] font-black text-[#eadfbe]">
-                                          {option.name}
-                                        </p>
-                                        <p className="mt-0.5 truncate font-mono text-[8px] text-slate-500">
-                                          {option.assetId}
-                                        </p>
-                                      </div>
-
-                                      {facebookLinkOpenSettings.pagePost === "tab" ? (
-                                        <>
-                                          <a
-                                            href={createMetaBusinessComposerUrl(option.assetId)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            aria-disabled={isShareExecuting}
-                                            className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 p-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
-                                            onClick={(event) => {
-                                              if (isShareExecuting) {
-                                                event.preventDefault();
-                                                return;
-                                              }
-
-                                              const openerWindow =
-                                                event.currentTarget.ownerDocument.defaultView ??
-                                                window;
-
-                                              handleOpenMetaBusinessComposer(
-                                                openerWindow,
-                                                option,
-                                                "post",
-                                              );
-                                            }}
-                                          >
-                                            Meta Post
-                                          </a>
-
-                                          <a
-                                            href={createMetaBusinessComposerUrl(option.assetId)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            aria-disabled={isShareExecuting}
-                                            className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 p-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
-                                            onClick={(event) => {
-                                              if (isShareExecuting) {
-                                                event.preventDefault();
-                                                return;
-                                              }
-
-                                              const openerWindow =
-                                                event.currentTarget.ownerDocument.defaultView ??
-                                                window;
-
-                                              handleOpenMetaBusinessComposer(
-                                                openerWindow,
-                                                option,
-                                                "comment",
-                                              );
-                                            }}
-                                          >
-                                            Meta Cmt
-                                          </a>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <button
-                                            type="button"
-                                            disabled={isShareExecuting}
-                                            className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                            onClick={(event) => {
-                                              const openerWindow =
-                                                event.currentTarget.ownerDocument.defaultView ??
-                                                window;
-
-                                              handleOpenMetaBusinessComposer(
-                                                openerWindow,
-                                                option,
-                                                "post",
-                                              );
-                                            }}
-                                          >
-                                            Meta Post
-                                          </button>
-
-                                          <button
-                                            type="button"
-                                            disabled={isShareExecuting}
-                                            className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                            onClick={(event) => {
-                                              const openerWindow =
-                                                event.currentTarget.ownerDocument.defaultView ??
-                                                window;
-
-                                              handleOpenMetaBusinessComposer(
-                                                openerWindow,
-                                                option,
-                                                "comment",
-                                              );
-                                            }}
-                                          >
-                                            Meta Cmt
-                                          </button>
-                                        </>)}
-                                    </article>
-                                  ))}
-                                </div>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={isShareExecuting}
-                                className="w-full border border-dashed border-[#d8c99f]/30 bg-black/20 px-3 py-2 text-[10px] font-black text-[#eadfbe] transition hover:bg-[#d8c99f]/[0.08] disabled:opacity-40"
-                                onClick={() => {
-                                  clearPersistedShareModalState();
-                                  setPendingShare(null);
-                                  setShareContactId("");
-                                  setIncludeInternalShareImages(true);
-                                  openModal("facebookPages");
-                                }}
-                              >
-                                Cấu hình Fanpage và Asset ID
-                              </button>
-                            )}
-                          </section>
-
-                          <section className="flex min-h-0 min-w-0 flex-col border border-fuchsia-300/25 bg-fuchsia-300/[0.055] p-2.5">
-                            {selectedFacebookGroups.length > 0 ? (
-                              <>
-                                <div className="flex min-w-0 items-start justify-between gap-2 border-b border-fuchsia-300/15 pb-2">
-                                  <div className="min-w-0">
-                                    <p className="text-[10px] font-black text-fuchsia-100">
-                                      Danh sách Group Facebook
-                                    </p>
-                                  </div>
-                                  <span className="shrink-0 border border-fuchsia-200/35 bg-fuchsia-200/10 px-2 py-1 text-[9px] font-black text-fuchsia-100">
-                                    {selectedFacebookGroups.length} Group
-                                  </span>
-                                </div>
-
-                                <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
-                                  {selectedFacebookGroupGroups.map((categoryGroup) => (
-                                    <section
-                                      key={normalizeTextKey(categoryGroup.category)}
-                                      className="min-w-0 border border-violet-300/15 bg-black/15 p-1.5"
-                                    >
-                                      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-violet-300/15 px-1 pb-1.5">
-                                        <p className="truncate text-[9px] font-black text-violet-100">
-                                          {categoryGroup.category}
-                                        </p>
-                                        <span className="shrink-0 border border-violet-200/25 bg-violet-300/10 px-1.5 py-0.5 text-[8px] font-black text-violet-100">
-                                          {categoryGroup.options.length}
-                                        </span>
-                                      </div>
-
-                                      <div className="mt-1.5 space-y-1.5">
-                                        {categoryGroup.options.map(
-                                          ({ option: group, index: groupIndex }) => {
-                                            const isActiveGroup =
-                                              groupIndex ===
-                                              facebookGroupActiveIndex % selectedFacebookGroups.length;
-
-                                            return (
-                                              <article
-                                                key={group.id}
-                                                className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 border p-1.5 transition ${isActiveGroup
-                                                  ? "border-[#f0e3c0]/65 bg-[linear-gradient(135deg,rgba(216,201,159,0.16),rgba(139,92,246,0.08))] shadow-[inset_3px_0_0_rgba(240,227,192,0.75),0_8px_24px_rgba(0,0,0,0.18)]"
-                                                  : "border-white/10 bg-slate-950/55 hover:border-violet-300/30 hover:bg-violet-300/[0.06]"
-                                                  }`}
-                                              >
-                                                <button
-                                                  type="button"
-                                                  disabled={isShareExecuting}
-                                                  aria-pressed={isActiveGroup}
-                                                  className="flex min-w-0 cursor-pointer items-center gap-2 px-1.5 py-1 text-left disabled:cursor-wait disabled:opacity-50"
-                                                  onClick={() => setFacebookGroupActiveIndex(groupIndex)}
-                                                >
-                                                  <span
-                                                    aria-hidden="true"
-                                                    className={`h-2 w-2 shrink-0 border ${isActiveGroup
-                                                      ? "border-[#f0e3c0] bg-[#f0e3c0] shadow-[0_0_10px_rgba(240,227,192,0.55)]"
-                                                      : "border-slate-600 bg-slate-900"
-                                                      }`}
-                                                  />
-
-                                                  <span className="min-w-0 flex-1">
-                                                    <span className="mb-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-violet-200/75">
-                                                      {normalizeCategoryName(group.category) ||
-                                                        "Chưa phân loại"}
-                                                    </span>
-
-                                                    <span
-                                                      className={`block whitespace-normal break-words text-[10px] font-black ${isActiveGroup
-                                                        ? "text-[#f4e8c7]"
-                                                        : "text-slate-200"
-                                                        }`}
-                                                    >
-                                                      {group.name}
-                                                    </span>
-
-                                                    <span className="mt-0.5 block truncate text-[8px] text-slate-500">
-                                                      {group.url}
-                                                    </span>
-                                                  </span>
-
-                                                  {isActiveGroup ? (
-                                                    <span className="shrink-0 border border-[#f0e3c0]/40 bg-[#f0e3c0]/10 p-2 text-[8px] font-black text-[#f4e8c7]">
-                                                      ACTIVE
-                                                    </span>
-                                                  ) : null}
-                                                </button>
-
-                                                {facebookLinkOpenSettings.group === "tab" ? (
-                                                  <a
-                                                    href={group.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    aria-label={`Mở ${group.name}`}
-                                                    className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
-                                                    onClick={(event) => {
-                                                      if (isShareExecuting) {
-                                                        event.preventDefault();
-                                                        return;
-                                                      }
-
-                                                      const openerWindow =
-                                                        event.currentTarget.ownerDocument.defaultView ??
-                                                        window;
-
-                                                      handleOpenFacebookGroup(
-                                                        openerWindow,
-                                                        groupIndex,
-                                                        "post",
-                                                      );
-                                                    }}
-                                                  >
-                                                    Mở link
-                                                  </a>
-                                                ) : (
-                                                  <button
-                                                    type="button"
-                                                    disabled={isShareExecuting}
-                                                    title={`Mở ${group.name}`}
-                                                    aria-label={`Mở ${group.name}`}
-                                                    className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                                    onClick={(event) => {
-                                                      const openerWindow =
-                                                        event.currentTarget.ownerDocument.defaultView ??
-                                                        window;
-
-                                                      handleOpenFacebookGroup(
-                                                        openerWindow,
-                                                        groupIndex,
-                                                        "post",
-                                                      );
-                                                    }}
-                                                  >
-                                                    Mở link
-                                                  </button>
-                                                )}
-
-                                                <button
-                                                  type="button"
-                                                  disabled={isShareExecuting}
-                                                  title={`Copy link ${group.name}`}
-                                                  aria-label={`Copy link ${group.name}`}
-                                                  className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] p-2 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                                  onClick={() => {
-                                                    setFacebookGroupActiveIndex(groupIndex);
-                                                    void copyFacebookUrl(
-                                                      group.url,
-                                                      "Đã copy link Group Facebook",
-                                                    );
-                                                  }}
-                                                >
-                                                  Copy link
-                                                </button>
-                                              </article>
-                                            );
-                                          },
-                                        )}
-                                      </div>
-                                    </section>
-                                  ))}
-                                </div>
-
-                                {activeFacebookGroup ? (
-                                  <div className="mt-2 border border-[#d8c99f]/20 bg-black/20 p-2">
-                                    <div className="flex min-w-0 items-center justify-between gap-2">
-                                      <div className="min-w-0">
-                                        <p className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-500">
-                                          Share Sheet cho Group active
-                                        </p>
-                                        <p className="mt-1 whitespace-normal break-words text-[10px] font-black text-[#f4e8c7]">
-                                          {activeFacebookGroup.name}
-                                        </p>
-                                        <p className="mt-0.5 truncate text-[8px] font-bold uppercase tracking-[0.08em] text-violet-200/70">
-                                          {normalizeCategoryName(
-                                            activeFacebookGroup.category,
-                                          ) || "Chưa phân loại"}
-                                        </p>
-                                      </div>
-                                      <span className="shrink-0 bg-[#d8c99f] px-2 py-1 text-[8px] font-black text-[#17130a]">
-                                        ACTIVE
-                                      </span>
-                                    </div>
-
-                                    <div className="mt-2 grid grid-cols-2 gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={isShareExecuting}
-                                        className="min-h-9 border border-emerald-300/35 bg-emerald-300/10 px-2 py-2 text-[9px] font-black text-emerald-100 transition hover:bg-emerald-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={() =>
-                                          void handleShareFacebookGroupImages(
-                                            facebookGroupActiveIndex % selectedFacebookGroups.length,
-                                            "post",
-                                          )
-                                        }
-                                      >
-                                        Ảnh + Post
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isShareExecuting}
-                                        className="min-h-9 border border-fuchsia-300/35 bg-fuchsia-300/10 px-2 py-2 text-[9px] font-black text-fuchsia-100 transition hover:bg-fuchsia-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                                        onClick={() =>
-                                          void handleShareFacebookGroupImages(
-                                            facebookGroupActiveIndex % selectedFacebookGroups.length,
-                                            "comment",
-                                          )
-                                        }
-                                      >
-                                        Ảnh + Cmt
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : null}
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled={isShareExecuting}
-                                className="w-full border border-dashed border-violet-300/30 bg-black/20 px-3 py-2 text-[10px] font-black text-violet-100 transition hover:bg-violet-300/[0.08] disabled:opacity-40"
-                                onClick={() => {
-                                  clearPersistedShareModalState();
-                                  setPendingShare(null);
-                                  setShareContactId("");
-                                  setIncludeInternalShareImages(true);
-                                  openModal("facebookPages");
-                                }}
-                              >
-                                Cấu hình link Group Facebook
-                              </button>
-                            )}
-                          </section>
-                        </div>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-              </>
+              <button
+                type="button"
+                disabled={isShareExecuting}
+                aria-expanded={isShareMoreOpen}
+                className="mt-2 flex min-h-10 w-full items-center justify-between gap-3 border border-[#d8c99f]/25 bg-[#d8c99f]/[0.045] px-3 py-2 text-left text-[10px] font-black text-[#eadfbe] transition hover:border-[#d8c99f]/45 hover:bg-[#d8c99f]/[0.08] active:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                onClick={() => setIsShareMoreOpen(true)}
+              >
+                <span>Khác</span>
+                <span className="flex items-center gap-1.5 text-[8px] font-bold text-slate-500">
+                  <span>Fanpage + Group Facebook</span>
+                  <FiChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+                </span>
+              </button>
             ) : null}
           </div>
+        </div>
+      ) : null}
+
+      {pendingShare && isShareMoreOpen && shareDialogStep === "share" ? (
+        <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.985, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="luxury-dialog flex h-[calc(100dvh-1rem)] w-full max-w-7xl min-w-0 flex-col overflow-hidden border p-3 xl:h-[calc(100dvh-2.5rem)] xl:p-4"
+          >
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d8c99f]/20 pb-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-black text-white">Khác</h2>
+                <p className="mt-1 text-[10px] leading-5 text-slate-400">
+                  Fanpage Facebook và Group Facebook
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isShareExecuting}
+                className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#d8c99f]/25 bg-[#d8c99f]/[0.06] text-[#eadfbe] transition hover:border-[#d8c99f]/50 hover:bg-[#d8c99f]/10 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                onClick={() => setIsShareMoreOpen(false)}
+                aria-label="Đóng mục Khác"
+              >
+                <FiX aria-hidden="true" className={iconClassName} />
+              </button>
+            </div>
+
+            <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 overflow-hidden xl:grid-cols-2 xl:grid-rows-1">
+              <section className="flex min-h-0 min-w-0 flex-col border border-sky-300/25 bg-sky-300/[0.055] p-2.5">
+                {settings.facebookPages.length > 0 ? (
+                  <>
+                    <div className="mb-3 flex items-center justify-between gap-2 border-b border-sky-300/15 pb-2">
+                      <div>
+                        <p className="text-[10px] font-black text-sky-100">
+                          Fanpage Facebook
+                        </p>
+                        <p className="mt-0.5 text-[9px] text-slate-500">
+                          Copy nội dung, tải ảnh chính và mở Meta Business
+                          Composer
+                        </p>
+                      </div>
+                      <span className="border border-sky-200/30 bg-sky-200/10 px-2 py-1 text-[9px] font-black text-sky-100">
+                        Page
+                      </span>
+                    </div>
+                    <div className="min-h-0 flex-1 space-y-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                      {settings.facebookPages.map((option) => (
+                        <article
+                          key={option.id}
+                          className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-stretch gap-1.5 border border-white/10 bg-slate-950/55 p-1.5"
+                        >
+                          <div className="min-w-0 px-1.5 py-1">
+                            <p className="truncate text-[10px] font-black text-[#eadfbe]">
+                              {option.name}
+                            </p>
+                            <p className="mt-0.5 truncate font-mono text-[8px] text-slate-500">
+                              {option.assetId}
+                            </p>
+                          </div>
+
+                          {facebookLinkOpenSettings.pagePost === "tab" ? (
+                            <>
+                              <a
+                                href={createMetaBusinessComposerUrl(option.assetId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-disabled={isShareExecuting}
+                                className="flex min-w-16 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 p-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                onClick={(event) => {
+                                  if (isShareExecuting) {
+                                    event.preventDefault();
+                                    return;
+                                  }
+
+                                  const openerWindow =
+                                    event.currentTarget.ownerDocument.defaultView ??
+                                    window;
+
+                                  handleOpenMetaBusinessComposer(
+                                    openerWindow,
+                                    option,
+                                    "post",
+                                  );
+                                }}
+                              >
+                                Meta Post
+                              </a>
+
+                              <a
+                                href={createMetaBusinessComposerUrl(option.assetId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-disabled={isShareExecuting}
+                                className="flex min-w-16 items-center justify-center border border-amber-300/35 bg-amber-300/10 p-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                                onClick={(event) => {
+                                  if (isShareExecuting) {
+                                    event.preventDefault();
+                                    return;
+                                  }
+
+                                  const openerWindow =
+                                    event.currentTarget.ownerDocument.defaultView ??
+                                    window;
+
+                                  handleOpenMetaBusinessComposer(
+                                    openerWindow,
+                                    option,
+                                    "comment",
+                                  );
+                                }}
+                              >
+                                Meta Cmt
+                              </a>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isShareExecuting}
+                                className="min-w-16 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                onClick={(event) => {
+                                  const openerWindow =
+                                    event.currentTarget.ownerDocument.defaultView ??
+                                    window;
+
+                                  handleOpenMetaBusinessComposer(
+                                    openerWindow,
+                                    option,
+                                    "post",
+                                  );
+                                }}
+                              >
+                                Meta Post
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isShareExecuting}
+                                className="min-w-16 border border-amber-300/35 bg-amber-300/10 px-2 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                onClick={(event) => {
+                                  const openerWindow =
+                                    event.currentTarget.ownerDocument.defaultView ??
+                                    window;
+
+                                  handleOpenMetaBusinessComposer(
+                                    openerWindow,
+                                    option,
+                                    "comment",
+                                  );
+                                }}
+                              >
+                                Meta Cmt
+                              </button>
+                            </>)}
+                        </article>
+                      ))}
+                    </div>
+                    <p className="mt-auto pt-3 text-[9px] leading-4 text-slate-400">
+                      Meta Post/Cmt luôn tự tải ảnh chính và bỏ qua ảnh nội bộ. Mobile có thể dùng các nút chia sẻ bên dưới để gửi ảnh qua Share Sheet.
+                    </p>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isShareExecuting}
+                    className="w-full border border-dashed border-[#d8c99f]/30 bg-black/20 px-3 py-2 text-[10px] font-black text-[#eadfbe] transition hover:bg-[#d8c99f]/[0.08] disabled:opacity-40"
+                    onClick={() => {
+                      clearPersistedShareModalState();
+                      setPendingShare(null);
+                      setShareContactId("");
+                      setIncludeInternalShareImages(true);
+                      openModal("facebookPages");
+                    }}
+                  >
+                    Cấu hình Fanpage và Asset ID
+                  </button>
+                )}
+              </section>
+
+              <section className="flex min-h-0 min-w-0 flex-col border border-fuchsia-300/25 bg-fuchsia-300/[0.055] p-2.5">
+                {selectedFacebookGroups.length > 0 ? (
+                  <>
+                    <div className="flex min-w-0 items-start justify-between gap-2 border-b border-fuchsia-300/15 pb-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-fuchsia-100">
+                          Danh sách Group Facebook
+                        </p>
+                        <p className="mt-0.5 text-[9px] leading-4 text-slate-500">
+                          Mở Group Facebook hoặc copy link Group
+                        </p>
+                      </div>
+                      <span className="shrink-0 border border-fuchsia-200/35 bg-fuchsia-200/10 px-2 py-1 text-[9px] font-black text-fuchsia-100">
+                        {selectedFacebookGroups.length} Group
+                      </span>
+                    </div>
+
+                    <div className="mt-2 min-h-0 flex-1 space-y-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                      {selectedFacebookGroupGroups.map((categoryGroup) => (
+                        <section
+                          key={normalizeTextKey(categoryGroup.category)}
+                          className="min-w-0 border border-violet-300/15 bg-black/15 p-1.5"
+                        >
+                          <div className="flex min-w-0 items-center justify-between gap-2 border-b border-violet-300/15 px-1 pb-1.5">
+                            <p className="truncate text-[9px] font-black text-violet-100">
+                              {categoryGroup.category}
+                            </p>
+                            <span className="shrink-0 border border-violet-200/25 bg-violet-300/10 px-1.5 py-0.5 text-[8px] font-black text-violet-100">
+                              {categoryGroup.options.length}
+                            </span>
+                          </div>
+
+                          <div className="mt-1.5 space-y-1.5">
+                            {categoryGroup.options.map(
+                              ({ option: group, index: groupIndex }) => {
+                                const isActiveGroup =
+                                  groupIndex ===
+                                  facebookGroupActiveIndex % selectedFacebookGroups.length;
+
+                                return (
+                                  <article
+                                    key={group.id}
+                                    className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 border p-1.5 transition ${isActiveGroup
+                                      ? "border-[#f0e3c0]/65 bg-[linear-gradient(135deg,rgba(216,201,159,0.16),rgba(139,92,246,0.08))] shadow-[inset_3px_0_0_rgba(240,227,192,0.75),0_8px_24px_rgba(0,0,0,0.18)]"
+                                      : "border-white/10 bg-slate-950/55 hover:border-violet-300/30 hover:bg-violet-300/[0.06]"
+                                      }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={isShareExecuting}
+                                      aria-pressed={isActiveGroup}
+                                      className="flex min-w-0 cursor-pointer items-center gap-2 px-1.5 py-1 text-left disabled:cursor-wait disabled:opacity-50"
+                                      onClick={() => setFacebookGroupActiveIndex(groupIndex)}
+                                    >
+                                      <span
+                                        aria-hidden="true"
+                                        className={`h-2 w-2 shrink-0 border ${isActiveGroup
+                                          ? "border-[#f0e3c0] bg-[#f0e3c0] shadow-[0_0_10px_rgba(240,227,192,0.55)]"
+                                          : "border-slate-600 bg-slate-900"
+                                          }`}
+                                      />
+
+                                      <span className="min-w-0 flex-1">
+                                        <span className="mb-0.5 block truncate text-[8px] font-black uppercase tracking-[0.08em] text-violet-200/75">
+                                          {normalizeCategoryName(group.category) ||
+                                            "Chưa phân loại"}
+                                        </span>
+
+                                        <span
+                                          className={`block whitespace-normal break-words text-[10px] font-black ${isActiveGroup
+                                            ? "text-[#f4e8c7]"
+                                            : "text-slate-200"
+                                            }`}
+                                        >
+                                          {group.name}
+                                        </span>
+
+                                        <span className="mt-0.5 block truncate text-[8px] text-slate-500">
+                                          {group.url}
+                                        </span>
+                                      </span>
+
+                                      {isActiveGroup ? (
+                                        <span className="shrink-0 border border-[#f0e3c0]/40 bg-[#f0e3c0]/10 p-2 text-[8px] font-black text-[#f4e8c7]">
+                                          ACTIVE
+                                        </span>
+                                      ) : null}
+                                    </button>
+
+                                    {facebookLinkOpenSettings.group === "tab" ? (
+                                      <a
+                                        href={group.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        aria-label={`Mở ${group.name}`}
+                                        className="flex min-w-14 items-center justify-center border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80"
+                                        onClick={(event) => {
+                                          if (isShareExecuting) {
+                                            event.preventDefault();
+                                            return;
+                                          }
+
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
+                                          handleOpenFacebookGroup(
+                                            openerWindow,
+                                            groupIndex,
+                                            "post",
+                                          );
+                                        }}
+                                      >
+                                        Mở link
+                                      </a>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={isShareExecuting}
+                                        title={`Mở ${group.name}`}
+                                        aria-label={`Mở ${group.name}`}
+                                        className="min-w-14 border border-cyan-300/30 bg-cyan-300/[0.08] p-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/55 hover:bg-cyan-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                        onClick={(event) => {
+                                          const openerWindow =
+                                            event.currentTarget.ownerDocument.defaultView ??
+                                            window;
+
+                                          handleOpenFacebookGroup(
+                                            openerWindow,
+                                            groupIndex,
+                                            "post",
+                                          );
+                                        }}
+                                      >
+                                        Mở link
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      disabled={isShareExecuting}
+                                      title={`Copy link ${group.name}`}
+                                      aria-label={`Copy link ${group.name}`}
+                                      className="min-w-14 border border-amber-300/30 bg-amber-300/[0.08] p-2 text-[9px] font-black text-amber-100 transition hover:border-amber-200/55 hover:bg-amber-300/15 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                                      onClick={() => {
+                                        setFacebookGroupActiveIndex(groupIndex);
+                                        void copyFacebookUrl(
+                                          group.url,
+                                          "Đã copy link Group Facebook",
+                                        );
+                                      }}
+                                    >
+                                      Copy link
+                                    </button>
+                                  </article>
+                                );
+                              },
+                            )}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+
+                    {activeFacebookGroup ? (
+                      <div className="mt-2 border border-[#d8c99f]/20 bg-black/20 p-2">
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[9px] font-black uppercase tracking-[0.12em] text-slate-500">
+                              Share Sheet cho Group active
+                            </p>
+                            <p className="mt-1 whitespace-normal break-words text-[10px] font-black text-[#f4e8c7]">
+                              {activeFacebookGroup.name}
+                            </p>
+                            <p className="mt-0.5 truncate text-[8px] font-bold uppercase tracking-[0.08em] text-violet-200/70">
+                              {normalizeCategoryName(
+                                activeFacebookGroup.category,
+                              ) || "Chưa phân loại"}
+                            </p>
+                          </div>
+                          <span className="shrink-0 bg-[#d8c99f] px-2 py-1 text-[8px] font-black text-[#17130a]">
+                            ACTIVE
+                          </span>
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={isShareExecuting}
+                            className="min-h-9 border border-emerald-300/35 bg-emerald-300/10 px-2 py-2 text-[9px] font-black text-emerald-100 transition hover:bg-emerald-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                            onClick={() =>
+                              void handleShareFacebookGroupImages(
+                                facebookGroupActiveIndex % selectedFacebookGroups.length,
+                                "post",
+                              )
+                            }
+                          >
+                            Ảnh + Post
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isShareExecuting}
+                            className="min-h-9 border border-fuchsia-300/35 bg-fuchsia-300/10 px-2 py-2 text-[9px] font-black text-fuchsia-100 transition hover:bg-fuchsia-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                            onClick={() =>
+                              void handleShareFacebookGroupImages(
+                                facebookGroupActiveIndex % selectedFacebookGroups.length,
+                                "comment",
+                              )
+                            }
+                          >
+                            Ảnh + Cmt
+                          </button>
+                        </div>
+
+                        <p className="mt-2 text-[8px] leading-4 text-slate-500">
+                          Meta Post/Cmt luôn tải ảnh chính và bỏ qua ảnh nội bộ. Share Sheet sử dụng trạng thái ở công tắc phía trên.
+                        </p>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isShareExecuting}
+                    className="w-full border border-dashed border-violet-300/30 bg-black/20 px-3 py-2 text-[10px] font-black text-violet-100 transition hover:bg-violet-300/[0.08] disabled:opacity-40"
+                    onClick={() => {
+                      clearPersistedShareModalState();
+                      setPendingShare(null);
+                      setShareContactId("");
+                      setIncludeInternalShareImages(true);
+                      openModal("facebookPages");
+                    }}
+                  >
+                    Cấu hình link Group Facebook
+                  </button>
+                )}
+              </section>
+
+            </div>
+          </motion.div>
         </div>
       ) : null}
 
