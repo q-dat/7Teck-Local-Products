@@ -12,6 +12,7 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -4983,6 +4984,7 @@ export default function LocalPage({
   const systemDeleteTapCountRef = useRef<number>(0);
   const systemDeleteLastTapAtRef = useRef<number>(0);
   const systemDeleteLogRef = useRef<HTMLParagraphElement | null>(null);
+  const allowNextBlankMetaPostNavigationRef = useRef<boolean>(false);
   const persistedAppStateSignaturesRef = useRef<{
     settings: string;
     scheduleConfig: string;
@@ -10761,6 +10763,79 @@ export default function LocalPage({
         shouldDownload,
       ),
     );
+  };
+
+  const handleOpenMetaBusinessPostBlank = (
+    event: ReactMouseEvent<HTMLAnchorElement>,
+    page: FacebookPageOption,
+  ): void => {
+    if (allowNextBlankMetaPostNavigationRef.current) {
+      allowNextBlankMetaPostNavigationRef.current = false;
+      return;
+    }
+
+    if (!pendingShare || isShareExecuting) {
+      event.preventDefault();
+      return;
+    }
+
+    const anchor = event.currentTarget;
+    const request = pendingShare;
+    const composerUrl = createMetaBusinessComposerUrl(page.assetId);
+
+    if (!composerUrl) {
+      event.preventDefault();
+      Toastify("Asset ID của Fanpage không hợp lệ", 400);
+      return;
+    }
+
+    const storedDownloadedProductIds = loadDownloadedProductIds();
+    const wasDownloaded =
+      downloadedProductIds.has(request.productId) ||
+      storedDownloadedProductIds.has(request.productId);
+
+    if (!wasDownloaded) {
+      setIsShareExecuting(true);
+
+      const imageDownloadLabel = prepareMetaImageDownload(request, true);
+
+      Toastify(
+        imageDownloadLabel,
+        imageDownloadLabel.startsWith("đang tải") ? 200 : 300,
+      );
+
+      setIsShareExecuting(false);
+      return;
+    }
+
+    event.preventDefault();
+
+    requestConfirm({
+      title: "Ảnh đã được đánh dấu tải về",
+      description: `${request.title} đã tải ảnh chính trong phiên này. Có thể tiếp tục mà không tải hoặc tải lại ảnh.`,
+      cancelLabel: "Hủy",
+      confirmLabel: "Đồng ý, không tải lại",
+      secondaryLabel: "Vẫn tải lại ảnh",
+      tone: "warning",
+      onConfirm: () => {
+        allowNextBlankMetaPostNavigationRef.current = true;
+        anchor.click();
+      },
+      onSecondary: () => {
+        setIsShareExecuting(true);
+
+        const imageDownloadLabel = prepareMetaImageDownload(request, true);
+
+        Toastify(
+          imageDownloadLabel,
+          imageDownloadLabel.startsWith("đang tải") ? 200 : 300,
+        );
+
+        setIsShareExecuting(false);
+        allowNextBlankMetaPostNavigationRef.current = true;
+        anchor.click();
+      },
+    });
   };
 
   const executeOpenFacebookGroup = async (
@@ -19575,25 +19650,40 @@ export default function LocalPage({
                             </p>
                           </div>
 
-                          <button
-                            type="button"
-                            disabled={isShareExecuting}
-                            className="col-span-2 min-h-9 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
-                            onClick={(event) => {
-                              if (isShareExecuting) return;
+                          {facebookLinkOpenSettings.pagePost === "tab" ? (
+                            <a
+                              href={createMetaBusinessComposerUrl(option.assetId)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-disabled={isShareExecuting}
+                              className="col-span-2 flex min-h-9 items-center justify-center border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 aria-disabled:pointer-events-none aria-disabled:opacity-40"
+                              onClick={(event) =>
+                                handleOpenMetaBusinessPostBlank(event, option)
+                              }
+                            >
+                              Mở Post
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isShareExecuting}
+                              className="col-span-2 min-h-9 border border-cyan-300/35 bg-cyan-300/10 px-2 py-2 text-[9px] font-black text-cyan-100 transition hover:bg-cyan-300/20 active:opacity-80 disabled:cursor-wait disabled:opacity-40"
+                              onClick={(event) => {
+                                if (isShareExecuting) return;
 
-                              const openerWindow =
-                                event.currentTarget.ownerDocument.defaultView ??
-                                window;
+                                const openerWindow =
+                                  event.currentTarget.ownerDocument.defaultView ??
+                                  window;
 
-                              handleOpenMetaBusinessPost(
-                                openerWindow,
-                                option,
-                              );
-                            }}
-                          >
-                            Mở Post
-                          </button>
+                                handleOpenMetaBusinessPost(
+                                  openerWindow,
+                                  option,
+                                );
+                              }}
+                            >
+                              Mở Post
+                            </button>
+                          )}
                         </article>
                       ))}
                     </div>
