@@ -27,6 +27,7 @@ import {
   FiCheck,
   FiCheckCircle,
   FiClipboard,
+  FiKey,
   FiCopy,
   FiDatabase,
   FiDownload,
@@ -265,6 +266,433 @@ type FacebookLinkOpenSettings = Record<
   FacebookLinkOpenMode
 >;
 
+type HeaderShortcutActionId =
+  | "toggleHeaderVisibility"
+  | "addProduct"
+  | "navigation"
+  | "importExport"
+  | "toggleNfkc"
+  | "toggleSocialTags"
+  | "shareCopyOption"
+  | "productList"
+  | "schedule"
+  | "hourlyNotification"
+  | "globalNote"
+  | "globalDescription"
+  | "imageDownload"
+  | "localImageManager"
+  | "clearDownloadedSession"
+  | "pictureInPicture"
+  | "facebookLinkSettings"
+  | "shortcuts"
+  | "facebookPages"
+  | "facebookDuplicatePosts"
+  | "facebookSearch"
+  | "contact"
+  | "reloadPage"
+  | "refreshCloud"
+  | "toggleRemoteSyncReminder";
+
+type HeaderShortcutConfig = Record<HeaderShortcutActionId, string>;
+
+type HeaderShortcutDefinition = {
+  id: HeaderShortcutActionId;
+  label: string;
+  description: string;
+  defaultShortcut: string;
+};
+
+const HEADER_SHORTCUT_ACTIONS: readonly HeaderShortcutDefinition[] = [
+  {
+    id: "toggleHeaderVisibility",
+    label: "Hiện / Ẩn Header",
+    description: "Bật hoặc ẩn header ngoài trên thiết bị này",
+    defaultShortcut: "Shift+1",
+  },
+  {
+    id: "addProduct",
+    label: "Thêm sản phẩm",
+    description: "Mở form tạo sản phẩm mới",
+    defaultShortcut: "Shift+2",
+  },
+  {
+    id: "navigation",
+    label: "Điều hướng",
+    description: "Mở bộ chọn khu vực làm việc",
+    defaultShortcut: "Shift+3",
+  },
+  {
+    id: "importExport",
+    label: "Data",
+    description: "Quản lý import, export và quyền dữ liệu",
+    defaultShortcut: "Shift+4",
+  },
+  {
+    id: "toggleNfkc",
+    label: "NFKC",
+    description: "Bật hoặc tắt chuẩn hóa nội dung copy",
+    defaultShortcut: "Shift+5",
+  },
+  {
+    id: "toggleSocialTags",
+    label: "Tag",
+    description: "Bật hoặc tắt tag khi copy",
+    defaultShortcut: "Shift+6",
+  },
+  {
+    id: "shareCopyOption",
+    label: "Copy Post / Cmt",
+    description: "Mở cài đặt nội dung tự copy",
+    defaultShortcut: "Shift+7",
+  },
+  {
+    id: "productList",
+    label: "List",
+    description: "Mở bảng sản phẩm",
+    defaultShortcut: "Shift+8",
+  },
+  {
+    id: "schedule",
+    label: "Lịch",
+    description: "Mở cấu hình lịch đăng",
+    defaultShortcut: "Shift+9",
+  },
+  {
+    id: "hourlyNotification",
+    label: "Giờ",
+    description: "Mở cấu hình thông báo theo thời gian",
+    defaultShortcut: "Shift+0",
+  },
+  {
+    id: "globalNote",
+    label: "Ghi chú",
+    description: "Mở ghi chú chung",
+    defaultShortcut: "Shift+Q",
+  },
+  {
+    id: "globalDescription",
+    label: "Mô tả",
+    description: "Mở mô tả chung",
+    defaultShortcut: "Shift+W",
+  },
+  {
+    id: "imageDownload",
+    label: "Ảnh",
+    description: "Mở khu vực tải ảnh",
+    defaultShortcut: "Shift+E",
+  },
+  {
+    id: "localImageManager",
+    label: "Ảnh máy",
+    description: "Quản lý ảnh trong thư mục đã liên kết",
+    defaultShortcut: "Shift+R",
+  },
+  {
+    id: "clearDownloadedSession",
+    label: "Xóa phiên",
+    description: "Xóa trạng thái ảnh đã tải trong session hiện tại",
+    defaultShortcut: "Shift+T",
+  },
+  {
+    id: "pictureInPicture",
+    label: "Nổi / Về tab",
+    description: "Mở hoặc đóng cửa sổ nổi",
+    defaultShortcut: "Shift+Y",
+  },
+  {
+    id: "facebookLinkSettings",
+    label: "Link",
+    description: "Cài đặt cách mở link Meta / Facebook",
+    defaultShortcut: "Shift+U",
+  },
+  {
+    id: "shortcuts",
+    label: "Phím tắt",
+    description: "Mở bảng cấu hình toàn bộ phím tắt",
+    defaultShortcut: "Shift+G",
+  },
+  {
+    id: "facebookPages",
+    label: "Facebook",
+    description: "Quản lý Fanpage, Asset ID và Group",
+    defaultShortcut: "Shift+I",
+  },
+  {
+    id: "facebookDuplicatePosts",
+    label: "Fanpage",
+    description: "Mở công cụ đăng bài, tạo tin và nhân bản",
+    defaultShortcut: "Shift+O",
+  },
+  {
+    id: "facebookSearch",
+    label: "FB Search",
+    description: "Mở và sắp xếp các popup Facebook Search",
+    defaultShortcut: "Shift+P",
+  },
+  {
+    id: "contact",
+    label: "Liên hệ",
+    description: "Chọn liên hệ dùng khi copy",
+    defaultShortcut: "Shift+A",
+  },
+  {
+    id: "reloadPage",
+    label: "Làm mới",
+    description: "Reload trang và kiểm tra phiên bản dữ liệu",
+    defaultShortcut: "Shift+S",
+  },
+  {
+    id: "refreshCloud",
+    label: "Đồng bộ",
+    description: "Kiểm tra và đồng bộ dữ liệu Cloud mới",
+    defaultShortcut: "Shift+D",
+  },
+  {
+    id: "toggleRemoteSyncReminder",
+    label: "Nhắc",
+    description: "Bật hoặc tắt nhắc đồng bộ tự động",
+    defaultShortcut: "Shift+F",
+  },
+];
+
+const HEADER_SHORTCUT_STORAGE_KEY =
+  "local-products-header-shortcuts-v1";
+
+const createDefaultHeaderShortcuts = (): HeaderShortcutConfig => {
+  const shortcuts = {} as HeaderShortcutConfig;
+
+  HEADER_SHORTCUT_ACTIONS.forEach((definition) => {
+    shortcuts[definition.id] = definition.defaultShortcut;
+  });
+
+  return shortcuts;
+};
+
+const DEFAULT_HEADER_SHORTCUTS = createDefaultHeaderShortcuts();
+
+const LEGACY_HEADER_SHORTCUT_DEFAULTS: HeaderShortcutConfig = {
+  toggleHeaderVisibility: "Ctrl+Alt+1",
+  addProduct: "Ctrl+Alt+2",
+  navigation: "Ctrl+Alt+3",
+  importExport: "Ctrl+Alt+4",
+  toggleNfkc: "Ctrl+Alt+5",
+  toggleSocialTags: "Ctrl+Alt+6",
+  shareCopyOption: "Ctrl+Alt+7",
+  productList: "Ctrl+Alt+8",
+  schedule: "Ctrl+Alt+9",
+  hourlyNotification: "Ctrl+Alt+0",
+  globalNote: "Ctrl+Alt+Q",
+  globalDescription: "Ctrl+Alt+W",
+  imageDownload: "Ctrl+Alt+E",
+  localImageManager: "Ctrl+Alt+R",
+  clearDownloadedSession: "Ctrl+Alt+T",
+  pictureInPicture: "Ctrl+Alt+Y",
+  facebookLinkSettings: "Ctrl+Alt+U",
+  shortcuts: "Ctrl+Alt+G",
+  facebookPages: "Ctrl+Alt+I",
+  facebookDuplicatePosts: "Ctrl+Alt+O",
+  facebookSearch: "Ctrl+Alt+P",
+  contact: "Ctrl+Alt+A",
+  reloadPage: "Ctrl+Alt+S",
+  refreshCloud: "Ctrl+Alt+D",
+  toggleRemoteSyncReminder: "Ctrl+Alt+F",
+};
+
+const normalizeHeaderShortcutConfig = (value: unknown): HeaderShortcutConfig => {
+  const normalized = { ...DEFAULT_HEADER_SHORTCUTS };
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return normalized;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  HEADER_SHORTCUT_ACTIONS.forEach((definition) => {
+    const configuredShortcut = record[definition.id];
+
+    if (typeof configuredShortcut === "string") {
+      const trimmedShortcut = configuredShortcut.trim();
+      const legacyDefault = LEGACY_HEADER_SHORTCUT_DEFAULTS[definition.id];
+
+      normalized[definition.id] =
+        trimmedShortcut === legacyDefault
+          ? definition.defaultShortcut
+          : trimmedShortcut;
+    }
+  });
+
+  return normalized;
+};
+
+const loadHeaderShortcuts = (): HeaderShortcutConfig => {
+  if (typeof window === "undefined") return DEFAULT_HEADER_SHORTCUTS;
+
+  try {
+    const raw = window.localStorage.getItem(HEADER_SHORTCUT_STORAGE_KEY);
+
+    return raw
+      ? normalizeHeaderShortcutConfig(JSON.parse(raw) as unknown)
+      : DEFAULT_HEADER_SHORTCUTS;
+  } catch {
+    return DEFAULT_HEADER_SHORTCUTS;
+  }
+};
+
+const saveHeaderShortcuts = (shortcuts: HeaderShortcutConfig): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      HEADER_SHORTCUT_STORAGE_KEY,
+      JSON.stringify(shortcuts),
+    );
+  } catch {
+    return;
+  }
+};
+
+const HEADER_SHORTCUTS_ENABLED_STORAGE_KEY =
+  "local-products-header-shortcuts-enabled-v1";
+
+const loadHeaderShortcutsEnabled = (): boolean => {
+  if (typeof window === "undefined") return true;
+
+  try {
+    const raw = window.localStorage.getItem(
+      HEADER_SHORTCUTS_ENABLED_STORAGE_KEY,
+    );
+
+    return raw !== "0";
+  } catch {
+    return true;
+  }
+};
+
+const saveHeaderShortcutsEnabled = (enabled: boolean): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      HEADER_SHORTCUTS_ENABLED_STORAGE_KEY,
+      enabled ? "1" : "0",
+    );
+  } catch {
+    return;
+  }
+};
+
+const normalizeHeaderShortcutKey = (key: string): string | null => {
+  const specialKeys: Record<string, string> = {
+    " ": "Space",
+    Escape: "Escape",
+    Esc: "Escape",
+    Enter: "Enter",
+    Tab: "Tab",
+    Backspace: "Backspace",
+    Delete: "Delete",
+    Insert: "Insert",
+    Home: "Home",
+    End: "End",
+    PageUp: "PageUp",
+    PageDown: "PageDown",
+    ArrowUp: "ArrowUp",
+    ArrowDown: "ArrowDown",
+    ArrowLeft: "ArrowLeft",
+    ArrowRight: "ArrowRight",
+  };
+
+  const normalized =
+    specialKeys[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+
+  if (
+    normalized === "Control" ||
+    normalized === "Alt" ||
+    normalized === "Shift" ||
+    normalized === "Meta"
+  ) {
+    return null;
+  }
+
+  if (normalized === "Dead" || normalized === "Unidentified" || normalized === "Compose") {
+    return null;
+  }
+
+  return normalized;
+};
+
+const createHeaderShortcutFromKeyboardEvent = (
+  event: Pick<
+    KeyboardEvent,
+    "key" | "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey"
+  >,
+): string | null => {
+  const codeKeyMap: Record<string, string> = {
+    ...Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        `Digit${index}`,
+        String(index),
+      ]),
+    ),
+    ...Object.fromEntries(
+      Array.from({ length: 26 }, (_, index) => [
+        `Key${String.fromCharCode(65 + index)}`,
+        String.fromCharCode(65 + index),
+      ]),
+    ),
+  };
+
+  const key =
+    codeKeyMap[event.code] ?? normalizeHeaderShortcutKey(event.key);
+
+  if (!key) return null;
+
+  const parts: string[] = [];
+
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Meta");
+
+  parts.push(key);
+
+  return parts.join("+");
+};
+
+const formatHeaderShortcutLabel = (shortcut: string): string =>
+  shortcut
+    .split("+")
+    .map((part) => (part === "Meta" ? "⌘" : part === "Control" ? "Ctrl" : part))
+    .join("+");
+
+const formatHeaderAriaShortcut = (shortcut: string): string | undefined => {
+  if (!shortcut) return undefined;
+
+  return shortcut
+    .split("+")
+    .map((part) => (part === "Ctrl" ? "Control" : part))
+    .join("+");
+};
+
+const UNSAFE_HEADER_SHORTCUTS = new Set([
+  "Escape",
+  "Space",
+  "Tab",
+  "Enter",
+  "F5",
+  "F11",
+  "F12",
+  "Ctrl+R",
+  "Ctrl+T",
+  "Ctrl+W",
+  "Ctrl+L",
+  "Ctrl+F",
+  "Ctrl+P",
+  "Ctrl+S",
+]);
+
+const isUnsafeHeaderShortcut = (shortcut: string): boolean =>
+  UNSAFE_HEADER_SHORTCUTS.has(shortcut);
+
 type ExportPayload = {
   version: 22;
   settings: GlobalSettings;
@@ -374,6 +802,7 @@ type ModalName =
   | "facebookLinkSettings"
   | "contentNavigation"
   | "writeAccessDenied"
+  | "shortcuts"
   | "";
 
 type CategoryTab = "all" | string;
@@ -5100,6 +5529,13 @@ export default function LocalPage({
     useState<boolean>(false);
   const [isHeaderActionsMenuOpen, setIsHeaderActionsMenuOpen] =
     useState<boolean>(false);
+  const [headerShortcuts, setHeaderShortcuts] =
+    useState<HeaderShortcutConfig>(() => loadHeaderShortcuts());
+  const [isHeaderShortcutsEnabled, setIsHeaderShortcutsEnabled] =
+    useState<boolean>(() => loadHeaderShortcutsEnabled());
+  const [shortcutCaptureAction, setShortcutCaptureAction] =
+    useState<HeaderShortcutActionId | "">("");
+  const [shortcutNotice, setShortcutNotice] = useState<string>("");
   const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(false);
   const [isScrollTopVisible, setIsScrollTopVisible] =
     useState<boolean>(false);
@@ -5347,6 +5783,43 @@ export default function LocalPage({
   useEffect(() => {
     saveFacebookLinkOpenSettings(facebookLinkOpenSettings);
   }, [facebookLinkOpenSettings]);
+
+  useEffect(() => {
+    saveHeaderShortcuts(headerShortcuts);
+  }, [headerShortcuts]);
+
+  useEffect(() => {
+    saveHeaderShortcutsEnabled(isHeaderShortcutsEnabled);
+  }, [isHeaderShortcutsEnabled]);
+
+  useEffect(() => {
+    const handleHeaderShortcutStorage = (event: StorageEvent): void => {
+      if (event.key === HEADER_SHORTCUTS_ENABLED_STORAGE_KEY) {
+        setIsHeaderShortcutsEnabled(event.newValue !== "0");
+        return;
+      }
+
+      if (event.key !== HEADER_SHORTCUT_STORAGE_KEY) return;
+
+      try {
+        setHeaderShortcuts(
+          event.newValue
+            ? normalizeHeaderShortcutConfig(
+              JSON.parse(event.newValue) as unknown,
+            )
+            : DEFAULT_HEADER_SHORTCUTS,
+        );
+      } catch {
+        setHeaderShortcuts(DEFAULT_HEADER_SHORTCUTS);
+      }
+    };
+
+    window.addEventListener("storage", handleHeaderShortcutStorage);
+
+    return () => {
+      window.removeEventListener("storage", handleHeaderShortcutStorage);
+    };
+  }, []);
 
   useEffect(() => {
     const handleFacebookLinkSettingsStorage = (event: StorageEvent): void => {
@@ -7355,6 +7828,9 @@ export default function LocalPage({
     isConfirmExecuting,
     isFacebookSearchDialogOpen,
     isRemoteSyncReminderEnabled,
+    isFacebookSearchDialogOpen,
+    isHeaderActionsMenuOpen,
+    isMobileCategoryMenuOpen,
     isSettingsReady,
     isShareExecuting,
     pendingBackup,
@@ -7592,6 +8068,15 @@ export default function LocalPage({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        const eventWindow = event.currentTarget as Window;
+        if (eventWindow.document.activeElement === searchInputRef.current) {
+          event.preventDefault();
+          searchInputRef.current?.blur();
+          return;
+        }
+      }
+
       if (
         event.code === "Space" &&
         !activeModal &&
@@ -12387,6 +12872,155 @@ export default function LocalPage({
     );
   };
 
+  const handleShortcutCapture = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    actionId: HeaderShortcutActionId,
+  ): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      setShortcutCaptureAction("");
+      setShortcutNotice("");
+      return;
+    }
+
+    const shortcut = createHeaderShortcutFromKeyboardEvent(event);
+
+    if (!shortcut) {
+      setShortcutNotice("Hãy nhấn một phím hoặc tổ hợp phím hợp lệ.");
+      return;
+    }
+
+    if (isUnsafeHeaderShortcut(shortcut)) {
+      setShortcutNotice(
+        "Phím này trùng thao tác hệ thống/trình duyệt. Hãy chọn tổ hợp khác.",
+      );
+      return;
+    }
+
+    const conflictingAction = HEADER_SHORTCUT_ACTIONS.find(
+      (definition) =>
+        definition.id !== actionId && headerShortcuts[definition.id] === shortcut,
+    );
+
+    if (conflictingAction) {
+      setShortcutNotice(
+        `Phím ${formatHeaderShortcutLabel(shortcut)} đang được gán cho ${conflictingAction.label}.`,
+      );
+      return;
+    }
+
+    setHeaderShortcuts((current) => ({
+      ...current,
+      [actionId]: shortcut,
+    }));
+    setShortcutCaptureAction("");
+    setShortcutNotice(
+      `Đã gán ${formatHeaderShortcutLabel(shortcut)} cho ${
+        HEADER_SHORTCUT_ACTIONS.find((definition) => definition.id === actionId)?.label ??
+        actionId
+      }.`,
+    );
+  };
+
+  const clearHeaderShortcut = (actionId: HeaderShortcutActionId): void => {
+    setHeaderShortcuts((current) => ({
+      ...current,
+      [actionId]: "",
+    }));
+    setShortcutCaptureAction("");
+    setShortcutNotice("Đã bỏ phím tắt của thao tác này.");
+  };
+
+  const resetHeaderShortcuts = (): void => {
+    setHeaderShortcuts(createDefaultHeaderShortcuts());
+    setShortcutCaptureAction("");
+    setShortcutNotice("Đã khôi phục toàn bộ phím tắt mặc định.");
+  };
+
+  useEffect(() => {
+    if (activeModal !== "shortcuts") {
+      setShortcutCaptureAction("");
+      setShortcutNotice("");
+    }
+  }, [activeModal]);
+
+  useEffect(() => {
+    if (!isSettingsReady || !isHeaderShortcutsEnabled || shortcutCaptureAction) return;
+
+    const handleHeaderShortcutKeyDown = (event: KeyboardEvent): void => {
+      if (
+        isTypingTarget(event.target) ||
+        activeModal ||
+        isFacebookSearchDialogOpen ||
+        isHeaderActionsMenuOpen ||
+        isMobileCategoryMenuOpen ||
+        pendingConfirm ||
+        pendingDownload ||
+        pendingShare ||
+        pendingBackup ||
+        isConfirmExecuting ||
+        isShareExecuting ||
+        isBackupSaving
+      ) {
+        return;
+      }
+
+      const shortcut = createHeaderShortcutFromKeyboardEvent(event);
+      if (!shortcut) return;
+
+      const matchedDefinition = HEADER_SHORTCUT_ACTIONS.find(
+        (definition) => headerShortcuts[definition.id] === shortcut,
+      );
+
+      if (!matchedDefinition) return;
+
+      const targetWindow = event.currentTarget as Window;
+      const targetButton = targetWindow.document.querySelector<HTMLButtonElement>(
+        `[data-header-shortcut-action="${matchedDefinition.id}"]`,
+      );
+
+      if (!targetButton || targetButton.disabled) return;
+
+      event.preventDefault();
+      targetButton.click();
+    };
+
+    const eventWindows = [window, pictureInPictureWindow].filter(
+      (targetWindow, index, windowList): targetWindow is Window =>
+        targetWindow !== null && windowList.indexOf(targetWindow) === index,
+    );
+
+    eventWindows.forEach((targetWindow) => {
+      targetWindow.addEventListener("keydown", handleHeaderShortcutKeyDown);
+    });
+
+    return () => {
+      eventWindows.forEach((targetWindow) => {
+        targetWindow.removeEventListener(
+          "keydown",
+          handleHeaderShortcutKeyDown,
+        );
+      });
+    };
+  }, [
+    activeModal,
+    headerShortcuts,
+    isHeaderShortcutsEnabled,
+    isBackupSaving,
+    isConfirmExecuting,
+    isSettingsReady,
+    isShareExecuting,
+    pendingBackup,
+    pendingConfirm,
+    pendingDownload,
+    pendingShare,
+    pictureInPictureWindow,
+    shortcutCaptureAction,
+  ]);
+
+
   if (!isSettingsReady) {
     return (
       <main
@@ -13840,6 +14474,19 @@ export default function LocalPage({
           height: 20px;
         }
 
+        .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-header-shortcut-action]::after {
+          content: attr(data-header-shortcut-key);
+          flex: none;
+          margin-left: auto;
+          border: 1px solid rgba(216, 201, 159, 0.22);
+          background: rgba(0, 0, 0, 0.22);
+          color: rgba(226, 232, 240, 0.7);
+          padding: 2px 4px;
+          font: 800 7px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+          letter-spacing: 0.02em;
+          white-space: nowrap;
+        }
+
         .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent]:hover {
           transform: translateY(-2px) scale(1.015);
           box-shadow:
@@ -13943,14 +14590,16 @@ export default function LocalPage({
                 }
               }}
             >
-              {isHeaderActionsMenuOpen ? (
-                <button
+              <button
+                data-header-shortcut-action="toggleHeaderVisibility"
+                data-header-shortcut-key={headerShortcuts["toggleHeaderVisibility"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleHeaderVisibility"])}
                   type="button"
                   data-luxury-accent="amber"
                   title={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
                   aria-label={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
                   aria-pressed={isHeaderVisible}
-                  className={`${headerActionButtonBaseClassName} ${isHeaderVisible
+                  className={`${isHeaderActionsMenuOpen ? "" : "hidden"} ${headerActionButtonBaseClassName} ${isHeaderVisible
                     ? headerActiveButtonClassName
                     : headerNeutralButtonClassName
                     }`}
@@ -13966,9 +14615,11 @@ export default function LocalPage({
                   <FiMonitor aria-hidden="true" className={iconClassName} />
                   {isHeaderVisible ? "Ẩn Header" : "Hiện Header"}
                 </button>
-              ) : null}
 
               <button
+                data-header-shortcut-action="addProduct"
+                data-header-shortcut-key={headerShortcuts["addProduct"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["addProduct"])}
                 type="button"
                 data-luxury-accent="gold"
                 title="Thêm sản phẩm"
@@ -13981,6 +14632,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="navigation"
+                data-header-shortcut-key={headerShortcuts["navigation"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["navigation"])}
                 type="button"
                 data-luxury-accent="gold"
                 title="Điều hướng"
@@ -13997,6 +14651,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="importExport"
+                data-header-shortcut-key={headerShortcuts["importExport"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["importExport"])}
                 type="button"
                 data-luxury-accent="sapphire"
                 title="Import Export dữ liệu"
@@ -14019,6 +14676,24 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="shortcuts"
+                data-header-shortcut-key={headerShortcuts["shortcuts"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["shortcuts"])}
+                type="button"
+                data-luxury-accent="cyan"
+                title={`Phím tắt · ${formatHeaderShortcutLabel(headerShortcuts.shortcuts)}`}
+                aria-label={`Phím tắt · ${formatHeaderShortcutLabel(headerShortcuts.shortcuts)}`}
+                className={`${headerActionButtonBaseClassName} border-cyan-300/35 bg-cyan-300/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(165,243,252,0.08)] hover:-translate-y-px hover:border-cyan-200/60 hover:bg-cyan-300/15 hover:text-cyan-50 hover:shadow-[0_8px_20px_rgba(8,145,178,0.18)]`}
+                onClick={() => openModal("shortcuts")}
+              >
+                <FiKey aria-hidden="true" className={iconClassName} />
+                Phím tắt
+              </button>
+
+              <button
+                data-header-shortcut-action="toggleNfkc"
+                data-header-shortcut-key={headerShortcuts["toggleNfkc"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleNfkc"])}
                 type="button"
                 data-luxury-accent="cyan"
                 title={`${isCopyNfkcEnabled ? "Tắt" : "Bật"} chuẩn hóa NFKC tạm thời cho nội dung copy`}
@@ -14043,6 +14718,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="toggleSocialTags"
+                data-header-shortcut-key={headerShortcuts["toggleSocialTags"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleSocialTags"])}
                 type="button"
                 data-luxury-accent="emerald"
                 title={includeSocialTags ? "Tắt Tag khi copy" : "Bật Tag khi copy"}
@@ -14082,6 +14760,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="shareCopyOption"
+                data-header-shortcut-key={headerShortcuts["shareCopyOption"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["shareCopyOption"])}
                 type="button"
                 data-luxury-accent={
                   autoCopyShareMode === "post" ? "sapphire" : "amber"
@@ -14098,6 +14779,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="productList"
+                data-header-shortcut-key={headerShortcuts["productList"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["productList"])}
                 type="button"
                 data-luxury-accent="violet"
                 title="Bảng sản phẩm"
@@ -14110,6 +14794,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="schedule"
+                data-header-shortcut-key={headerShortcuts["schedule"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["schedule"])}
                 type="button"
                 data-luxury-accent="amber"
                 title="Lịch đăng"
@@ -14122,6 +14809,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="hourlyNotification"
+                data-header-shortcut-key={headerShortcuts["hourlyNotification"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["hourlyNotification"])}
                 type="button"
                 data-luxury-accent="emerald"
                 title={
@@ -14148,6 +14838,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="globalNote"
+                data-header-shortcut-key={headerShortcuts["globalNote"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["globalNote"])}
                 type="button"
                 data-luxury-accent="rose"
                 title="Ghi chú"
@@ -14160,6 +14853,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="globalDescription"
+                data-header-shortcut-key={headerShortcuts["globalDescription"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["globalDescription"])}
                 type="button"
                 data-luxury-accent="indigo"
                 title="Mô tả chung"
@@ -14172,6 +14868,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="imageDownload"
+                data-header-shortcut-key={headerShortcuts["imageDownload"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["imageDownload"])}
                 type="button"
                 data-luxury-accent="cyan"
                 title="Tải ảnh"
@@ -14184,6 +14883,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="localImageManager"
+                data-header-shortcut-key={headerShortcuts["localImageManager"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["localImageManager"])}
                 type="button"
                 data-luxury-accent="emerald"
                 title="Quản lý ảnh trong thư mục đã chọn"
@@ -14196,6 +14898,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="clearDownloadedSession"
+                data-header-shortcut-key={headerShortcuts["clearDownloadedSession"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["clearDownloadedSession"])}
                 type="button"
                 data-luxury-accent="rose"
                 title={`Xóa ${downloadedProductIds.size} trạng thái ảnh đã tải trong phiên hiện tại`}
@@ -14211,6 +14916,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="pictureInPicture"
+                data-header-shortcut-key={headerShortcuts["pictureInPicture"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["pictureInPicture"])}
                 type="button"
                 data-luxury-accent="amethyst"
                 title={
@@ -14238,6 +14946,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="facebookLinkSettings"
+                data-header-shortcut-key={headerShortcuts["facebookLinkSettings"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["facebookLinkSettings"])}
                 type="button"
                 data-luxury-accent="sapphire"
                 title="Cài đặt cách mở link Meta, Fanpage và Group"
@@ -14250,6 +14961,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="facebookPages"
+                data-header-shortcut-key={headerShortcuts["facebookPages"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["facebookPages"])}
                 type="button"
                 data-luxury-accent="sapphire"
                 title="Quản lý Fanpage, Asset ID và Group"
@@ -14264,6 +14978,9 @@ export default function LocalPage({
 
 
               <button
+                data-header-shortcut-action="facebookDuplicatePosts"
+                data-header-shortcut-key={headerShortcuts["facebookDuplicatePosts"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["facebookDuplicatePosts"])}
                 type="button"
                 data-luxury-accent="amber"
                 title="Mở công cụ đăng bài, tạo tin và nhân bản Fanpage"
@@ -14276,6 +14993,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="facebookSearch"
+                data-header-shortcut-key={headerShortcuts["facebookSearch"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["facebookSearch"])}
                 type="button"
                 data-luxury-accent="indigo"
                 title="Mở và sắp xếp nhiều popup Facebook Search"
@@ -14288,6 +15008,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="contact"
+                data-header-shortcut-key={headerShortcuts["contact"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["contact"])}
                 type="button"
                 data-luxury-accent="teal"
                 title={
@@ -14309,6 +15032,9 @@ export default function LocalPage({
 
 
               <button
+                data-header-shortcut-action="reloadPage"
+                data-header-shortcut-key={headerShortcuts["reloadPage"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["reloadPage"])}
                 type="button"
                 data-luxury-accent="cyan"
                 title="Làm mới trang và kiểm tra lại phiên bản dữ liệu Cloud"
@@ -14321,6 +15047,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="refreshCloud"
+                data-header-shortcut-key={headerShortcuts["refreshCloud"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["refreshCloud"])}
                 type="button"
                 data-luxury-accent={
                   availableRemoteSyncVersion !== null &&
@@ -14362,6 +15091,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="toggleRemoteSyncReminder"
+                data-header-shortcut-key={headerShortcuts["toggleRemoteSyncReminder"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleRemoteSyncReminder"])}
                 type="button"
                 data-luxury-accent="amber"
                 title={
@@ -15322,10 +16054,12 @@ export default function LocalPage({
 
       {activeModal ? (
         <div className="luxury-modal-overlay fixed inset-0 z-modal flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-8">
-          <div className="luxury-modal flex h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden border xl:h-[calc(100dvh-4rem)]">
+          <div
+            className="luxury-modal flex h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden border xl:h-[calc(100dvh-4rem)]"
+          >
             <div className="luxury-modal-titlebar flex min-w-0 shrink-0 items-center justify-between gap-3 border-b p-2.5">
               <div className="flex min-w-0 items-center gap-2">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/30 bg-[#d8c99f]/[0.07] text-[#eadfbe] [clip-path:polygon(7px_0,100%_0,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,0_100%,0_7px)]">
+                <div className="[clip-path:polygon(7px_0,100%_0,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,0_100%,0_7px)] flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/30 bg-[#d8c99f]/[0.07] text-[#eadfbe]">
                   {activeModal === "product" ? (
                     <FiPlus aria-hidden="true" className={iconClassName} />
                   ) : null}
@@ -15378,6 +16112,9 @@ export default function LocalPage({
                   {activeModal === "contentNavigation" ? (
                     <FiMenu aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "shortcuts" ? (
+                    <FiKey aria-hidden="true" className={iconClassName} />
+                  ) : null}
                 </div>
 
                 <div className="min-w-0">
@@ -15420,6 +16157,7 @@ export default function LocalPage({
                       ? "Quản lý ảnh trên máy"
                       : null}
                     {activeModal === "contentNavigation" ? "Điều hướng" : null}
+                    {activeModal === "shortcuts" ? "Phím tắt" : null}
                   </h2>
                 </div>
               </div>
@@ -15436,6 +16174,130 @@ export default function LocalPage({
             <div
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
+              {activeModal === "shortcuts" ? (
+                <section className="mx-auto flex w-full max-w-[1680px] flex-col gap-2 py-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border border-white/10 bg-white/[0.018] px-3 py-2.5 xl:flex-nowrap">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/20 bg-[#d8c99f]/[0.07] text-[#eadfbe]">
+                        <FiKey aria-hidden="true" className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-sm font-black tracking-tight text-white">Phím tắt</h3>
+                          <span className="rounded-full border border-[#d8c99f]/15 bg-[#d8c99f]/[0.07] px-1.5 py-0.5 font-mono text-[8px] font-black text-[#eadfbe]">{HEADER_SHORTCUT_ACTIONS.length}</span>
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[8px] font-semibold text-slate-500">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#d8c99f]" />
+                          {HEADER_SHORTCUT_ACTIONS.filter((definition) => Boolean(headerShortcuts[definition.id])).length}/{HEADER_SHORTCUT_ACTIONS.length} đã gán
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className={`rounded-md border px-2 py-1.5 font-mono text-[8px] font-black ${isHeaderShortcutsEnabled ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200" : "border-white/10 bg-white/[0.025] text-slate-500"}`}>
+                        {isHeaderShortcutsEnabled ? "ON" : "OFF"}
+                      </span>
+                      <button
+                        type="button"
+                        aria-pressed={isHeaderShortcutsEnabled}
+                        className="border border-[#d8c99f]/20 bg-[#d8c99f]/[0.045] px-2.5 py-1.5 text-[8px] font-black text-[#eadfbe] transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.09]"
+                        onClick={() => {
+                          setIsHeaderShortcutsEnabled((current) => !current);
+                          setShortcutCaptureAction("");
+                          setShortcutNotice(isHeaderShortcutsEnabled ? "Đã tắt phím tắt" : "Đã bật phím tắt");
+                        }}
+                      >
+                        {isHeaderShortcutsEnabled ? "Tắt" : "Bật"}
+                      </button>
+                      <button
+                        type="button"
+                        title="Khôi phục phím mặc định"
+                        aria-label="Khôi phục phím mặc định"
+                        className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-400 transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.07] hover:text-[#eadfbe]"
+                        onClick={resetHeaderShortcuts}
+                      >
+                        <FiRefreshCcw aria-hidden="true" className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {shortcutNotice ? (
+                    <div className="border border-[#d8c99f]/15 bg-[#d8c99f]/[0.045] px-3 py-1.5 text-[8px] font-bold text-[#eadfbe]">{shortcutNotice}</div>
+                  ) : null}
+
+                  <div className="grid grid-cols-1 gap-2 xl:grid-cols-5">
+                    {HEADER_SHORTCUT_ACTIONS.map((definition, index) => {
+                      const shortcut = headerShortcuts[definition.id];
+                      const isCapturing = shortcutCaptureAction === definition.id;
+
+                      return (
+                        <article
+                          key={definition.id}
+                          title={definition.description}
+                          className={`group min-w-0 overflow-hidden border px-2.5 py-2 transition duration-200 ${isCapturing ? "border-[#d8c99f]/35 bg-[#d8c99f]/[0.05] shadow-[0_8px_24px_rgba(216,201,159,0.08)]" : "border-white/10 bg-slate-950/30 hover:border-[#d8c99f]/25 hover:bg-white/[0.025]"}`}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              aria-hidden="true"
+                              className={`flex h-6 w-6 shrink-0 items-center justify-center border font-mono text-[7px] font-black ${isCapturing ? "border-[#d8c99f]/30 bg-[#d8c99f] text-[#17130a]" : "border-white/10 bg-white/[0.04] text-slate-500"}`}
+                            >
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <p className="min-w-0 flex-1 truncate text-[9px] font-black leading-tight text-slate-100">{definition.label}</p>
+                          </div>
+
+                          <div className="mt-2 flex items-center gap-1.5">
+                            {isCapturing ? (
+                              <button
+                                type="button"
+                                autoFocus
+                                className="flex min-h-8 min-w-0 flex-1 items-center justify-center border border-[#d8c99f]/25 bg-[#d8c99f]/[0.07] px-2 font-mono text-[8px] font-black uppercase tracking-[0.08em] text-[#eadfbe] outline-none ring-1 ring-[#d8c99f]/10"
+                                onKeyDown={(event) => handleShortcutCapture(event, definition.id)}
+                                onBlur={() => {
+                                  if (shortcutCaptureAction === definition.id) setShortcutCaptureAction("");
+                                }}
+                              >
+                                Nhấn phím
+                              </button>
+                            ) : (
+                              <kbd
+                                className={`flex min-h-8 min-w-0 flex-1 items-center justify-center border px-2 font-mono text-[9px] font-black tracking-[0.04em] ${shortcut ? "border-[#d8c99f]/25 bg-[#d8c99f]/[0.07] text-[#eadfbe]" : "border-white/10 bg-white/[0.025] text-slate-500"}`}
+                                title={shortcut ? `Shortcut ${formatHeaderShortcutLabel(shortcut)}` : "Chưa gán"}
+                              >
+                                {shortcut ? formatHeaderShortcutLabel(shortcut) : "—"}
+                              </kbd>
+                            )}
+
+                            <button
+                              type="button"
+                              aria-label={`Đổi phím tắt ${definition.label}`}
+                              title="Đổi phím"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-400 transition hover:border-[#d8c99f]/35 hover:bg-[#d8c99f]/[0.06] hover:text-[#eadfbe]"
+                              onClick={() => {
+                                setShortcutNotice("");
+                                setShortcutCaptureAction(definition.id);
+                              }}
+                            >
+                              <FiEdit3 aria-hidden="true" className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!shortcut}
+                              aria-label={`Xóa phím tắt ${definition.label}`}
+                              title="Xóa"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-500 transition hover:border-rose-300/30 hover:bg-rose-300/[0.06] hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-25"
+                              onClick={() => clearHeaderShortcut(definition.id)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
               {activeModal === "contentNavigation" ? (
                 <section className="mx-auto flex w-full max-w-xl flex-col gap-3 py-2">
                   <div className="border border-[#d8c99f]/15 bg-white/[0.018] p-3 text-center">
