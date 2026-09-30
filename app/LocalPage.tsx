@@ -785,6 +785,7 @@ type AlbumSource = {
 type ModalName =
   | "product"
   | "productList"
+  | "productMerge"
   | "schedule"
   | "hourlyNotification"
   | "globalNote"
@@ -3357,6 +3358,57 @@ const buildCopyableProductListText = (
     .join("\n\n");
 };
 
+const toUnicodeBoldText = (value: string): string => {
+  const uppercaseStart = 0x1d400;
+  const lowercaseStart = 0x1d41a;
+  const digitStart = 0x1d7ce;
+
+  return Array.from(value)
+    .map((character) => {
+      const code = character.charCodeAt(0);
+
+      if (code >= 65 && code <= 90) {
+        return String.fromCodePoint(uppercaseStart + code - 65);
+      }
+
+      if (code >= 97 && code <= 122) {
+        return String.fromCodePoint(lowercaseStart + code - 97);
+      }
+
+      if (code >= 48 && code <= 57) {
+        return String.fromCodePoint(digitStart + code - 48);
+      }
+
+      return character;
+    })
+    .join("");
+};
+
+const buildMergedProductListText = (
+  groups: {
+    category: string;
+    products: LocalProduct[];
+  }[],
+): string => {
+  return groups
+    .map((group) => {
+      const lines = group.products.map((product, index) => {
+        const price = product.priceText.trim();
+
+        return [
+          `${index + 1}. ${removeDoneProductPrefix(product.name)}`,
+          price ? `Giá: ${price}` : "",
+        ]
+          .filter(Boolean)
+          .join(" | ");
+      });
+
+      return [`📌 ${toUnicodeBoldText(group.category)}`, ...lines].join("\n");
+    })
+    .join("\n\n")
+    .trim();
+};
+
 const escapeCsvCell = (value: string): string => {
   return `"${value.replace(/"/g, '""')}"`;
 };
@@ -5525,6 +5577,18 @@ export default function LocalPage({
     key: string;
     position: CategoryDropPosition;
   } | null>(null);
+  const [productMergeCategoryOrder, setProductMergeCategoryOrder] =
+    useState<string[]>([]);
+  const [productMergeCategorySearch, setProductMergeCategorySearch] =
+    useState<string>("");
+  const [productMergeDraggingKey, setProductMergeDraggingKey] =
+    useState<string>("");
+  const [productMergeDropTarget, setProductMergeDropTarget] = useState<{
+    key: string;
+    position: CategoryDropPosition;
+  } | null>(null);
+  const [productMergeCopied, setProductMergeCopied] =
+    useState<boolean>(false);
   const [isMobileCategoryMenuOpen, setIsMobileCategoryMenuOpen] =
     useState<boolean>(false);
   const [isHeaderActionsMenuOpen, setIsHeaderActionsMenuOpen] =
@@ -7149,6 +7213,58 @@ export default function LocalPage({
       0,
     );
   }, [copyableProductGroups]);
+
+  const mergeableProductGroups = useMemo(() => {
+    return orderGroupsByCategories(
+      createGroupedProducts(
+        products.filter((product) => !product.isDone),
+        pendingDoneProductIds,
+      ),
+      categories,
+    );
+  }, [categories, pendingDoneProductIds, products]);
+
+  const productMergeGroups = useMemo(() => {
+    const groupMap = new Map(
+      mergeableProductGroups.map((group) => [
+        normalizeTextKey(group.category),
+        group,
+      ]),
+    );
+
+    return productMergeCategoryOrder
+      .map((category) => groupMap.get(normalizeTextKey(category)))
+      .filter((group): group is (typeof mergeableProductGroups)[number] => Boolean(group));
+  }, [mergeableProductGroups, productMergeCategoryOrder]);
+
+  const productMergeSelectedKeys = useMemo(() => {
+    return new Set(
+      productMergeCategoryOrder.map((category) => normalizeTextKey(category)),
+    );
+  }, [productMergeCategoryOrder]);
+
+  const productMergeCategoryOptions = useMemo(() => {
+    const keyword = normalizeTextKey(productMergeCategorySearch);
+
+    return mergeableProductGroups
+      .filter((group) => {
+        const key = normalizeTextKey(group.category);
+        if (productMergeSelectedKeys.has(key)) return false;
+        return !keyword || key.includes(keyword);
+      })
+      .slice(0, 12);
+  }, [mergeableProductGroups, productMergeCategorySearch, productMergeSelectedKeys]);
+
+  const productMergeProductCount = useMemo(() => {
+    return productMergeGroups.reduce(
+      (total, group) => total + group.products.length,
+      0,
+    );
+  }, [productMergeGroups]);
+
+  const productMergeText = useMemo(() => {
+    return buildMergedProductListText(productMergeGroups);
+  }, [productMergeGroups]);
 
   const soldProductCount = useMemo(() => {
     return filteredProducts.filter((product) => product.isDone).length;
@@ -9274,6 +9390,13 @@ export default function LocalPage({
         setImageDownloadCategory("all");
       }
 
+      if (closingModal === "productMerge") {
+        setProductMergeDraggingKey("");
+        setProductMergeDropTarget(null);
+        setProductMergeCategorySearch("");
+        setProductMergeCopied(false);
+      }
+
       if (closingModal === "localImageManager") {
         setLocalImageView("active");
       }
@@ -10010,6 +10133,189 @@ export default function LocalPage({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Không thể copy ảnh đại diện";
+      Toastify(message, 400);
+    }
+  };
+
+  const openProductMergeModal = (): void => {
+    if (mergeableProductGroups.length === 0) {
+      Toastify("Không có sản phẩm đang hoạt động để gộp", 300);
+      return;
+    }
+
+    setProductMergeCategoryOrder(
+      copyableProductGroups.length > 0
+        ? copyableProductGroups.map((group) => group.category)
+        : mergeableProductGroups.map((group) => group.category),
+    );
+    setProductMergeCategorySearch("");
+    setProductMergeDraggingKey("");
+    setProductMergeDropTarget(null);
+    setProductMergeCopied(false);
+    openModal("productMerge");
+  };
+
+  const resetProductMergeDrag = (): void => {
+    setProductMergeDraggingKey("");
+    setProductMergeDropTarget(null);
+  };
+
+  const addProductMergeCategory = (category: string): void => {
+    const categoryKey = normalizeTextKey(category);
+    if (!categoryKey || productMergeSelectedKeys.has(categoryKey)) return;
+
+    const match = mergeableProductGroups.find(
+      (group) => normalizeTextKey(group.category) === categoryKey,
+    );
+    if (!match) return;
+
+    setProductMergeCategoryOrder((current) => {
+      if (current.some((item) => normalizeTextKey(item) === categoryKey)) {
+        return current;
+      }
+      return [...current, match.category];
+    });
+    setProductMergeCategorySearch("");
+  };
+
+  const handleProductMergeCategorySearchKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (event.key !== "Enter") return;
+    const firstMatch = productMergeCategoryOptions[0];
+    if (!firstMatch) return;
+
+    event.preventDefault();
+    addProductMergeCategory(firstMatch.category);
+  };
+
+
+  const handleProductMergeDragStart = (
+    event: DragEvent<HTMLButtonElement>,
+    category: string,
+  ): void => {
+    const key = normalizeTextKey(category);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", key);
+    setProductMergeDraggingKey(key);
+    setProductMergeDropTarget(null);
+  };
+
+  const handleProductMergeDragOver = (
+    event: DragEvent<HTMLButtonElement>,
+    category: string,
+  ): void => {
+    if (!productMergeDraggingKey) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+
+    const targetKey = normalizeTextKey(category);
+    if (targetKey === productMergeDraggingKey) {
+      setProductMergeDropTarget(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position: CategoryDropPosition =
+      event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+
+    setProductMergeDropTarget((current) =>
+      current?.key === targetKey && current.position === position
+        ? current
+        : { key: targetKey, position },
+    );
+  };
+
+  const handleProductMergeDrop = (
+    event: DragEvent<HTMLButtonElement>,
+    category: string,
+  ): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const sourceKey = productMergeDraggingKey;
+    const targetKey = normalizeTextKey(category);
+
+    if (!sourceKey || sourceKey === targetKey) {
+      resetProductMergeDrag();
+      return;
+    }
+
+    const sourceCategory = productMergeCategoryOrder.find(
+      (item) => normalizeTextKey(item) === sourceKey,
+    );
+    if (!sourceCategory) {
+      resetProductMergeDrag();
+      return;
+    }
+
+    const nextOrder = productMergeCategoryOrder.filter(
+      (item) => normalizeTextKey(item) !== sourceKey,
+    );
+    const targetIndex = nextOrder.findIndex(
+      (item) => normalizeTextKey(item) === targetKey,
+    );
+    const position =
+      productMergeDropTarget?.key === targetKey
+        ? productMergeDropTarget.position
+        : event.clientY <
+          event.currentTarget.getBoundingClientRect().top +
+          event.currentTarget.getBoundingClientRect().height / 2
+          ? "before"
+          : "after";
+    const insertionIndex =
+      targetIndex < 0
+        ? nextOrder.length
+        : targetIndex + (position === "after" ? 1 : 0);
+
+    nextOrder.splice(insertionIndex, 0, sourceCategory);
+    setProductMergeCategoryOrder(nextOrder);
+    resetProductMergeDrag();
+  };
+
+  const saveProductMergeCategoryOrder = (): void => {
+    if (!requestWriteAccess()) return;
+
+    const knownKeys = new Set(
+      categories.map((category) => normalizeTextKey(category)),
+    );
+    const mergedOrder = [
+      ...productMergeCategoryOrder,
+      ...categories.filter(
+        (category) =>
+          !productMergeCategoryOrder.some(
+            (selected) => normalizeTextKey(selected) === normalizeTextKey(category),
+          ),
+      ),
+    ].filter((category) => knownKeys.has(normalizeTextKey(category)));
+
+    setSettings((current) => ({
+      ...current,
+      categoryOrder: mergedOrder,
+    }));
+
+    Toastify("Đã lưu thứ tự danh mục", 200);
+  };
+
+  const handleCopyMergedProductList = async (): Promise<void> => {
+    if (!productMergeText) {
+      Toastify("Không có dữ liệu để copy", 300);
+      return;
+    }
+
+    try {
+      await copyText(productMergeText);
+      setProductMergeCopied(true);
+      Toastify("Đã copy danh sách gộp", 200);
+
+      getActiveInteractionWindow().setTimeout(() => {
+        setProductMergeCopied(false);
+      }, 1200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Không thể copy danh sách gộp";
       Toastify(message, 400);
     }
   };
@@ -12917,9 +13223,8 @@ export default function LocalPage({
     }));
     setShortcutCaptureAction("");
     setShortcutNotice(
-      `Đã gán ${formatHeaderShortcutLabel(shortcut)} cho ${
-        HEADER_SHORTCUT_ACTIONS.find((definition) => definition.id === actionId)?.label ??
-        actionId
+      `Đã gán ${formatHeaderShortcutLabel(shortcut)} cho ${HEADER_SHORTCUT_ACTIONS.find((definition) => definition.id === actionId)?.label ??
+      actionId
       }.`,
     );
   };
@@ -14594,27 +14899,27 @@ export default function LocalPage({
                 data-header-shortcut-action="toggleHeaderVisibility"
                 data-header-shortcut-key={headerShortcuts["toggleHeaderVisibility"] || ""}
                 aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleHeaderVisibility"])}
-                  type="button"
-                  data-luxury-accent="amber"
-                  title={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
-                  aria-label={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
-                  aria-pressed={isHeaderVisible}
-                  className={`${isHeaderActionsMenuOpen ? "" : "hidden"} ${headerActionButtonBaseClassName} ${isHeaderVisible
-                    ? headerActiveButtonClassName
-                    : headerNeutralButtonClassName
-                    }`}
-                  onClick={() => {
-                    const nextVisible = !isHeaderVisible;
-                    setIsHeaderVisible(nextVisible);
-                    Toastify(
-                      `Đã ${nextVisible ? "hiện" : "ẩn"} header trên thiết bị này`,
-                      200,
-                    );
-                  }}
-                >
-                  <FiMonitor aria-hidden="true" className={iconClassName} />
-                  {isHeaderVisible ? "Ẩn Header" : "Hiện Header"}
-                </button>
+                type="button"
+                data-luxury-accent="amber"
+                title={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
+                aria-label={isHeaderVisible ? "Ẩn header ngoài" : "Hiện header ngoài"}
+                aria-pressed={isHeaderVisible}
+                className={`${isHeaderActionsMenuOpen ? "" : "hidden"} ${headerActionButtonBaseClassName} ${isHeaderVisible
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName
+                  }`}
+                onClick={() => {
+                  const nextVisible = !isHeaderVisible;
+                  setIsHeaderVisible(nextVisible);
+                  Toastify(
+                    `Đã ${nextVisible ? "hiện" : "ẩn"} header trên thiết bị này`,
+                    200,
+                  );
+                }}
+              >
+                <FiMonitor aria-hidden="true" className={iconClassName} />
+                {isHeaderVisible ? "Ẩn Header" : "Hiện Header"}
+              </button>
 
               <button
                 data-header-shortcut-action="addProduct"
@@ -16056,14 +16361,18 @@ export default function LocalPage({
         <div className="luxury-modal-overlay fixed inset-0 z-modal flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-8">
           <div
             className="luxury-modal flex h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden border xl:h-[calc(100dvh-4rem)]"
+            data-shortcuts-modal={activeModal === "shortcuts" ? "true" : undefined}
           >
             <div className="luxury-modal-titlebar flex min-w-0 shrink-0 items-center justify-between gap-3 border-b p-2.5">
               <div className="flex min-w-0 items-center gap-2">
-                <div className="[clip-path:polygon(7px_0,100%_0,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,0_100%,0_7px)] flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/30 bg-[#d8c99f]/[0.07] text-[#eadfbe]">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/30 bg-[#d8c99f]/[0.07] text-[#eadfbe] [clip-path:polygon(7px_0,100%_0,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,0_100%,0_7px)]">
                   {activeModal === "product" ? (
                     <FiPlus aria-hidden="true" className={iconClassName} />
                   ) : null}
                   {activeModal === "productList" ? (
+                    <FiDatabase aria-hidden="true" className={iconClassName} />
+                  ) : null}
+                  {activeModal === "productMerge" ? (
                     <FiDatabase aria-hidden="true" className={iconClassName} />
                   ) : null}
                   {activeModal === "schedule" ? (
@@ -16127,6 +16436,9 @@ export default function LocalPage({
                     {activeModal === "productList"
                       ? "Bảng sản phẩm"
                       : null}
+                    {activeModal === "productMerge"
+                      ? "Gộp sản phẩm"
+                      : null}
                     {activeModal === "schedule" ? "Cấu hình lịch đăng" : null}
                     {activeModal === "hourlyNotification" ? "Thông báo thời gian" : null}
                     {activeModal === "globalNote" ? "Ghi chú" : null}
@@ -16175,57 +16487,60 @@ export default function LocalPage({
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
               {activeModal === "shortcuts" ? (
-                <section className="mx-auto flex w-full max-w-[1680px] flex-col gap-2 py-1">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border border-white/10 bg-white/[0.018] px-3 py-2.5 xl:flex-nowrap">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center border border-[#d8c99f]/20 bg-[#d8c99f]/[0.07] text-[#eadfbe]">
-                        <FiKey aria-hidden="true" className="h-3.5 w-3.5" />
+                <section className="flex w-full min-w-0 flex-col gap-2 py-1">
+                  <div className="relative min-w-0 overflow-hidden rounded-md border border-white/10 bg-slate-950/45 shadow-[0_12px_34px_rgba(0,0,0,0.24)]">
+                    <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0556b1] via-[#009485] to-[#d8c99f]" />
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 xl:flex-nowrap">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 bg-cyan-300/[0.08] text-cyan-100">
+                          <FiKey aria-hidden="true" className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="truncate text-sm font-black tracking-tight text-white">Phím tắt</h3>
+                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-mono text-[8px] font-black text-slate-400">{HEADER_SHORTCUT_ACTIONS.length}</span>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-1.5 text-[8px] font-bold text-slate-500">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#009485]" />
+                            {HEADER_SHORTCUT_ACTIONS.filter((definition) => Boolean(headerShortcuts[definition.id])).length}/{HEADER_SHORTCUT_ACTIONS.length} đã gán
+                          </div>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="truncate text-sm font-black tracking-tight text-white">Phím tắt</h3>
-                          <span className="rounded-full border border-[#d8c99f]/15 bg-[#d8c99f]/[0.07] px-1.5 py-0.5 font-mono text-[8px] font-black text-[#eadfbe]">{HEADER_SHORTCUT_ACTIONS.length}</span>
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[8px] font-semibold text-slate-500">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#d8c99f]" />
-                          {HEADER_SHORTCUT_ACTIONS.filter((definition) => Boolean(headerShortcuts[definition.id])).length}/{HEADER_SHORTCUT_ACTIONS.length} đã gán
-                        </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className={`rounded-md border px-2 py-1.5 font-mono text-[8px] font-black ${isHeaderShortcutsEnabled ? "border-[#009485]/20 bg-[#009485]/[0.07] text-[#007e70]" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
+                          {isHeaderShortcutsEnabled ? "ON" : "OFF"}
+                        </span>
+                        <button
+                          type="button"
+                          aria-pressed={isHeaderShortcutsEnabled}
+                          className={`rounded-md border px-2.5 py-1.5 text-[8px] font-black transition ${isHeaderShortcutsEnabled ? "border-white/10 bg-white/[0.04] text-slate-200 hover:border-cyan-300/25 hover:bg-cyan-300/[0.05] hover:text-cyan-100" : "border-cyan-300/35 bg-cyan-300/[0.08] text-cyan-100 hover:bg-cyan-300/[0.14]"}`}
+                          onClick={() => {
+                            setIsHeaderShortcutsEnabled((current) => !current);
+                            setShortcutCaptureAction("");
+                            setShortcutNotice(isHeaderShortcutsEnabled ? "Đã tắt phím tắt" : "Đã bật phím tắt");
+                          }}
+                        >
+                          {isHeaderShortcutsEnabled ? "Tắt" : "Bật"}
+                        </button>
+                        <button
+                          type="button"
+                          title="Khôi phục phím mặc định"
+                          aria-label="Khôi phục phím mặc định"
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-slate-200"
+                          onClick={resetHeaderShortcuts}
+                        >
+                          <FiRefreshCcw aria-hidden="true" className="h-3 w-3" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <span className={`rounded-md border px-2 py-1.5 font-mono text-[8px] font-black ${isHeaderShortcutsEnabled ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200" : "border-white/10 bg-white/[0.025] text-slate-500"}`}>
-                        {isHeaderShortcutsEnabled ? "ON" : "OFF"}
-                      </span>
-                      <button
-                        type="button"
-                        aria-pressed={isHeaderShortcutsEnabled}
-                        className="border border-[#d8c99f]/20 bg-[#d8c99f]/[0.045] px-2.5 py-1.5 text-[8px] font-black text-[#eadfbe] transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.09]"
-                        onClick={() => {
-                          setIsHeaderShortcutsEnabled((current) => !current);
-                          setShortcutCaptureAction("");
-                          setShortcutNotice(isHeaderShortcutsEnabled ? "Đã tắt phím tắt" : "Đã bật phím tắt");
-                        }}
-                      >
-                        {isHeaderShortcutsEnabled ? "Tắt" : "Bật"}
-                      </button>
-                      <button
-                        type="button"
-                        title="Khôi phục phím mặc định"
-                        aria-label="Khôi phục phím mặc định"
-                        className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-400 transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.07] hover:text-[#eadfbe]"
-                        onClick={resetHeaderShortcuts}
-                      >
-                        <FiRefreshCcw aria-hidden="true" className="h-3 w-3" />
-                      </button>
-                    </div>
+                    {shortcutNotice ? (
+                      <div className="border-t border-white/10 bg-white/[0.025] px-3 py-1.5 text-[8px] font-bold text-slate-400">{shortcutNotice}</div>
+                    ) : null}
                   </div>
 
-                  {shortcutNotice ? (
-                    <div className="border border-[#d8c99f]/15 bg-[#d8c99f]/[0.045] px-3 py-1.5 text-[8px] font-bold text-[#eadfbe]">{shortcutNotice}</div>
-                  ) : null}
-
-                  <div className="grid grid-cols-1 gap-2 xl:grid-cols-5">
+                  <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-5">
                     {HEADER_SHORTCUT_ACTIONS.map((definition, index) => {
                       const shortcut = headerShortcuts[definition.id];
                       const isCapturing = shortcutCaptureAction === definition.id;
@@ -16234,12 +16549,14 @@ export default function LocalPage({
                         <article
                           key={definition.id}
                           title={definition.description}
-                          className={`group min-w-0 overflow-hidden border px-2.5 py-2 transition duration-200 ${isCapturing ? "border-[#d8c99f]/35 bg-[#d8c99f]/[0.05] shadow-[0_8px_24px_rgba(216,201,159,0.08)]" : "border-white/10 bg-slate-950/30 hover:border-[#d8c99f]/25 hover:bg-white/[0.025]"}`}
+                          className={`group relative min-w-0 overflow-hidden rounded-md border bg-slate-950/55 px-2 py-2 transition duration-200 ${isCapturing ? "border-cyan-300/45 bg-cyan-300/[0.06] shadow-[0_8px_24px_rgba(34,211,238,0.1)]" : "border-white/10 shadow-[0_4px_16px_rgba(0,0,0,0.12)] hover:-translate-y-px hover:border-white/20 hover:bg-white/[0.03]"}`}
                         >
+                          <div aria-hidden="true" className={`absolute inset-x-2 top-0 h-px ${isCapturing ? "bg-[#d8c99f]" : "bg-gradient-to-r from-transparent via-[#0556b1]/35 to-transparent"}`} />
+
                           <div className="flex min-w-0 items-center gap-2">
                             <span
                               aria-hidden="true"
-                              className={`flex h-6 w-6 shrink-0 items-center justify-center border font-mono text-[7px] font-black ${isCapturing ? "border-[#d8c99f]/30 bg-[#d8c99f] text-[#17130a]" : "border-white/10 bg-white/[0.04] text-slate-500"}`}
+                              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[7px] font-black ${isCapturing ? "border-cyan-300/35 bg-cyan-300 text-slate-950" : "border-white/10 bg-white/[0.04] text-slate-400"}`}
                             >
                               {String(index + 1).padStart(2, "0")}
                             </span>
@@ -16251,7 +16568,7 @@ export default function LocalPage({
                               <button
                                 type="button"
                                 autoFocus
-                                className="flex min-h-8 min-w-0 flex-1 items-center justify-center border border-[#d8c99f]/25 bg-[#d8c99f]/[0.07] px-2 font-mono text-[8px] font-black uppercase tracking-[0.08em] text-[#eadfbe] outline-none ring-1 ring-[#d8c99f]/10"
+                                className="flex min-h-8 min-w-0 flex-1 items-center justify-center rounded-md border border-cyan-300/35 bg-cyan-300/[0.07] px-2 font-mono text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100 outline-none ring-1 ring-cyan-300/20"
                                 onKeyDown={(event) => handleShortcutCapture(event, definition.id)}
                                 onBlur={() => {
                                   if (shortcutCaptureAction === definition.id) setShortcutCaptureAction("");
@@ -16261,7 +16578,7 @@ export default function LocalPage({
                               </button>
                             ) : (
                               <kbd
-                                className={`flex min-h-8 min-w-0 flex-1 items-center justify-center border px-2 font-mono text-[9px] font-black tracking-[0.04em] ${shortcut ? "border-[#d8c99f]/25 bg-[#d8c99f]/[0.07] text-[#eadfbe]" : "border-white/10 bg-white/[0.025] text-slate-500"}`}
+                                className={`flex min-h-8 min-w-0 flex-1 items-center justify-center border px-2 font-mono text-[9px] font-black tracking-[0.04em] shadow-[inset_0_-2px_0_rgba(15,23,42,0.06)] ${shortcut ? "border-cyan-300/20 bg-cyan-300/[0.06] text-cyan-100" : "border-rose-300/20 bg-rose-300/[0.05] text-rose-200"}`}
                                 title={shortcut ? `Shortcut ${formatHeaderShortcutLabel(shortcut)}` : "Chưa gán"}
                               >
                                 {shortcut ? formatHeaderShortcutLabel(shortcut) : "—"}
@@ -16272,7 +16589,7 @@ export default function LocalPage({
                               type="button"
                               aria-label={`Đổi phím tắt ${definition.label}`}
                               title="Đổi phím"
-                              className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-400 transition hover:border-[#d8c99f]/35 hover:bg-[#d8c99f]/[0.06] hover:text-[#eadfbe]"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition hover:border-cyan-300/25 hover:bg-cyan-300/[0.05] hover:text-cyan-100"
                               onClick={() => {
                                 setShortcutNotice("");
                                 setShortcutCaptureAction(definition.id);
@@ -16285,7 +16602,7 @@ export default function LocalPage({
                               disabled={!shortcut}
                               aria-label={`Xóa phím tắt ${definition.label}`}
                               title="Xóa"
-                              className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/10 bg-white/[0.025] text-slate-500 transition hover:border-rose-300/30 hover:bg-rose-300/[0.06] hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-25"
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-[10px] font-black text-slate-500 transition hover:border-rose-300/25 hover:bg-rose-300/[0.05] hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-25"
                               onClick={() => clearHeaderShortcut(definition.id)}
                             >
                               ×
@@ -16650,92 +16967,86 @@ export default function LocalPage({
 
               {activeModal === "productList" ? (
                 <section className="product-list-dialog flex h-full w-full min-w-0 max-w-full flex-col gap-2 overflow-x-hidden">
-                  <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-center">
-                    <div className="">
-                      <h3 className="text-xs font-black text-white">
-                        Bảng sản phẩm
-                      </h3>
-                    </div>
+                  <div className="flex min-w-0 items-center justify-between gap-3 overflow-hidden rounded-md border border-white/10 bg-slate-900/70 px-2.5 py-1.5">
+                    <h3 className="shrink-0 text-xs font-black tracking-tight text-white">
+                      Bảng sản phẩm
+                    </h3>
 
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-md border border-white/10 bg-slate-800 p-2">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">
-                          Tổng
-                        </p>
-                        <p className="mt-1 text-sm font-black text-white">
-                          {filteredProducts.length}
-                        </p>
-                      </div>
-
-                      <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-2">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-300/80">
-                          Đã bán
-                        </p>
-                        <p className="mt-1 text-sm font-black text-emerald-100">
-                          {soldProductCount}
-                        </p>
-                      </div>
-
-                      <div className="rounded-md border border-cyan-400/20 bg-cyan-400/10 p-2">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-cyan-200/80">
-                          Chưa bán
-                        </p>
-                        <p className="mt-1 text-sm font-black text-cyan-100">
-                          {activeProductCount}
-                        </p>
-                      </div>
+                    <div className="flex shrink-0 items-center gap-1 text-[8px] font-bold leading-none">
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-1 text-slate-400">
+                        Tổng <strong className="text-slate-200">{filteredProducts.length}</strong>
+                      </span>
+                      <span className="rounded-full border border-emerald-400/15 bg-emerald-400/[0.05] px-1.5 py-1 text-emerald-300/80">
+                        Đã bán <strong className="text-emerald-200">{soldProductCount}</strong>
+                      </span>
+                      <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.05] px-1.5 py-1 text-cyan-300/80">
+                        Chưa bán <strong className="text-cyan-200">{activeProductCount}</strong>
+                      </span>
                     </div>
                   </div>
 
-                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-[minmax(0,1fr)_110px_110px_90px]">
-                    <label className="flex items-center gap-2 rounded-md border border-slate-600 bg-slate-950/70 px-2 py-1.5 text-slate-400 transition focus-within:border-slate-300 focus-within:bg-slate-950">
-                      <FiSearch
-                        aria-hidden="true"
-                        className={`${iconClassName} shrink-0`}
-                      />
+                  <div className="flex min-w-0 w-full items-center gap-2.5 overflow-visible">
+                    <div className="min-w-0 flex-1">
+                      <label className="flex h-12 w-full min-w-0 items-center gap-2.5 rounded-md border border-slate-600 bg-slate-950/75 px-3.5 text-slate-400 shadow-inner transition focus-within:border-cyan-300/50 focus-within:bg-slate-950 focus-within:shadow-[0_0_0_1px_rgba(103,232,249,0.08)]">
+                        <FiSearch
+                          aria-hidden="true"
+                          className="h-4 w-4 shrink-0 text-slate-500"
+                        />
 
-                      <input
-                        // autoFocus
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        className="w-full bg-transparent text-xs font-semibold text-white outline-none placeholder:text-slate-500"
-                        placeholder="Tìm tên, giá hoặc danh mục"
-                      />
-                    </label>
+                        <input
+                          // autoFocus
+                          value={query}
+                          onChange={(event) => setQuery(event.target.value)}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          className="min-w-0 w-full bg-transparent text-[13px] font-semibold text-white outline-none placeholder:text-slate-500"
+                          placeholder="Tìm sản phẩm..."
+                        />
+                      </label>
+                    </div>
 
-                    <button
-                      type="button"
-                      className="flex items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-2 py-2 whitespace-nowrap text-xs font-black text-white transition hover:bg-slate-700 active:opacity-80"
-                      onClick={() => void handleCopyProductList()}
-                    >
-                      {copiedKey === "product-list-copy" ? (
-                        <FiCheck aria-hidden="true" className={iconClassName} />
-                      ) : (
-                        <FiCopy aria-hidden="true" className={iconClassName} />
-                      )}
-                      Copy
-                    </button>
+                    <div className="flex shrink-0 items-center justify-end gap-1.5 overflow-visible rounded-md border border-white/10 bg-slate-900/55 p-1">
+                      <button
+                        type="button"
+                        className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-slate-800 px-3 whitespace-nowrap text-[10px] font-black text-white transition hover:bg-slate-700 active:opacity-80"
+                        onClick={() => void handleCopyProductList()}
+                      >
+                        {copiedKey === "product-list-copy" ? (
+                          <FiCheck aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <FiCopy aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        Copy
+                      </button>
 
-                    <button
-                      type="button"
-                      className="flex items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-2 py-2 whitespace-nowrap text-xs font-black text-white transition hover:bg-slate-700 active:opacity-80"
-                      onClick={handleExportProductsCsv}
-                    >
-                      <FiFileText
-                        aria-hidden="true"
-                        className={iconClassName}
-                      />
-                      Excel
-                    </button>
+                      <button
+                        type="button"
+                        className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-slate-800 px-3 whitespace-nowrap text-[10px] font-black text-white transition hover:bg-slate-700 active:opacity-80"
+                        onClick={handleExportProductsCsv}
+                      >
+                        <FiFileText aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                        Excel
+                      </button>
 
-                    <button
-                      type="button"
-                      className="flex items-center justify-center gap-2 rounded-md bg-cyan-300 px-2 py-2 whitespace-nowrap text-xs font-black text-slate-950 transition hover:bg-cyan-200 active:opacity-80"
-                      onClick={openProductModalForCreate}
-                    >
-                      <FiPlus aria-hidden="true" className={iconClassName} />
-                    </button>
+                      <button
+                        type="button"
+                        disabled={mergeableProductGroups.length === 0}
+                        className="flex h-10 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 bg-cyan-300/[0.06] px-3 whitespace-nowrap text-[10px] font-black text-cyan-100 transition hover:border-cyan-200/40 hover:bg-cyan-300/[0.1] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                        onClick={openProductMergeModal}
+                        title="Gộp sản phẩm theo danh mục"
+                      >
+                        Gộp
+                      </button>
+
+                      <button
+                        type="button"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-cyan-300 text-slate-950 transition hover:bg-cyan-200 active:opacity-80"
+                        onClick={openProductModalForCreate}
+                        title="Thêm sản phẩm"
+                        aria-label="Thêm sản phẩm"
+                      >
+                        <FiPlus aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                      </button>
+                    </div>
                   </div>
 
                   <div className="product-list-scroll min-h-0 min-w-0 max-w-full flex-1 overflow-auto rounded-md border border-white/10 bg-slate-950">
@@ -16911,6 +17222,109 @@ export default function LocalPage({
                         </div>
                       </div>
                     )}
+                  </div>
+                </section>
+              ) : null}
+
+              {activeModal === "productMerge" ? (
+                <section className="flex h-full min-h-0 w-full min-w-0 flex-col gap-2 overflow-hidden">
+                  <div className="grid min-h-0 min-w-0 flex-1 gap-2 xl:grid-cols-[360px_minmax(0,1fr)]">
+                    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
+                      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <FiMenu aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                          <h3 className="truncate text-xs font-black text-white">Danh mục</h3>
+                        </div>
+                        <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[9px] font-black text-slate-400">{productMergeGroups.length}</span>
+                      </div>
+
+                      <div className="min-w-0 border-b border-white/10 p-2">
+                        <label className="flex min-w-0 items-center gap-2 rounded-md border border-white/10 bg-slate-950/70 px-2.5 py-2 focus-within:border-cyan-300/45">
+                          <FiSearch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                          <input
+                            value={productMergeCategorySearch}
+                            onChange={(event) => setProductMergeCategorySearch(event.target.value)}
+                            onKeyDown={handleProductMergeCategorySearchKeyDown}
+                            onKeyDownCapture={(event) => event.stopPropagation()}
+                            className="min-w-0 w-full bg-transparent text-[10px] font-bold text-white outline-none placeholder:text-slate-500"
+                            placeholder="Tìm danh mục..."
+                            aria-label="Tìm danh mục để thêm"
+                          />
+                        </label>
+                        {productMergeCategoryOptions.length > 0 ? (
+                          <div className="mt-1.5 grid min-w-0 grid-cols-2 gap-1 overflow-hidden">
+                            {productMergeCategoryOptions.map((group) => (
+                              <button
+                                key={normalizeTextKey(group.category)}
+                                type="button"
+                                onClick={() => addProductMergeCategory(group.category)}
+                                className="flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-cyan-300/15 bg-cyan-300/[0.045] px-2 py-1.5 text-left text-[9px] font-black text-cyan-100 transition hover:border-cyan-300/35 hover:bg-cyan-300/[0.09]"
+                                title={`Thêm ${group.category}`}
+                              >
+                                <FiPlus aria-hidden="true" className="h-3 w-3 shrink-0" />
+                                <span className="min-w-0 flex-1 truncate">{group.category}</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-2">
+                        <div className="grid min-w-0 grid-cols-2 gap-1.5 overflow-hidden">
+                          {productMergeGroups.map((group, index) => {
+                            const categoryKey = normalizeTextKey(group.category);
+                            const isDragging = productMergeDraggingKey === categoryKey;
+                            const dropPosition = productMergeDropTarget?.key === categoryKey ? productMergeDropTarget.position : null;
+                            return (
+                              <button
+                                key={categoryKey}
+                                type="button"
+                                draggable
+                                onDragStart={(event) => handleProductMergeDragStart(event, group.category)}
+                                onDragOver={(event) => handleProductMergeDragOver(event, group.category)}
+                                onDrop={(event) => handleProductMergeDrop(event, group.category)}
+                                onDragEnd={resetProductMergeDrag}
+                                className={`relative flex h-9 min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-left transition ${isDragging ? "border-cyan-300/45 bg-cyan-300/[0.09]" : "border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]"}`}
+                                title="Kéo để sắp xếp"
+                              >
+                                {dropPosition === "before" ? <span className="pointer-events-none absolute left-1 right-1 top-0 h-0.5 rounded-full bg-cyan-300" /> : null}
+                                {dropPosition === "after" ? <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-cyan-300" /> : null}
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 bg-white/[0.04] font-mono text-[8px] font-black text-slate-500">{String(index + 1).padStart(2, "0")}</span>
+                                <span className="min-w-0 flex-1 truncate text-[9px] font-black text-slate-100">{group.category}</span>
+                                <span className="shrink-0 rounded border border-white/10 bg-white/[0.035] px-1 py-0.5 font-mono text-[8px] font-bold text-slate-500">{group.products.length}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
+                      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 text-sm">📌</span>
+                          <h3 className="truncate text-xs font-black text-white">Xem trước</h3>
+                          <span className="shrink-0 font-mono text-[9px] text-slate-500">{productMergeProductCount}</span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!productMergeText}
+                          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-cyan-300/25 bg-cyan-300/[0.07] px-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-300/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => void handleCopyMergedProductList()}
+                        >
+                          {productMergeCopied ? <FiCheck aria-hidden="true" className="h-3 w-3" /> : <FiCopy aria-hidden="true" className="h-3 w-3" />}
+                          {productMergeCopied ? "Đã copy" : "Copy"}
+                        </button>
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-auto p-3">
+                        <pre className="whitespace-pre-wrap break-words text-[11px] leading-6 text-slate-200">{productMergeText || "Chưa có sản phẩm đang hoạt động."}</pre>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="flex min-w-0 shrink-0 items-center justify-end gap-2 border-t border-white/10 pt-2">
+                    <button type="button" className="rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[9px] font-black text-slate-200 transition hover:bg-slate-700" onClick={closeModal}>Đóng</button>
+                    <button type="button" className="rounded-md border border-cyan-300/25 bg-cyan-300/[0.07] px-3 py-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-300/[0.12]" onClick={saveProductMergeCategoryOrder}>Lưu thứ tự</button>
                   </div>
                 </section>
               ) : null}
