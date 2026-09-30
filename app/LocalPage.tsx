@@ -3509,12 +3509,19 @@ const createCloudinaryThumbnailUrl = (sourceUrl: string): string => {
   }
 };
 
+const SYSTEM_IMAGE_INDEX_WIDTH = 4;
+
 const createSystemImageFilename = (
   index: number,
   imageId: string,
   extension = "jpg",
 ): string => {
-  return `sanpham${index + 1}-${createImageFilenameSuffix(imageId)}.${extension}`;
+  const sequence = String(Math.max(0, index + 1)).padStart(
+    SYSTEM_IMAGE_INDEX_WIDTH,
+    "0",
+  );
+
+  return `sanpham${sequence}-${createImageFilenameSuffix(imageId)}.${extension}`;
 };
 
 const renameImagesByOrder = (images: ProductImage[]): ProductImage[] => {
@@ -4644,7 +4651,10 @@ const saveImagesToDirectory = async (
   request: DownloadRequest,
   directoryHandle: LocalFileSystemDirectoryHandle,
 ): Promise<void> => {
-  for (let index = 0; index < request.images.length; index += 1) {
+  // Ghi index giảm dần để khi Windows Explorer Group by Date và
+  // sort Date Modified giảm dần, index 1 sẽ nằm trước index 2, 3...
+  // Tên file zero-padding đồng thời bảo toàn thứ tự khi sort theo Name.
+  for (let index = request.images.length - 1; index >= 0; index -= 1) {
     const image = request.images[index];
 
     if (!image) continue;
@@ -10347,29 +10357,86 @@ export default function LocalPage({
     }
   };
 
+  const downloadOriginalImagesInOrder = async (
+    images: ProductImage[],
+    startIndex = 0,
+  ): Promise<void> => {
+    // Kích hoạt theo index giảm dần. File index 1 được tạo sau cùng,
+    // giúp Date Modified giảm dần trên Windows vẫn hiển thị 1, 2, 3...
+    // Filename zero-padding giữ thứ tự ổn định khi sort theo Name.
+    for (let index = images.length - 1; index >= 0; index -= 1) {
+      const image = images[index];
+
+      if (!image) continue;
+
+      await downloadOriginalImage(image, startIndex + index);
+    }
+  };
+
+  const requestDownloadImageDecision = (
+    request: DownloadRequest,
+    onDecision: (shouldDownload: boolean) => void | Promise<void>,
+  ): void => {
+    const storedDownloadedProductIds = loadDownloadedProductIds();
+    const productIds = getDownloadedProductIds(request);
+    const wasDownloaded = productIds.some(
+      (productId) =>
+        downloadedProductIds.has(productId) ||
+        storedDownloadedProductIds.has(productId),
+    );
+
+    if (!wasDownloaded) {
+      void onDecision(true);
+      return;
+    }
+
+    requestConfirm({
+      title: "Ảnh đã được đánh dấu tải về",
+      description: `${request.title} đã tải ảnh trong phiên này. Có thể tiếp tục mà không tải lại hoặc tải lại ảnh.`,
+      cancelLabel: "Hủy",
+      confirmLabel: "Đồng ý, không tải lại",
+      secondaryLabel: "Vẫn tải lại ảnh",
+      tone: "warning",
+      onConfirm: () => onDecision(false),
+      onSecondary: () => onDecision(true),
+    });
+  };
+
   const executeDownloadRequest = async (): Promise<void> => {
     if (!pendingDownload) return;
 
     const request = pendingDownload;
     const images = getDownloadImages(request);
+    const productIdsToMark = getDownloadedProductIds(request);
 
     if (images.length === 0) {
       Toastify("Không còn ảnh phù hợp để tải", 300);
       return;
     }
 
-    await copyDownloadTextIfNeeded(request);
+    requestDownloadImageDecision(request, async (shouldDownload) => {
+      if (!shouldDownload) {
+        setPendingDownload(null);
+        setSkipInternalDownloadImages(false);
+        Toastify("Đã bỏ qua tải lại ảnh", 200);
+        return;
+      }
 
-    images.forEach((image, index) => {
-      window.setTimeout(() => {
-        void downloadOriginalImage(image, request.startIndex + index);
-      }, index * 180);
+      try {
+        await copyDownloadTextIfNeeded(request);
+        await downloadOriginalImagesInOrder(images, request.startIndex);
+        markProductImagesDownloaded(productIdsToMark);
+        Toastify(`Đã gửi ${images.length} ảnh nguyên bản vào trình tải xuống`, 200);
+        setPendingDownload(null);
+        setSkipInternalDownloadImages(false);
+      } catch (error) {
+        if (isAbortError(error)) return;
+
+        const message =
+          error instanceof Error ? error.message : "Không thể tải ảnh nguyên bản";
+        Toastify(message, 400);
+      }
     });
-
-    markProductImagesDownloaded(getDownloadedProductIds(request));
-    Toastify(`Đang tải ${images.length} ảnh nguyên bản`, 200);
-    setPendingDownload(null);
-    setSkipInternalDownloadImages(false);
   };
 
   const executeDownloadToFolder = async (): Promise<void> => {
@@ -10377,34 +10444,44 @@ export default function LocalPage({
 
     const request = pendingDownload;
     const images = getDownloadImages(request);
+    const productIdsToMark = getDownloadedProductIds(request);
 
     if (images.length === 0) {
       Toastify("Không còn ảnh phù hợp để tải", 300);
       return;
     }
 
-    try {
-      const directoryHandle = await getWritableLocalImageDirectory();
+    requestDownloadImageDecision(request, async (shouldDownload) => {
+      if (!shouldDownload) {
+        setPendingDownload(null);
+        setSkipInternalDownloadImages(false);
+        Toastify("Đã bỏ qua tải lại ảnh", 200);
+        return;
+      }
 
-      if (!directoryHandle) return;
+      try {
+        const directoryHandle = await getWritableLocalImageDirectory();
 
-      await copyDownloadTextIfNeeded(request);
-      await saveImagesToDirectory({ ...request, images }, directoryHandle);
-      await applyLocalImageDirectorySnapshot(directoryHandle).catch(() => undefined);
-      markProductImagesDownloaded(getDownloadedProductIds(request));
-      Toastify(
-        `Đã lưu ${images.length} ảnh vào ${directoryHandle.name}`,
-        200,
-      );
-      setPendingDownload(null);
-      setSkipInternalDownloadImages(false);
-    } catch (error) {
-      if (isAbortError(error)) return;
+        if (!directoryHandle) return;
 
-      const message =
-        error instanceof Error ? error.message : "Không thể lưu ảnh vào thư mục";
-      Toastify(message, 400);
-    }
+        await copyDownloadTextIfNeeded(request);
+        await saveImagesToDirectory({ ...request, images }, directoryHandle);
+        await applyLocalImageDirectorySnapshot(directoryHandle).catch(() => undefined);
+        markProductImagesDownloaded(productIdsToMark);
+        Toastify(
+          `Đã lưu ${images.length} ảnh vào ${directoryHandle.name}`,
+          200,
+        );
+        setPendingDownload(null);
+        setSkipInternalDownloadImages(false);
+      } catch (error) {
+        if (isAbortError(error)) return;
+
+        const message =
+          error instanceof Error ? error.message : "Không thể lưu ảnh vào thư mục";
+        Toastify(message, 400);
+      }
+    });
   };
 
   const handleDownloadProductImages = (product: LocalProduct): void => {
@@ -10421,7 +10498,7 @@ export default function LocalPage({
     const autoCopyLabel =
       autoCopyShareMode === "comment" ? "Cmt" : "Post";
 
-    requestDownload({
+    const request: DownloadRequest = {
       productIds: [product.id],
       title: "Tải ảnh sản phẩm",
       description: `Tải ảnh của sản phẩm này về máy? Nội dung ${autoCopyLabel} đã chọn sẽ được tự động copy trước khi tải.`,
@@ -10439,6 +10516,52 @@ export default function LocalPage({
           product.contentType,
           product.realEstateComment,
         ),
+      },
+    };
+
+    const storedDownloadedProductIds = loadDownloadedProductIds();
+    const wasDownloaded =
+      downloadedProductIds.has(product.id) ||
+      storedDownloadedProductIds.has(product.id);
+
+    if (!wasDownloaded) {
+      requestDownload(request);
+      return;
+    }
+
+    requestConfirm({
+      title: "Ảnh đã được đánh dấu tải về",
+      description: `${request.title} đã tải ảnh trong phiên này. Có thể tiếp tục mà không tải lại hoặc tải lại ảnh.`,
+      cancelLabel: "Hủy",
+      confirmLabel: "Đồng ý, không tải lại",
+      secondaryLabel: "Vẫn tải lại ảnh",
+      tone: "warning",
+      onConfirm: () => undefined,
+      onSecondary: async () => {
+        const images = getDownloadImages(request);
+
+        if (images.length === 0) {
+          Toastify("Không còn ảnh phù hợp để tải", 300);
+          return;
+        }
+
+        try {
+          await copyDownloadTextIfNeeded(request);
+          await downloadOriginalImagesInOrder(images, request.startIndex);
+          markProductImagesDownloaded([product.id]);
+          Toastify(
+            `Đã gửi ${images.length} ảnh nguyên bản vào trình tải xuống`,
+            200,
+          );
+        } catch (error) {
+          if (isAbortError(error)) return;
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Không thể tải lại ảnh nguyên bản";
+          Toastify(message, 400);
+        }
       },
     });
   };
@@ -10664,13 +10787,7 @@ export default function LocalPage({
   };
 
   const queueMetaComposerImageDownloads = (images: ProductImage[]): void => {
-    const interactionWindow = getActiveInteractionWindow();
-
-    images.forEach((image, index) => {
-      interactionWindow.setTimeout(() => {
-        void downloadOriginalImage(image, index).catch(() => undefined);
-      }, index * 180);
-    });
+    void downloadOriginalImagesInOrder(images).catch(() => undefined);
   };
 
   const prepareMetaImageDownload = (
@@ -10939,13 +11056,7 @@ export default function LocalPage({
     };
 
     const downloadShareImages = (): void => {
-      const interactionWindow = getActiveInteractionWindow();
-
-      shareImages.forEach((image, index) => {
-        interactionWindow.setTimeout(() => {
-          void downloadOriginalImage(image, index);
-        }, index * 180);
-      });
+      void downloadOriginalImagesInOrder(shareImages).catch(() => undefined);
     };
 
     setIsShareExecuting(true);
