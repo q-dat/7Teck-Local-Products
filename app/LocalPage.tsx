@@ -5563,6 +5563,8 @@ export default function LocalPage({
     useState<FacebookLinkOpenSettings>(() => loadFacebookLinkOpenSettings());
   const [editingId, setEditingId] = useState<string>("");
   const [query, setQuery] = useState<string>("");
+  const [isSearchSuggestionsOpen, setIsSearchSuggestionsOpen] =
+    useState<boolean>(false);
   const [productRenderState, setProductRenderState] = useState<{
     key: string;
     limit: number;
@@ -7105,6 +7107,53 @@ export default function LocalPage({
     },
     [goToAdjacentCategory],
   );
+
+  const searchSuggestions = useMemo<LocalProduct[]>(() => {
+    const keyword = normalizeTextKey(query);
+
+    if (!keyword) return [];
+
+    return viewProducts
+      .map((product) => {
+        const nameKey = normalizeTextKey(product.name);
+        const categoryKey = normalizeTextKey(product.category);
+        const descriptionKey = normalizeTextKey(product.description);
+        const priceKey = normalizeTextKey(product.priceText);
+
+        let score = 0;
+
+        if (nameKey === keyword) {
+          score = 4;
+        } else if (nameKey.startsWith(keyword)) {
+          score = 3;
+        } else if (nameKey.includes(keyword)) {
+          score = 2;
+        } else if (
+          categoryKey.includes(keyword) ||
+          priceKey.includes(keyword)
+        ) {
+          score = 1;
+        } else if (descriptionKey.includes(keyword)) {
+          score = 0.5;
+        }
+
+        return { product, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((first, second) => {
+        if (second.score !== first.score) {
+          return second.score - first.score;
+        }
+
+        return first.product.name.localeCompare(
+          second.product.name,
+          "vi",
+          { sensitivity: "base" },
+        );
+      })
+      .slice(0, 8)
+      .map(({ product }) => product);
+  }, [query, viewProducts]);
 
   const filteredProducts = useMemo(() => {
     const keyword = normalizeTextKey(query);
@@ -15430,7 +15479,7 @@ export default function LocalPage({
           data-header-hidden={!isHeaderVisible ? "true" : undefined}
           className="luxury-content-panel border py-1 px-2"
         >
-          <div className="mb-3">
+          <div className="relative z-40 mb-3">
             <label
               className="
       luxury-search group relative flex w-full items-center
@@ -15498,8 +15547,19 @@ export default function LocalPage({
                 ref={searchInputRef}
                 type="text"
                 value={query}
-                onFocus={(event) => event.currentTarget.select()}
-                onChange={(event) => setQuery(event.target.value)}
+                onFocus={(event) => {
+                  event.currentTarget.select();
+                  setIsSearchSuggestionsOpen(true);
+                }}
+                onBlur={() => {
+                  window.setTimeout(() => {
+                    setIsSearchSuggestionsOpen(false);
+                  }, 120);
+                }}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setIsSearchSuggestionsOpen(true);
+                }}
                 onKeyDown={(event) => event.stopPropagation()}
                 className="
         h-8 w-full min-w-0
@@ -15523,6 +15583,79 @@ export default function LocalPage({
                 aria-label="Tìm tất cả sản phẩm"
               />
             </label>
+
+            <AnimatePresence initial={false}>
+              {isSearchSuggestionsOpen &&
+              normalizeTextKey(query) &&
+              searchSuggestions.length > 0 ? (
+                <motion.div
+                  role="listbox"
+                  aria-label="Gợi ý sản phẩm"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{
+                    duration: prefersReducedMotion ? 0.08 : 0.16,
+                    ease: [0.16, 1, 0.3, 1],
+                  }}
+                  className="absolute left-0 right-0 top-[calc(100%+4px)] z-[80] overflow-hidden border border-[#e7d59f]/35 bg-[#100e09]/[0.98] shadow-[0_14px_38px_rgba(0,0,0,0.45),0_0_24px_rgba(232,200,117,0.09)] backdrop-blur-xl"
+                >
+                  <div className="border-b border-white/[0.06] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.12em] text-[#d8c99f]/75">
+                    Gợi ý từ dữ liệu local
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto py-1">
+                    {searchSuggestions.map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          setQuery(product.name);
+                          setIsSearchSuggestionsOpen(false);
+                        }}
+                        className="flex w-full min-w-0 items-center gap-2.5 border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
+                          {product.images[0] ? (
+                            <img
+                              src={product.images[0].dataUrl}
+                              alt=""
+                              width={64}
+                              height={64}
+                              className="h-full w-full object-contain"
+                            />
+                          ) : (
+                            <FiSearch
+                              aria-hidden="true"
+                              className="h-3.5 w-3.5 text-slate-600"
+                            />
+                          )}
+                        </span>
+
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[11px] font-bold text-[#fffdf5]">
+                            {product.name}
+                          </span>
+                          <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[9px] font-semibold text-slate-500">
+                            {product.category ? (
+                              <span className="truncate">{product.category}</span>
+                            ) : null}
+                            {product.priceText ? (
+                              <span className="shrink-0 text-[#d8c99f]">
+                                {product.priceText}
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
 
           <AnimatePresence initial={false}>
