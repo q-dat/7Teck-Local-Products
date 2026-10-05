@@ -7108,6 +7108,17 @@ export default function LocalPage({
     [goToAdjacentCategory],
   );
 
+  const handleCancelSearchInput = useCallback((): void => {
+    setIsSearchSuggestionsOpen(false);
+    searchInputRef.current?.blur();
+  }, []);
+
+  const handleClearSearchInput = useCallback((): void => {
+    setQuery("");
+    setIsSearchSuggestionsOpen(true);
+    searchInputRef.current?.focus();
+  }, []);
+
   const searchSuggestions = useMemo<LocalProduct[]>(() => {
     const keyword = normalizeTextKey(query);
 
@@ -13375,6 +13386,81 @@ export default function LocalPage({
   ]);
 
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const existingViewport = document.querySelector<HTMLMetaElement>(
+      'meta[name="viewport"]',
+    );
+    const viewport = existingViewport ?? document.createElement("meta");
+    const previousContent = viewport.getAttribute("content");
+    const wasAttached = Boolean(existingViewport);
+
+    viewport.name = "viewport";
+    viewport.content =
+      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content";
+
+    if (!wasAttached) {
+      document.head.appendChild(viewport);
+    }
+
+    const rootElement = document.documentElement;
+    const bodyElement = document.body;
+    const previousRootOverflowX = rootElement.style.overflowX;
+    const previousRootOverscrollBehaviorX = rootElement.style.overscrollBehaviorX;
+    const previousRootTouchAction = rootElement.style.touchAction;
+    const previousBodyOverflowX = bodyElement.style.overflowX;
+    const previousBodyOverscrollBehaviorX = bodyElement.style.overscrollBehaviorX;
+    const previousBodyTouchAction = bodyElement.style.touchAction;
+
+    const preventPinchZoom = (event: Event): void => {
+      event.preventDefault();
+    };
+
+    const preventMultiTouchZoom = (event: TouchEvent): void => {
+      if (event.touches.length > 1) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener("gesturestart", preventPinchZoom, { passive: false });
+    document.addEventListener("gesturechange", preventPinchZoom, { passive: false });
+    document.addEventListener("gestureend", preventPinchZoom, { passive: false });
+    document.addEventListener("touchmove", preventMultiTouchZoom, { passive: false });
+
+    rootElement.style.overflowX = "hidden";
+    rootElement.style.overscrollBehaviorX = "none";
+    rootElement.style.touchAction = "pan-x pan-y";
+    bodyElement.style.overflowX = "hidden";
+    bodyElement.style.overscrollBehaviorX = "none";
+    bodyElement.style.touchAction = "pan-x pan-y";
+
+    return () => {
+      document.removeEventListener("gesturestart", preventPinchZoom);
+      document.removeEventListener("gesturechange", preventPinchZoom);
+      document.removeEventListener("gestureend", preventPinchZoom);
+      document.removeEventListener("touchmove", preventMultiTouchZoom);
+
+      rootElement.style.overflowX = previousRootOverflowX;
+      rootElement.style.overscrollBehaviorX = previousRootOverscrollBehaviorX;
+      rootElement.style.touchAction = previousRootTouchAction;
+      bodyElement.style.overflowX = previousBodyOverflowX;
+      bodyElement.style.overscrollBehaviorX = previousBodyOverscrollBehaviorX;
+      bodyElement.style.touchAction = previousBodyTouchAction;
+
+      if (!wasAttached) {
+        viewport.remove();
+        return;
+      }
+
+      if (previousContent === null) {
+        viewport.removeAttribute("content");
+      } else {
+        viewport.setAttribute("content", previousContent);
+      }
+    };
+  }, []);
+
   if (!isSettingsReady) {
     return (
       <main
@@ -13414,6 +13500,16 @@ export default function LocalPage({
 
       <style>{`
         .local-products-workspace {
+          position: relative;
+          width: 100%;
+          min-width: 320px;
+          max-width: 100vw;
+          min-height: 100dvh;
+          overflow-x: hidden !important;
+          overscroll-behavior-x: none;
+          touch-action: pan-x pan-y;
+          -webkit-text-size-adjust: 100%;
+          -webkit-tap-highlight-color: transparent;
           color-scheme: dark;
           background:
             linear-gradient(rgba(216, 201, 159, 0.011) 1px, transparent 1px),
@@ -13466,7 +13562,7 @@ export default function LocalPage({
           -webkit-tap-highlight-color: transparent;
         }
 
-        .local-products-workspace button:not([data-description-line="true"]):not([data-category-bubble="true"]):not([data-image-surface="true"]):not([data-image-control="true"]) {
+        .local-products-workspace button:not([data-description-line="true"]):not([data-category-bubble="true"]):not([data-image-surface="true"]):not([data-image-control="true"]):not([data-search-action]) {
           position: relative;
           isolation: isolate;
           border-radius: 0 !important;
@@ -13474,7 +13570,7 @@ export default function LocalPage({
           transition: color 320ms ease, background-color 320ms ease, border-color 320ms ease, box-shadow 320ms ease, filter 320ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
         }
 
-        .local-products-workspace button:not([data-description-line="true"]):not([data-category-bubble="true"]):not([data-image-surface="true"]):not([data-image-control="true"])::after {
+        .local-products-workspace button:not([data-description-line="true"]):not([data-category-bubble="true"]):not([data-image-surface="true"]):not([data-image-control="true"]):not([data-search-action])::after {
           content: "";
           position: absolute;
           z-index: 2;
@@ -13742,6 +13838,31 @@ export default function LocalPage({
           border-color: rgba(216, 201, 159, 0.2) !important;
           background: linear-gradient(180deg, rgba(16, 21, 29, 0.92), rgba(8, 12, 17, 0.82)) !important;
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.022), inset 0 -1px 0 rgba(0, 0, 0, 0.3), 0 28px 76px rgba(0, 0, 0, 0.27);
+        }
+
+        .local-products-workspace .search-action-button {
+          display: inline-flex;
+          width: 30px;
+          height: 30px;
+          flex: 0 0 30px;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(216, 201, 159, 0.2) !important;
+          background: rgba(216, 201, 159, 0.055) !important;
+          color: rgba(241, 229, 194, 0.82) !important;
+          box-shadow: none !important;
+          clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% calc(100% - 4px), calc(100% - 4px) 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        .local-products-workspace .search-action-button:hover {
+          border-color: rgba(245, 233, 199, 0.5) !important;
+          background: rgba(216, 201, 159, 0.12) !important;
+          color: #fffbeF !important;
+        }
+
+        .local-products-workspace .search-action-button:active {
+          transform: scale(0.94);
         }
 
         .luxury-search {
@@ -15582,12 +15703,37 @@ export default function LocalPage({
                 placeholder="Tìm tất cả sản phẩm"
                 aria-label="Tìm tất cả sản phẩm"
               />
+
+              <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+                <button
+                  type="button"
+                  data-search-action="clear"
+                  className="search-action-button"
+                  title="Xóa toàn bộ nội dung tìm kiếm"
+                  aria-label="Xóa toàn bộ nội dung tìm kiếm"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={handleClearSearchInput}
+                >
+                  <FiX aria-hidden="true" className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  data-search-action="cancel"
+                  className="search-action-button"
+                  title="Bỏ nhập"
+                  aria-label="Bỏ nhập"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={handleCancelSearchInput}
+                >
+                  Bỏ
+                </button>
+              </div>
             </label>
 
             <AnimatePresence initial={false}>
               {isSearchSuggestionsOpen &&
-              normalizeTextKey(query) &&
-              searchSuggestions.length > 0 ? (
+                normalizeTextKey(query) &&
+                searchSuggestions.length > 0 ? (
                 <motion.div
                   role="listbox"
                   aria-label="Gợi ý sản phẩm"
@@ -15604,7 +15750,10 @@ export default function LocalPage({
                     Gợi ý từ dữ liệu local
                   </div>
 
-                  <div className="max-h-72 overflow-y-auto py-1">
+                  <div
+                    className="max-h-[150px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
+                    style={{ scrollbarWidth: "thin" }}
+                  >
                     {searchSuggestions.map((product) => (
                       <button
                         key={product.id}
@@ -15616,7 +15765,7 @@ export default function LocalPage({
                           setQuery(product.name);
                           setIsSearchSuggestionsOpen(false);
                         }}
-                        className="flex w-full min-w-0 items-center gap-2.5 border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
+                        className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
                       >
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
                           {product.images[0] ? (
@@ -15635,16 +15784,16 @@ export default function LocalPage({
                           )}
                         </span>
 
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[11px] font-bold text-[#fffdf5]">
+                        <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                          <span className="block min-w-0 truncate text-[11px] font-bold text-[#fffdf5]">
                             {product.name}
                           </span>
-                          <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[9px] font-semibold text-slate-500">
+                          <span className="mt-0.5 flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-[9px] font-semibold text-slate-500">
                             {product.category ? (
-                              <span className="truncate">{product.category}</span>
+                              <span className="min-w-0 truncate">{product.category}</span>
                             ) : null}
                             {product.priceText ? (
-                              <span className="shrink-0 text-[#d8c99f]">
+                              <span className="shrink-0 truncate text-[#d8c99f]">
                                 {product.priceText}
                               </span>
                             ) : null}
