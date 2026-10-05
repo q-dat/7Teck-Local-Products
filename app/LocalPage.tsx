@@ -719,6 +719,7 @@ type ConfirmRequest = {
   cancelLabel?: string;
   secondaryLabel?: string;
   tone?: ConfirmTone;
+  kind?: "default" | "sync";
   onConfirm: () => void | Promise<void>;
   onCancel?: () => void;
   onSecondary?: () => void | Promise<void>;
@@ -7970,13 +7971,13 @@ export default function LocalPage({
 
     remoteSyncPromptedVersionRef.current = remoteVersion;
     setPendingConfirm({
-      title: "Có dữ liệu mới",
-      description:
-        "Dữ liệu đã được cập nhật ở thiết bị khác. Đồng bộ chỉ lấy phần thay đổi, không xóa Blob cache ảnh đang có trên thiết bị này.",
-      confirmLabel: "Đồng bộ ngay",
+      title: "Đồng bộ dữ liệu mới?",
+      description: "Có cập nhật mới trên Cloud.",
+      confirmLabel: "Đồng bộ",
       cancelLabel: "Để sau",
       secondaryLabel: "Không nhắc lại",
       tone: "default",
+      kind: "sync",
       onCancel: () => {
         remoteSyncDismissedVersionRef.current = remoteVersion;
       },
@@ -20809,71 +20810,142 @@ export default function LocalPage({
       </AnimatePresence>
 
       {pendingConfirm ? (
-        <div className="luxury-modal-overlay fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center p-2">
-          <div className={compactLuxuryDialogClassName}>
-            <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-2">
-              <div className="">
-                <h3 className="text-xs font-black text-white">
-                  {pendingConfirm.title}
-                </h3>
-                <p className="mt-2 text-xs leading-5 text-slate-400">
-                  {pendingConfirm.description}
-                </p>
+        <div className="luxury-modal-overlay fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center p-3">
+          <div
+            className={`w-full border border-white/10 bg-slate-950/95 shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl ${pendingConfirm.kind === "sync" ? "max-w-sm rounded-2xl p-4" : compactLuxuryDialogClassName}`}
+          >
+            {pendingConfirm.kind === "sync" ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
+                    <FiRefreshCcw
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-black tracking-tight text-white">
+                      {pendingConfirm.title}
+                    </h3>
+                    <p className="mt-1 text-[11px] font-medium text-slate-400">
+                      {pendingConfirm.description}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-400 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-wait disabled:opacity-50"
+                    onClick={closeConfirm}
+                    aria-label="Đóng"
+                  >
+                    <FiX aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {pendingConfirm.onSecondary && pendingConfirm.secondaryLabel ? (
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2.5 transition hover:border-white/15 hover:bg-white/[0.045]">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      disabled={isConfirmExecuting}
+                      onChange={() => void executeConfirmSecondary()}
+                      className="h-4 w-4 shrink-0 accent-cyan-300"
+                    />
+                    <span className="min-w-0 text-[11px] font-semibold text-slate-300">
+                      {pendingConfirm.secondaryLabel}
+                    </span>
+                  </label>
+                ) : null}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-[11px] font-bold text-slate-200 transition hover:bg-white/[0.08] disabled:cursor-wait disabled:opacity-50"
+                    onClick={closeConfirm}
+                  >
+                    {pendingConfirm.cancelLabel ?? "Hủy"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className="rounded-xl bg-cyan-300 px-3 py-2.5 text-[11px] font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-60"
+                    onClick={() => void executeConfirm()}
+                  >
+                    {isConfirmExecuting ? "Đang xử lý..." : pendingConfirm.confirmLabel}
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                disabled={isConfirmExecuting}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-slate-800 text-slate-200 transition hover:bg-slate-700 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
-                onClick={closeConfirm}
-              >
-                <FiX aria-hidden="true" className={iconClassName} />
-              </button>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-2">
+                  <div className="">
+                    <h3 className="text-xs font-black text-white">
+                      {pendingConfirm.title}
+                    </h3>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      {pendingConfirm.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-slate-800 text-slate-200 transition hover:bg-slate-700 active:opacity-80 disabled:cursor-wait disabled:opacity-50"
+                    onClick={closeConfirm}
+                  >
+                    <FiX aria-hidden="true" className={iconClassName} />
+                  </button>
+                </div>
 
-            <div
-              className={`mt-2 grid gap-2 ${pendingConfirm.onSecondary
-                ? "grid-cols-1 xl:grid-cols-3"
-                : "grid-cols-2"
-                }`}
-            >
-              <button
-                type="button"
-                disabled={isConfirmExecuting}
-                className="rounded-md border border-white/10 bg-slate-800 p-2 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
-                onClick={closeConfirm}
-              >
-                {pendingConfirm.cancelLabel ?? "Hủy"}
-              </button>
-
-              <button
-                type="button"
-                disabled={isConfirmExecuting}
-                className={`rounded-md p-2 text-xs font-black transition disabled:cursor-wait disabled:opacity-60 ${pendingConfirm.tone === "danger"
-                  ? "bg-rose-500 text-white hover:bg-rose-400"
-                  : pendingConfirm.tone === "warning"
-                    ? "bg-amber-300 text-slate-950 hover:bg-amber-200"
-                    : "bg-cyan-300 text-slate-950 hover:bg-cyan-200"
-                  }`}
-                onClick={() => void executeConfirm()}
-              >
-                {isConfirmExecuting
-                  ? "Đang xử lý..."
-                  : pendingConfirm.confirmLabel}
-              </button>
-
-              {pendingConfirm.onSecondary && pendingConfirm.secondaryLabel ? (
-                <button
-                  type="button"
-                  disabled={isConfirmExecuting}
-                  className="rounded-md border border-amber-200/50 bg-amber-300/15 p-2 text-xs font-black text-amber-50 transition hover:bg-amber-300/25 disabled:cursor-wait disabled:opacity-60"
-                  onClick={() => void executeConfirmSecondary()}
+                <div
+                  className={`mt-2 grid gap-2 ${pendingConfirm.onSecondary
+                    ? "grid-cols-1 xl:grid-cols-3"
+                    : "grid-cols-2"
+                    }`}
                 >
-                  {isConfirmExecuting
-                    ? "Đang xử lý..."
-                    : pendingConfirm.secondaryLabel}
-                </button>
-              ) : null}
-            </div>
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className="rounded-md border border-white/10 bg-slate-800 p-2 text-xs font-bold text-white transition hover:bg-slate-700 disabled:cursor-wait disabled:opacity-50"
+                    onClick={closeConfirm}
+                  >
+                    {pendingConfirm.cancelLabel ?? "Hủy"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isConfirmExecuting}
+                    className={`rounded-md p-2 text-xs font-black transition disabled:cursor-wait disabled:opacity-60 ${pendingConfirm.tone === "danger"
+                      ? "bg-rose-500 text-white hover:bg-rose-400"
+                      : pendingConfirm.tone === "warning"
+                        ? "bg-amber-300 text-slate-950 hover:bg-amber-200"
+                        : "bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                      }`}
+                    onClick={() => void executeConfirm()}
+                  >
+                    {isConfirmExecuting
+                      ? "Đang xử lý..."
+                      : pendingConfirm.confirmLabel}
+                  </button>
+
+                  {pendingConfirm.onSecondary && pendingConfirm.secondaryLabel ? (
+                    <button
+                      type="button"
+                      disabled={isConfirmExecuting}
+                      className="rounded-md border border-amber-200/50 bg-amber-300/15 p-2 text-xs font-black text-amber-50 transition hover:bg-amber-300/25 disabled:cursor-wait disabled:opacity-60"
+                      onClick={() => void executeConfirmSecondary()}
+                    >
+                      {isConfirmExecuting
+                        ? "Đang xử lý..."
+                        : pendingConfirm.secondaryLabel}
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
