@@ -5147,6 +5147,138 @@ const permanentlyDeleteLocalTrashImages = async (
   return { moved, failed };
 };
 
+const sanitizeLocalProductFolderName = (value: string): string => {
+  const sanitized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "-")
+    .replace(/[. ]+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .slice(0, 100)
+    .trim();
+
+  if (!sanitized) return "San pham";
+
+  const reservedName = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu;
+  return reservedName.test(sanitized) ? `_${sanitized}` : sanitized;
+};
+
+const createProductFolderImageFilename = (
+  productName: string,
+  index: number,
+  image: ProductImage,
+  isInternal: boolean,
+): string => {
+  const safeProductName = sanitizeLocalProductFolderName(productName)
+    .replace(/[. ]+$/gu, "")
+    .slice(0, 72);
+  const sequence = String(index + 1).padStart(3, "0");
+  const prefix = isInternal ? `noi-bo-${sequence}` : sequence;
+
+  return `${prefix}-${safeProductName}-${createImageFilenameSuffix(image.id)}.${normalizeImageExtension(image)}`;
+};
+
+const getAvailableProductFolderName = async (
+  rootDirectoryHandle: LocalFileSystemDirectoryHandle,
+  productName: string,
+  reservedNames: Set<string>,
+): Promise<string> => {
+  const baseName = sanitizeLocalProductFolderName(productName);
+  let candidate = baseName;
+  let suffix = 2;
+
+  while (reservedNames.has(candidate)) {
+    candidate = `${baseName} (${suffix})`;
+    suffix += 1;
+  }
+
+  reservedNames.add(candidate);
+
+  try {
+    await rootDirectoryHandle.getDirectoryHandle(candidate);
+    return candidate;
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== "NotFoundError") {
+      throw error;
+    }
+
+    return candidate;
+  }
+};
+
+const saveProductImagesIntoFolders = async (
+  products: LocalProduct[],
+  rootDirectoryHandle: LocalFileSystemDirectoryHandle,
+): Promise<{ products: number; images: number }> => {
+  const reservedFolderNames = new Set<string>();
+  let savedProducts = 0;
+  let savedImages = 0;
+
+  for (const product of products) {
+    const mainImages = product.images;
+    const internalImages = product.internalImages;
+
+    if (mainImages.length === 0 && internalImages.length === 0) continue;
+
+    const folderName = await getAvailableProductFolderName(
+      rootDirectoryHandle,
+      product.name,
+      reservedFolderNames,
+    );
+    const productDirectoryHandle = await rootDirectoryHandle.getDirectoryHandle(
+      folderName,
+      { create: true },
+    );
+
+    const saveImageList = async (
+      images: ProductImage[],
+      isInternal: boolean,
+    ): Promise<void> => {
+      for (let index = 0; index < images.length; index += 1) {
+        const image = images[index];
+
+        if (!image) continue;
+
+        const blob = await getProductImageBlob(image);
+        const preferredName = createProductFolderImageFilename(
+          product.name,
+          index,
+          image,
+          isInternal,
+        );
+        const fileName = await createAvailableLocalImageName(
+          productDirectoryHandle,
+          preferredName,
+        );
+        const fileHandle = await productDirectoryHandle.getFileHandle(fileName, {
+          create: true,
+        });
+        const writable = await fileHandle.createWritable();
+
+        try {
+          await writable.write(blob);
+          await writable.close();
+        } catch (error) {
+          try {
+            await writable.close();
+          } catch {
+            // Giữ lỗi ghi file ban đầu.
+          }
+          await productDirectoryHandle.removeEntry(fileName).catch(() => undefined);
+          throw error;
+        }
+
+        savedImages += 1;
+      }
+    };
+
+    await saveImageList(mainImages, false);
+    await saveImageList(internalImages, true);
+    savedProducts += 1;
+  }
+
+  return { products: savedProducts, images: savedImages };
+};
+
 const saveImagesToDirectory = async (
   request: DownloadRequest,
   directoryHandle: LocalFileSystemDirectoryHandle,
@@ -5638,6 +5770,10 @@ export default function LocalPage({
   const prefersReducedMotion = useReducedMotion();
   const [imageDownloadCategory, setImageDownloadCategory] =
     useState<CategoryTab>("all");
+  const [excludedImageDownloadCategories, setExcludedImageDownloadCategories] =
+    useState<Set<string>>(() => new Set<string>());
+  const [isImageFolderDownloadBusy, setIsImageFolderDownloadBusy] =
+    useState<boolean>(false);
   const [localImageDirectoryHandle, setLocalImageDirectoryHandle] =
     useState<LocalFileSystemDirectoryHandle | null>(null);
   const [localImageDirectoryPermission, setLocalImageDirectoryPermission] =
@@ -7363,13 +7499,41 @@ export default function LocalPage({
     return viewProducts.filter((product) => !product.isDone);
   }, [viewProducts]);
 
+  const imageDownloadCategoryOptions = useMemo(() => {
+    const categoryMap = new Map<string, { name: string; count: number }>();
+
+    downloadableProducts.forEach((product) => {
+      const name =
+        normalizeCategoryName(product.category) || "Chưa phân loại";
+      const key = normalizeTextKey(name);
+      const current = categoryMap.get(key);
+
+      categoryMap.set(key, {
+        name: current?.name ?? name,
+        count: (current?.count ?? 0) + 1,
+      });
+    });
+
+    return Array.from(categoryMap.values()).sort((first, second) =>
+      first.name.localeCompare(second.name, "vi"),
+    );
+  }, [downloadableProducts]);
+
+  const filteredImageDownloadProducts = useMemo(() => {
+    return downloadableProducts.filter((product) => {
+      const category =
+        normalizeCategoryName(product.category) || "Chưa phân loại";
+      return !excludedImageDownloadCategories.has(normalizeTextKey(category));
+    });
+  }, [downloadableProducts, excludedImageDownloadCategories]);
+
   const totalImages = useMemo(() => {
-    return downloadableProducts.reduce(
+    return filteredImageDownloadProducts.reduce(
       (total, product) =>
         total + product.images.length + product.internalImages.length,
       0,
     );
-  }, [downloadableProducts]);
+  }, [filteredImageDownloadProducts]);
 
   const representativeImageCategoryOptions = useMemo(() => {
     const categoryMap = new Map<string, { name: string; count: number }>();
@@ -7415,7 +7579,7 @@ export default function LocalPage({
   const representativeImageProducts = useMemo(() => {
     const selectedCategoryKey = normalizeTextKey(imageDownloadCategory);
 
-    return downloadableProducts.filter((product) => {
+    return filteredImageDownloadProducts.filter((product) => {
       if (!product.images[0]) return false;
       if (imageDownloadCategory === "all") return true;
 
@@ -7424,7 +7588,7 @@ export default function LocalPage({
 
       return normalizeTextKey(productCategory) === selectedCategoryKey;
     });
-  }, [downloadableProducts, imageDownloadCategory]);
+  }, [filteredImageDownloadProducts, imageDownloadCategory]);
 
   useEffect(() => {
     if (imageDownloadCategory === "all") return;
@@ -9652,6 +9816,7 @@ export default function LocalPage({
 
       if (closingModal === "imageDownload") {
         setImageDownloadCategory("all");
+        setExcludedImageDownloadCategories(new Set<string>());
       }
 
       if (closingModal === "productMerge") {
@@ -12435,21 +12600,21 @@ export default function LocalPage({
   };
 
   const handleDownloadAllImages = (): void => {
-    const allMainImages = downloadableProducts.flatMap(
+    const allMainImages = filteredImageDownloadProducts.flatMap(
       (product) => product.images,
     );
-    const allInternalImages = downloadableProducts.flatMap(
+    const allInternalImages = filteredImageDownloadProducts.flatMap(
       (product) => product.internalImages,
     );
     const totalDownloadImages =
       allMainImages.length + allInternalImages.length;
 
     if (totalDownloadImages === 0) {
-      Toastify("Chưa có ảnh của sản phẩm chưa DONE để tải", 300);
+      Toastify("Chưa có ảnh phù hợp với danh mục đã chọn để tải", 300);
       return;
     }
 
-    const activeDescriptions = downloadableProducts
+    const activeDescriptions = filteredImageDownloadProducts
       .map((product) => {
         const description =
           product.description.trim() || settings.commonDescription.trim();
@@ -12458,7 +12623,7 @@ export default function LocalPage({
       })
       .filter(Boolean)
       .join("\n\n---\n\n");
-    const activeComments = downloadableProducts
+    const activeComments = filteredImageDownloadProducts
       .map((product) => {
         const description =
           product.description.trim() || settings.commonDescription.trim();
@@ -12476,13 +12641,13 @@ export default function LocalPage({
       .join("\n\n---\n\n");
 
     requestDownload({
-      productIds: downloadableProducts
+      productIds: filteredImageDownloadProducts
         .filter(
           (product) =>
             product.images.length + product.internalImages.length > 0,
         )
         .map((product) => product.id),
-      productIdsWhenSkippingInternal: downloadableProducts
+      productIdsWhenSkippingInternal: filteredImageDownloadProducts
         .filter((product) => product.images.length > 0)
         .map((product) => product.id),
       title: "Tải toàn bộ ảnh",
@@ -12495,6 +12660,156 @@ export default function LocalPage({
         postText: activeDescriptions,
         commentText: activeComments,
       },
+    });
+  };
+
+  const toggleImageDownloadCategory = (category: string): void => {
+    const key = normalizeTextKey(category);
+
+    setExcludedImageDownloadCategories((current) => {
+      const next = new Set(current);
+
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+
+      return next;
+    });
+  };
+
+  const selectAllImageDownloadCategories = (): void => {
+    setExcludedImageDownloadCategories(new Set<string>());
+  };
+
+  const clearAllImageDownloadCategories = (): void => {
+    setExcludedImageDownloadCategories(
+      new Set(
+        imageDownloadCategoryOptions.map((category) =>
+          normalizeTextKey(category.name),
+        ),
+      ),
+    );
+  };
+
+  const handleDownloadProductFolders = (): void => {
+    const products = filteredImageDownloadProducts.filter(
+      (product) => product.images.length > 0 || product.internalImages.length > 0,
+    );
+
+    if (products.length === 0) {
+      Toastify("Không còn sản phẩm hoạt động có ảnh để tải", 300);
+      return;
+    }
+
+    const productIds = products.map((product) => product.id);
+    const storedDownloadedProductIds = loadDownloadedProductIds();
+    const wasDownloaded = productIds.some(
+      (productId) =>
+        downloadedProductIds.has(productId) ||
+        storedDownloadedProductIds.has(productId),
+    );
+
+    const execute = async (): Promise<void> => {
+      const directoryHandle = await getWritableLocalImageDirectory();
+
+      if (!directoryHandle) return;
+
+      setIsImageFolderDownloadBusy(true);
+      setPageLoadingText(
+        `Đang tải ảnh vào ${directoryHandle.name} · ${products.length} sản phẩm...`,
+      );
+      await waitForUiPaint();
+
+      try {
+        const result = await saveProductImagesIntoFolders(
+          products,
+          directoryHandle,
+        );
+        markProductImagesDownloaded(productIds);
+        Toastify(
+          `Đã tạo ${result.products} folder và lưu ${result.images} ảnh vào ${directoryHandle.name}`,
+          200,
+        );
+      } catch (error: unknown) {
+        if (isAbortError(error)) return;
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Không thể tải ảnh theo folder sản phẩm";
+        Toastify(message, 400);
+      } finally {
+        setIsImageFolderDownloadBusy(false);
+        setPageLoadingText("");
+      }
+    };
+
+    if (!wasDownloaded) {
+      void execute();
+      return;
+    }
+
+    requestConfirm({
+      title: "Có sản phẩm đã tải ảnh",
+      description:
+        "Một số sản phẩm trong danh sách đã được đánh dấu tải ở phiên này. Bạn có muốn tiếp tục ghi lại ảnh vào các folder sản phẩm không?",
+      cancelLabel: "Hủy",
+      confirmLabel: "Bỏ qua sản phẩm đã tải",
+      secondaryLabel: "Tải lại tất cả",
+      tone: "warning",
+      onConfirm: async () => {
+        const skippedIds = new Set(
+          productIds.filter(
+            (productId) =>
+              downloadedProductIds.has(productId) ||
+              storedDownloadedProductIds.has(productId),
+          ),
+        );
+        const remainingProducts = products.filter(
+          (product) => !skippedIds.has(product.id),
+        );
+
+        if (remainingProducts.length === 0) {
+          Toastify("Tất cả sản phẩm đã được tải trong phiên này", 200);
+          return;
+        }
+
+        const directoryHandle = await getWritableLocalImageDirectory();
+
+        if (!directoryHandle) return;
+
+        setIsImageFolderDownloadBusy(true);
+        setPageLoadingText(
+          `Đang tải ${remainingProducts.length} sản phẩm chưa tải vào ${directoryHandle.name}...`,
+        );
+        await waitForUiPaint();
+
+        try {
+          const result = await saveProductImagesIntoFolders(
+            remainingProducts,
+            directoryHandle,
+          );
+          markProductImagesDownloaded(remainingProducts.map((product) => product.id));
+          Toastify(
+            `Đã tạo ${result.products} folder và lưu ${result.images} ảnh`,
+            200,
+          );
+        } catch (error: unknown) {
+          if (isAbortError(error)) return;
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Không thể tải ảnh theo folder sản phẩm";
+          Toastify(message, 400);
+        } finally {
+          setIsImageFolderDownloadBusy(false);
+          setPageLoadingText("");
+        }
+      },
+      onSecondary: async () => execute(),
     });
   };
 
@@ -17343,6 +17658,139 @@ export default function LocalPage({
 
               {activeModal === "imageDownload" ? (
                 <section className="grid w-full grid-cols-1 gap-3 xl:grid-cols-2">
+                  <article className="xl:col-span-2 flex flex-col rounded-md border border-emerald-300/15 bg-slate-900 p-3">
+                    <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-black text-white">
+                          Danh mục được phép tải
+                        </h3>
+                        <p className="mt-1 text-[10px] leading-4 text-slate-400">
+                          Chỉ áp dụng cho các lệnh tải ảnh trong modal này. Sản phẩm đã <strong className="text-emerald-300">Done</strong> luôn bị loại khỏi batch.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 xl:w-auto">
+                        <button
+                          type="button"
+                          className="min-h-9 border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={selectAllImageDownloadCategories}
+                          disabled={imageDownloadCategoryOptions.length === 0}
+                        >
+                          Chọn tất cả
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-9 border border-rose-300/20 bg-rose-300/10 px-3 py-2 text-[10px] font-black text-rose-100 transition hover:bg-rose-300/15 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={clearAllImageDownloadCategories}
+                          disabled={imageDownloadCategoryOptions.length === 0}
+                        >
+                          Bỏ tất cả
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-white/10 bg-slate-950 p-2">
+                      {imageDownloadCategoryOptions.length === 0 ? (
+                        <div className="p-4 text-center text-[10px] text-slate-500">
+                          Không có danh mục nào từ sản phẩm đang hoạt động.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-3">
+                          {imageDownloadCategoryOptions.map((category) => {
+                            const key = normalizeTextKey(category.name);
+                            const isEnabled = !excludedImageDownloadCategories.has(key);
+
+                            return (
+                              <label
+                                key={category.name}
+                                className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${
+                                  isEnabled
+                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                    : "border-white/5 bg-white/[0.02] text-slate-500"
+                                }`}
+                              >
+                                <span className="min-w-0">
+                                  <span className="block truncate text-[10px] font-black">
+                                    {category.name}
+                                  </span>
+                                  <span className="mt-0.5 block text-[8px] text-slate-500">
+                                    {category.count} sản phẩm hoạt động
+                                  </span>
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  checked={isEnabled}
+                                  onChange={() => toggleImageDownloadCategory(category.name)}
+                                  className="h-4 w-4 shrink-0 accent-emerald-300"
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-3 gap-1.5 text-center">
+                      <div className="border border-white/10 bg-slate-950 p-2">
+                        <span className="block text-[8px] uppercase tracking-wide text-slate-500">Danh mục tải</span>
+                        <strong className="mt-1 block text-sm font-black text-emerald-200">
+                          {imageDownloadCategoryOptions.filter((category) => !excludedImageDownloadCategories.has(normalizeTextKey(category.name))).length}
+                        </strong>
+                      </div>
+                      <div className="border border-white/10 bg-slate-950 p-2">
+                        <span className="block text-[8px] uppercase tracking-wide text-slate-500">Sản phẩm</span>
+                        <strong className="mt-1 block text-sm font-black text-white">
+                          {filteredImageDownloadProducts.length}
+                        </strong>
+                      </div>
+                      <div className="border border-white/10 bg-slate-950 p-2">
+                        <span className="block text-[8px] uppercase tracking-wide text-slate-500">Ảnh</span>
+                        <strong className="mt-1 block text-sm font-black text-cyan-200">
+                          {totalImages}
+                        </strong>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className="flex flex-col rounded-md border border-violet-300/15 bg-slate-900 p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-violet-300/20 bg-violet-300/10 text-violet-100">
+                        <FiArchive aria-hidden="true" className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-black text-white">
+                          Tải theo thư mục sản phẩm
+                        </h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          Chọn một thư mục gốc. Hệ thống tự tạo folder theo tên từng sản phẩm và đặt ảnh vào đúng folder.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-md border border-white/10 bg-slate-950 p-3">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                        Sản phẩm sẽ chia folder
+                      </p>
+                      <p className="mt-1 text-xl font-black text-white">
+                        {filteredImageDownloadProducts.filter((product) => product.images.length > 0 || product.internalImages.length > 0).length}
+                      </p>
+                      <p className="mt-1 text-[9px] leading-4 text-slate-500">
+                        Mỗi sản phẩm một folder · bỏ qua Done · bỏ qua danh mục đang tắt
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        isImageFolderDownloadBusy ||
+                        !canUseDirectoryPicker() ||
+                        filteredImageDownloadProducts.every((product) => product.images.length === 0 && product.internalImages.length === 0)
+                      }
+                      className="mt-3 flex items-center justify-center gap-2 rounded-md bg-violet-300 px-3 py-2.5 text-xs font-black text-slate-950 transition hover:bg-violet-200 active:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleDownloadProductFolders}
+                    >
+                      <FiDownload aria-hidden="true" className={iconClassName} />
+                      {isImageFolderDownloadBusy ? "Đang tải ảnh..." : "Chọn thư mục & tải theo folder"}
+                    </button>
+                  </article>
+
                   <article className="flex flex-col rounded-md border border-white/10 bg-slate-900 p-3">
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-sky-300/20 bg-sky-300/10 text-sky-100">
