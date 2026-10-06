@@ -17078,47 +17078,6 @@ export default function LocalPage({
 
                           <button
                             type="button"
-                            data-luxury-accent="violet"
-                            title="Copy tên sản phẩm"
-                            aria-label="Copy tên sản phẩm"
-                            className={`${productActionButtonBaseClassName} border-white/[0.12] bg-white/[0.025] text-slate-200 hover:border-[#d8c99f]/[0.35] hover:bg-[#d8c99f]/[0.055] hover:text-[#eadfbe]`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleCopyField(
-                                `name-${product.id}`,
-                                "tên",
-                                product.name,
-                              );
-                            }}
-                          >
-                            {renderCopyIcon(`name-${product.id}`)}
-                            <span className=" truncate whitespace-nowrap">Tên</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            data-luxury-accent={productDone ? "sapphire" : "emerald"}
-                            title={productDone ? "Bỏ DONE" : "Đánh dấu DONE"}
-                            aria-label={productDone ? "Bỏ DONE" : "Đánh dấu DONE"}
-                            className={`${productActionButtonBaseClassName} ${productDone
-                              ? "border-white/20 bg-white/[0.055] text-slate-100 hover:border-white/35 hover:bg-white/[0.08]"
-                              : "border-emerald-300/[0.38] bg-emerald-300/[0.06] text-emerald-100 hover:border-emerald-200/60 hover:bg-emerald-300/10"
-                              }`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void toggleProductDone(product.id);
-                            }}
-                          >
-                            <FiCheckCircle
-                              aria-hidden="true"
-                              className={iconClassName}
-                            />
-                            <span className=" truncate whitespace-nowrap">
-                              {productDone ? "DONE" : "Chưa bán"}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
                             data-luxury-accent="teal"
                             title="Tải ảnh sản phẩm"
                             aria-label="Tải ảnh sản phẩm"
@@ -17137,21 +17096,67 @@ export default function LocalPage({
 
                           <button
                             type="button"
-                            data-luxury-accent="rose"
-                            title="Xóa sản phẩm"
-                            aria-label="Xóa sản phẩm"
-                            className={`${productActionButtonBaseClassName} border-rose-300/[0.28] bg-rose-300/[0.045] text-rose-100 hover:border-rose-300/[0.55] hover:bg-rose-300/[0.08]`}
+                            data-luxury-accent="violet"
+                            title="Copy tên sản phẩm"
+                            aria-label="Copy tên sản phẩm"
+                            className={`${productActionButtonBaseClassName} border-white/[0.12] bg-white/[0.025] text-slate-200 hover:border-[#d8c99f]/[0.35] hover:bg-[#d8c99f]/[0.055] hover:text-[#eadfbe]`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleDelete(product.id);
+                              void handleCopyField(
+                                `name-${product.id}`,
+                                "tên",
+                                product.name,
+                              );
                             }}
                           >
-                            <FiTrash2
-                              aria-hidden="true"
-                              className={iconClassName}
-                            />
-                            <span className=" truncate whitespace-nowrap">Xóa</span>
+                            {renderCopyIcon(`name-${product.id}`)}
+                            <span className=" truncate whitespace-nowrap">Tên</span>
                           </button>
+
+                          {isWriteAccessUnlocked ? (
+                            <>
+                              <button
+                                type="button"
+                                data-luxury-accent={productDone ? "sapphire" : "emerald"}
+                                title={productDone ? "Bỏ DONE" : "Đánh dấu DONE"}
+                                aria-label={productDone ? "Bỏ DONE" : "Đánh dấu DONE"}
+                                className={`${productActionButtonBaseClassName} ${productDone
+                                  ? "border-white/20 bg-white/[0.055] text-slate-100 hover:border-white/35 hover:bg-white/[0.08]"
+                                  : "border-emerald-300/[0.38] bg-emerald-300/[0.06] text-emerald-100 hover:border-emerald-200/60 hover:bg-emerald-300/10"
+                                  }`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void toggleProductDone(product.id);
+                                }}
+                              >
+                                <FiCheckCircle
+                                  aria-hidden="true"
+                                  className={iconClassName}
+                                />
+                                <span className=" truncate whitespace-nowrap">
+                                  {productDone ? "DONE" : "Chưa bán"}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                data-luxury-accent="rose"
+                                title="Xóa sản phẩm"
+                                aria-label="Xóa sản phẩm"
+                                className={`${productActionButtonBaseClassName} border-rose-300/[0.28] bg-rose-300/[0.045] text-rose-100 hover:border-rose-300/[0.55] hover:bg-rose-300/[0.08]`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleDelete(product.id);
+                                }}
+                              >
+                                <FiTrash2
+                                  aria-hidden="true"
+                                  className={iconClassName}
+                                />
+                                <span className=" truncate whitespace-nowrap">Xóa</span>
+                              </button>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     </article>
