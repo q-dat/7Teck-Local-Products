@@ -8616,7 +8616,7 @@ export default function LocalPage({
         const eventWindow = event.currentTarget as Window;
         if (eventWindow.document.activeElement === searchInputRef.current) {
           event.preventDefault();
-          searchInputRef.current?.blur();
+          handleCancelSearchInput();
           return;
         }
       }
@@ -8733,6 +8733,7 @@ export default function LocalPage({
     activeModal,
     albumImages.length,
     albumLightboxIndex,
+    handleCancelSearchInput,
     handleCloseAlbumFullscreen,
     pendingDownload,
     pendingShare,
@@ -16200,7 +16201,17 @@ export default function LocalPage({
                   setQuery(event.target.value);
                   setIsSearchSuggestionsOpen(true);
                 }}
-                onKeyDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setIsSearchSuggestionsOpen(false);
+                    event.currentTarget.blur();
+                    return;
+                  }
+
+                  event.stopPropagation();
+                }}
                 className="
         h-8 w-full min-w-0
         appearance-none
