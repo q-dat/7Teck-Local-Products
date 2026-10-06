@@ -783,6 +783,24 @@ type AlbumSource = {
   internalImages?: ProductImage[];
 };
 
+type AlbumMobileTouchState = {
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  startDistance: number;
+  startZoom: number;
+  isPinching: boolean;
+  isDragging: boolean;
+};
+
+const isMobileAlbumViewport = (): boolean => {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 1279px)").matches
+  );
+};
+
 type ModalName =
   | "product"
   | "productList"
@@ -5693,6 +5711,12 @@ export default function LocalPage({
   const [selectedSlotId, setSelectedSlotId] = useState<string>("");
   const [selectedAlbumImageId, setSelectedAlbumImageId] = useState<string>("");
   const [albumLightboxIndex, setAlbumLightboxIndex] = useState<number | null>(null);
+  const [albumMobileZoom, setAlbumMobileZoom] = useState<number>(1);
+  const [albumMobileOffset, setAlbumMobileOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
+  const albumMobileTouchRef = useRef<AlbumMobileTouchState | null>(null);
   const albumFullscreenRef = useRef<HTMLDivElement | null>(null);
   const [selectedAlbumImageIds, setSelectedAlbumImageIds] = useState<
     Set<string>
@@ -7480,6 +7504,28 @@ export default function LocalPage({
     );
   }, [albumImages, selectedAlbumImageId]);
 
+  const resetAlbumMobileTransform = useCallback((): void => {
+    setAlbumMobileZoom(1);
+    setAlbumMobileOffset({ x: 0, y: 0 });
+    albumMobileTouchRef.current = null;
+  }, []);
+
+  const goToPreviousAlbumImage = useCallback((): void => {
+    setAlbumLightboxIndex((current) => {
+      if (current === null || albumImages.length === 0) return current;
+
+      return (current - 1 + albumImages.length) % albumImages.length;
+    });
+  }, [albumImages.length]);
+
+  const goToNextAlbumImage = useCallback((): void => {
+    setAlbumLightboxIndex((current) => {
+      if (current === null || albumImages.length === 0) return current;
+
+      return (current + 1) % albumImages.length;
+    });
+  }, [albumImages.length]);
+
   const handleOpenAlbumFullscreen = useCallback(async (index: number): Promise<void> => {
     if (index < 0 || index >= albumImages.length) return;
 
@@ -7487,6 +7533,13 @@ export default function LocalPage({
 
     if (!fullscreenElement) {
       Toastify("Không thể mở ảnh toàn màn hình", 400);
+      return;
+    }
+
+    resetAlbumMobileTransform();
+
+    if (isMobileAlbumViewport()) {
+      setAlbumLightboxIndex(index);
       return;
     }
 
@@ -7505,15 +7558,165 @@ export default function LocalPage({
 
       Toastify("Không thể mở ảnh toàn màn hình", 400);
     }
-  }, [albumImages.length]);
+  }, [albumImages.length, resetAlbumMobileTransform]);
 
   const handleCloseAlbumFullscreen = useCallback((): void => {
     setAlbumLightboxIndex(null);
+    resetAlbumMobileTransform();
 
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
     }
-  }, []);
+  }, [resetAlbumMobileTransform]);
+
+  useEffect(() => {
+    resetAlbumMobileTransform();
+  }, [albumLightboxIndex, resetAlbumMobileTransform]);
+
+  const handleAlbumTouchStart = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>): void => {
+      if (albumLightboxIndex === null || !isMobileAlbumViewport()) return;
+
+      const touches = event.touches;
+
+      if (touches.length >= 2) {
+        const firstTouch = touches[0];
+        const secondTouch = touches[1];
+        const dx = secondTouch.clientX - firstTouch.clientX;
+        const dy = secondTouch.clientY - firstTouch.clientY;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance <= 0) return;
+
+        albumMobileTouchRef.current = {
+          startX: (firstTouch.clientX + secondTouch.clientX) / 2,
+          startY: (firstTouch.clientY + secondTouch.clientY) / 2,
+          lastX: (firstTouch.clientX + secondTouch.clientX) / 2,
+          lastY: (firstTouch.clientY + secondTouch.clientY) / 2,
+          startDistance: distance,
+          startZoom: albumMobileZoom,
+          isPinching: true,
+          isDragging: false,
+        };
+        return;
+      }
+
+      const touch = touches[0];
+
+      if (!touch) return;
+
+      albumMobileTouchRef.current = {
+        startX: touch.clientX,
+        startY: touch.clientY,
+        lastX: touch.clientX,
+        lastY: touch.clientY,
+        startDistance: 0,
+        startZoom: albumMobileZoom,
+        isPinching: false,
+        isDragging: false,
+      };
+    },
+    [albumLightboxIndex, albumMobileZoom],
+  );
+
+  const handleAlbumTouchMove = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>): void => {
+      const touchState = albumMobileTouchRef.current;
+
+      if (
+        !touchState ||
+        albumLightboxIndex === null ||
+        !isMobileAlbumViewport()
+      ) {
+        return;
+      }
+
+      const touches = event.touches;
+
+      if (touches.length >= 2) {
+        const firstTouch = touches[0];
+        const secondTouch = touches[1];
+
+        if (!firstTouch || !secondTouch || touchState.startDistance <= 0) {
+          return;
+        }
+
+        event.preventDefault();
+
+        const dx = secondTouch.clientX - firstTouch.clientX;
+        const dy = secondTouch.clientY - firstTouch.clientY;
+        const distance = Math.hypot(dx, dy);
+        const zoom = Math.min(4, Math.max(1, touchState.startZoom * (distance / touchState.startDistance)));
+
+        setAlbumMobileZoom(zoom);
+
+        if (zoom <= 1.01) {
+          setAlbumMobileOffset({ x: 0, y: 0 });
+        }
+
+        touchState.lastX = (firstTouch.clientX + secondTouch.clientX) / 2;
+        touchState.lastY = (firstTouch.clientY + secondTouch.clientY) / 2;
+        touchState.isPinching = true;
+        return;
+      }
+
+      const touch = touches[0];
+
+      if (!touch) return;
+
+      const deltaX = touch.clientX - touchState.lastX;
+      const deltaY = touch.clientY - touchState.lastY;
+
+      touchState.lastX = touch.clientX;
+      touchState.lastY = touch.clientY;
+
+      if (albumMobileZoom <= 1.01) return;
+
+      event.preventDefault();
+
+      setAlbumMobileOffset((current) => ({
+        x: current.x + deltaX,
+        y: current.y + deltaY,
+      }));
+
+      touchState.isDragging = true;
+    },
+    [albumLightboxIndex, albumMobileZoom],
+  );
+
+  const handleAlbumTouchEnd = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>): void => {
+      const touchState = albumMobileTouchRef.current;
+
+      if (
+        !touchState ||
+        albumLightboxIndex === null ||
+        !isMobileAlbumViewport()
+      ) {
+        return;
+      }
+
+      if (event.touches.length > 0) return;
+
+      const deltaX = touchState.lastX - touchState.startX;
+      const deltaY = touchState.lastY - touchState.startY;
+
+      albumMobileTouchRef.current = null;
+
+      if (touchState.isPinching || albumMobileZoom > 1.01) {
+        return;
+      }
+
+      if (Math.abs(deltaX) >= 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        if (deltaX < 0) {
+          goToNextAlbumImage();
+        } else {
+          goToPreviousAlbumImage();
+        }
+      }
+    },
+    [albumLightboxIndex, albumMobileZoom, goToNextAlbumImage, goToPreviousAlbumImage],
+  );
 
   const activeScheduleProducts = useMemo(() => {
     return viewProducts.filter((product) => !product.isDone);
@@ -20651,87 +20854,72 @@ export default function LocalPage({
         >
           {albumLightboxIndex !== null && albumImages[albumLightboxIndex] ? (
             <>
-              <img
-                src={albumImages[albumLightboxIndex].dataUrl}
-                alt={albumImages[albumLightboxIndex].name}
-                className="block h-dvh w-dvw object-contain"
-              />
+              <div
+                className="flex h-full w-full touch-none select-none items-center justify-center overflow-hidden xl:touch-auto"
+                onTouchStart={handleAlbumTouchStart}
+                onTouchMove={handleAlbumTouchMove}
+                onTouchEnd={handleAlbumTouchEnd}
+                onTouchCancel={handleAlbumTouchEnd}
+              >
+                <img
+                  src={albumImages[albumLightboxIndex].dataUrl}
+                  alt={albumImages[albumLightboxIndex].name}
+                  draggable={false}
+                  className="block h-dvh w-dvw object-contain will-change-transform xl:transition-transform xl:duration-200"
+                  style={{
+                    transform:
+                      albumMobileZoom > 1
+                        ? `translate3d(${albumMobileOffset.x}px, ${albumMobileOffset.y}px, 0) scale(${albumMobileZoom})`
+                        : "translate3d(0, 0, 0) scale(1)",
+                  }}
+                />
+              </div>
 
-              <div className="pointer-events-none absolute bottom-5 right-5 z-30 flex max-w-[calc(100vw-1.25rem)] justify-end px-0">
-                <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-white/15 bg-black/75 p-2 shadow-xl backdrop-blur-md">
-                  {/* Prev */}
+              <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex w-full -translate-x-1/2 justify-center px-2 xl:bottom-5 xl:left-auto xl:right-5 xl:w-auto xl:translate-x-0 xl:justify-end xl:px-0">
+                <div className="pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/15 bg-black/75 p-1.5 shadow-xl backdrop-blur-md xl:gap-2 xl:p-2">
                   <button
                     type="button"
-                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
-                    onClick={() =>
-                      setAlbumLightboxIndex((current) => {
-                        if (current === null || albumImages.length === 0) {
-                          return current;
-                        }
-
-                        return (
-                          (current - 1 + albumImages.length) %
-                          albumImages.length
-                        );
-                      })
-                    }
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    onClick={goToPreviousAlbumImage}
                     disabled={albumImages.length <= 1}
                     aria-label="Ảnh trước"
                     title="Ảnh trước"
                   >
-                    <FiChevronLeft
-                      aria-hidden="true"
-                      className="h-7 w-7"
-                    />
+                    <FiChevronLeft aria-hidden="true" className="h-6 w-6 xl:h-7 xl:w-7" />
                   </button>
 
-                  {/* Counter */}
                   <span
-                    className="min-w-12 px-1 text-center text-xs font-semibold tabular-nums text-white/85"
+                    className="min-w-12 px-1 text-center text-[11px] font-semibold tabular-nums text-white/85 xl:text-xs"
                     aria-live="polite"
                   >
                     {albumLightboxIndex + 1} / {albumImages.length}
                   </span>
 
-                  {/* Next */}
                   <button
                     type="button"
-                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25"
-                    onClick={() =>
-                      setAlbumLightboxIndex((current) => {
-                        if (current === null || albumImages.length === 0) {
-                          return current;
-                        }
-
-                        return (
-                          (current + 1) % albumImages.length
-                        );
-                      })
-                    }
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    onClick={goToNextAlbumImage}
                     disabled={albumImages.length <= 1}
                     aria-label="Ảnh tiếp theo"
                     title="Ảnh tiếp theo"
                   >
-                    <FiChevronRight
-                      aria-hidden="true"
-                      className="h-7 w-7"
-                    />
+                    <FiChevronRight aria-hidden="true" className="h-6 w-6 xl:h-7 xl:w-7" />
                   </button>
 
-                  {/* Close - nằm ngay bên phải Next */}
                   <button
                     type="button"
-                    className="flex h-12 w-12 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95"
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 xl:h-12 xl:w-12"
                     onClick={handleCloseAlbumFullscreen}
                     aria-label="Đóng xem toàn màn hình"
                     title="Đóng"
                   >
-                    <FiX
-                      aria-hidden="true"
-                      className="h-6 w-6"
-                    />
+                    <FiX aria-hidden="true" className="h-5 w-5 xl:h-6 xl:w-6" />
                   </button>
                 </div>
+              </div>
+
+              <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[9px] font-semibold text-white/70 backdrop-blur-md xl:hidden">
+                Vuốt để chuyển · Pinch để zoom
               </div>
             </>
           ) : null}
