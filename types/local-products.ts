@@ -33,9 +33,6 @@ export type ProductRecord = {
 
 export type AppStateRecord = {
   settings?: unknown;
-  scheduleConfig?: unknown;
-  scheduleAssignments?: Record<string, string>;
-  postedRecords?: unknown[];
 };
 
 export type BootstrapResponse = AppStateRecord & {

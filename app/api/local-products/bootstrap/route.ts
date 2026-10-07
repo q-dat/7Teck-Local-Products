@@ -16,21 +16,13 @@ export async function GET() {
         { _id: 0, key: 0, updatedAt: 0, syncVersion: 0 },
       ).lean(),
     ]);
-    const state = rawState as
-      | {
-          settings?: unknown;
-          scheduleConfig?: unknown;
-          scheduleAssignments?: unknown;
-          postedRecords?: unknown;
-        }
-      | null;
+    const state = rawState as {
+      settings?: unknown;
+    } | null;
 
     return jsonNoStore({
       products,
       settings: state?.settings ?? null,
-      scheduleConfig: state?.scheduleConfig ?? null,
-      scheduleAssignments: state?.scheduleAssignments ?? {},
-      postedRecords: state?.postedRecords ?? [],
     });
   } catch (error) {
     return apiError(error);

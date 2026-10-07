@@ -4,9 +4,6 @@ const appStateSchema = new Schema(
   {
     key: { type: String, required: true, unique: true, default: "main" },
     settings: { type: Schema.Types.Mixed, default: null },
-    scheduleConfig: { type: Schema.Types.Mixed, default: null },
-    scheduleAssignments: { type: Schema.Types.Mixed, default: {} },
-    postedRecords: { type: [Schema.Types.Mixed], default: [] },
     syncVersion: { type: Number, default: 0, index: true },
     updatedAt: { type: Date, default: Date.now },
   },

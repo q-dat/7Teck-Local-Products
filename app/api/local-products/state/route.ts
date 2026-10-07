@@ -6,9 +6,6 @@ export const runtime = "nodejs";
 
 const ALLOWED_STATE_KEYS = new Set([
   "settings",
-  "scheduleConfig",
-  "scheduleAssignments",
-  "postedRecords",
 ]);
 
 export async function PATCH(request: Request) {

@@ -1216,6 +1216,13 @@ const defaultScheduleConfig: ScheduleConfig = {
   selectedCategories: [],
 };
 
+const LOCAL_SCHEDULE_CONFIG_STORAGE_KEY =
+  "local-products-schedule-config-v1";
+const LOCAL_SCHEDULE_ASSIGNMENTS_STORAGE_KEY =
+  "local-products-schedule-assignments-v1";
+const LOCAL_POSTED_RECORDS_STORAGE_KEY =
+  "local-products-posted-records-v1";
+
 const iconClassName =
   "h-3.5 w-3.5 shrink-0 transition-transform duration-300 group-hover:scale-110";
 
@@ -1909,9 +1916,6 @@ const apiRequest = async <T,>(path: string, init?: RequestInit): Promise<T> => {
 type BootstrapPayload = {
   products: unknown[];
   settings?: unknown;
-  scheduleConfig?: unknown;
-  scheduleAssignments?: unknown;
-  postedRecords?: unknown;
 };
 
 type SyncVersionPayload = {
@@ -2000,9 +2004,6 @@ const publishLocalSyncVersion = (value: unknown): void => {
 
 type SyncStatePayload = {
   settings?: unknown;
-  scheduleConfig?: unknown;
-  scheduleAssignments?: unknown;
-  postedRecords?: unknown;
 };
 
 type SyncChangesPayload = {
@@ -2075,9 +2076,6 @@ const normalizeBootstrapCacheRecord = (
     payload: {
       products: payloadRecord.products,
       settings: payloadRecord.settings,
-      scheduleConfig: payloadRecord.scheduleConfig,
-      scheduleAssignments: payloadRecord.scheduleAssignments,
-      postedRecords: payloadRecord.postedRecords,
     },
   };
 };
@@ -3132,34 +3130,68 @@ const saveGlobalSettings = (settings: GlobalSettings): void => {
   queueAppStatePatch({ settings });
 };
 
+const readLocalJson = (key: string): unknown => {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeLocalJson = (key: string, value: unknown): void => {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    return;
+  }
+};
+
 const loadPostedRecords = (): PostedRecord[] => {
-  return [];
+  return normalizePostedRecords(
+    readLocalJson(LOCAL_POSTED_RECORDS_STORAGE_KEY),
+  ) ?? [];
 };
 
 const savePostedRecords = (records: PostedRecord[]): void => {
-  queueAppStatePatch({ postedRecords: records });
+  writeLocalJson(LOCAL_POSTED_RECORDS_STORAGE_KEY, records);
 };
 
 const loadScheduleConfig = (): ScheduleConfig => {
   const today = getTodayString();
+  const storedConfig = normalizeScheduleConfig(
+    readLocalJson(LOCAL_SCHEDULE_CONFIG_STORAGE_KEY),
+  );
 
-  return {
-    ...defaultScheduleConfig,
-    dateFrom: today,
-    dateTo: today,
-  };
+  if (!storedConfig) {
+    return {
+      ...defaultScheduleConfig,
+      dateFrom: today,
+      dateTo: today,
+    };
+  }
+
+  return storedConfig;
 };
 
 const saveScheduleConfig = (config: ScheduleConfig): void => {
-  queueAppStatePatch({ scheduleConfig: config });
+  writeLocalJson(LOCAL_SCHEDULE_CONFIG_STORAGE_KEY, config);
 };
 
 const loadScheduleAssignments = (): ScheduleAssignmentMap => {
-  return {};
+  return (
+    normalizeScheduleAssignments(
+      readLocalJson(LOCAL_SCHEDULE_ASSIGNMENTS_STORAGE_KEY),
+    ) ?? {}
+  );
 };
 
 const saveScheduleAssignments = (assignments: ScheduleAssignmentMap): void => {
-  queueAppStatePatch({ scheduleAssignments: assignments });
+  writeLocalJson(LOCAL_SCHEDULE_ASSIGNMENTS_STORAGE_KEY, assignments);
 };
 
 const parsePriceNumber = (
@@ -7980,13 +8012,9 @@ export default function LocalPage({
     );
     const nextSettings =
       normalizeGlobalSettings(payload.settings) ?? loadGlobalSettings();
-    const nextScheduleConfig =
-      normalizeScheduleConfig(payload.scheduleConfig) ?? loadScheduleConfig();
-    const nextScheduleAssignments =
-      normalizeScheduleAssignments(payload.scheduleAssignments) ??
-      loadScheduleAssignments();
-    const nextPostedRecords =
-      normalizePostedRecords(payload.postedRecords) ?? loadPostedRecords();
+    const nextScheduleConfig = loadScheduleConfig();
+    const nextScheduleAssignments = loadScheduleAssignments();
+    const nextPostedRecords = loadPostedRecords();
 
     persistedAppStateSignaturesRef.current = {
       settings: JSON.stringify(nextSettings),
@@ -8008,9 +8036,6 @@ export default function LocalPage({
         applyBootstrapPayload({
           products: payload.products,
           settings: payload.state?.settings,
-          scheduleConfig: payload.state?.scheduleConfig,
-          scheduleAssignments: payload.state?.scheduleAssignments,
-          postedRecords: payload.state?.postedRecords,
         });
         return;
       }
@@ -8043,28 +8068,9 @@ export default function LocalPage({
         setSettings(nextSettings);
       }
 
-      if (nextState.scheduleConfig !== undefined) {
-        const nextScheduleConfig =
-          normalizeScheduleConfig(nextState.scheduleConfig) ??
-          loadScheduleConfig();
-        persistedAppStateSignaturesRef.current.scheduleConfig =
-          JSON.stringify(nextScheduleConfig);
-        setScheduleConfig(nextScheduleConfig);
-      }
+      // Lịch là dữ liệu chỉ lưu trên thiết bị. Không nhận schedule/posted
+      // records từ MongoDB hoặc /sync/changes để tránh ghi đè lịch Local.
 
-      if (nextState.scheduleAssignments !== undefined) {
-        const nextScheduleAssignments =
-          normalizeScheduleAssignments(nextState.scheduleAssignments) ?? {};
-        persistedAppStateSignaturesRef.current.scheduleAssignments =
-          JSON.stringify(nextScheduleAssignments);
-        setScheduleAssignments(nextScheduleAssignments);
-      }
-
-      if (nextState.postedRecords !== undefined) {
-        setPostedRecords(
-          normalizePostedRecords(nextState.postedRecords) ?? [],
-        );
-      }
     },
     [applyBootstrapPayload],
   );
@@ -8076,17 +8082,8 @@ export default function LocalPage({
       // hay blob: URL vào JSON/localStorage.
       products: products.map(toPersistedProduct),
       settings,
-      scheduleConfig,
-      scheduleAssignments,
-      postedRecords,
     };
-  }, [
-    postedRecords,
-    products,
-    scheduleAssignments,
-    scheduleConfig,
-    settings,
-  ]);
+  }, [products, settings]);
 
   const handleRefreshCloudData = async (
     options: {
@@ -17718,11 +17715,10 @@ export default function LocalPage({
                             return (
                               <label
                                 key={category.name}
-                                className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${
-                                  isEnabled
+                                className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
                                     ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
                                     : "border-white/5 bg-white/[0.02] text-slate-500"
-                                }`}
+                                  }`}
                               >
                                 <span className="min-w-0">
                                   <span className="block truncate text-[10px] font-black">

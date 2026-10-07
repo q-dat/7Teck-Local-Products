@@ -26,9 +26,6 @@ export async function DELETE() {
             {
               $set: {
                 settings: null,
-                scheduleConfig: null,
-                scheduleAssignments: {},
-                postedRecords: [],
                 updatedAt: new Date(),
               },
               $setOnInsert: { key: "main" },
