@@ -1,4 +1,4 @@
-'use client';
+'use client'
 
 import {
   useCallback,
@@ -9413,8 +9413,6 @@ export default function LocalPage({
     key: Key,
     value: ScheduleConfig[Key],
   ): void => {
-    if (!requestWriteAccess()) return;
-
     setScheduleConfig((current) => ({
       ...current,
       [key]: value,
@@ -12812,8 +12810,6 @@ export default function LocalPage({
   };
 
   const toggleScheduleCategory = (category: string): void => {
-    if (!requestWriteAccess()) return;
-
     setScheduleConfig((current) => {
       const categoryKey = normalizeTextKey(category);
       const exists = current.selectedCategories.some(
@@ -12864,8 +12860,6 @@ export default function LocalPage({
     taskIndex: number,
     productId: string,
   ): void => {
-    if (!requestWriteAccess()) return;
-
     const assignmentKey = createScheduleAssignmentKey(
       date,
       slotIndex,
@@ -12999,8 +12993,6 @@ export default function LocalPage({
   };
 
   const addScheduleTask = (): void => {
-    if (!requestWriteAccess()) return;
-
     setScheduleConfig((current) => {
       const nextTaskCount = Math.min(64, current.taskCount + 1);
 
@@ -13016,8 +13008,6 @@ export default function LocalPage({
   };
 
   const requestRemoveScheduleTask = (taskIndex: number): void => {
-    if (!requestWriteAccess()) return;
-
     if (scheduleConfig.taskCount <= 1) {
       Toastify("Cần giữ lại ít nhất một task", 300);
       return;
@@ -13027,8 +13017,6 @@ export default function LocalPage({
   };
 
   const removeScheduleTask = (taskIndexToRemove: number): void => {
-    if (!requestWriteAccess()) return;
-
     setScheduleConfig((current) => {
       const nextTaskCount = Math.max(1, current.taskCount - 1);
       const nextTaskNames = current.taskNames.filter(
@@ -13078,8 +13066,6 @@ export default function LocalPage({
   };
 
   const updateScheduleTaskName = (taskIndex: number, value: string): void => {
-    if (!requestWriteAccess()) return;
-
     setScheduleConfig((current) => {
       const taskNames = Array.from(
         { length: Math.max(1, current.taskCount) },
@@ -13108,8 +13094,6 @@ export default function LocalPage({
   };
 
   const autoFillScheduleAssignments = (): void => {
-    if (!requestWriteAccess()) return;
-
     const targetDate = today;
     const targetPrefix = `${targetDate}::task`;
     const slotCount = scheduleTimes.length;
@@ -13197,8 +13181,6 @@ export default function LocalPage({
   };
 
   const resetActiveScheduleTaskAssignments = (): void => {
-    if (!requestWriteAccess()) return;
-
     const taskPrefix = `${today}::task${activeScheduleTaskIndex + 1}::`;
 
     setScheduleAssignments((current) => {
@@ -13232,8 +13214,6 @@ export default function LocalPage({
   };
 
   const resetAllScheduleAssignments = (): void => {
-    if (!requestWriteAccess()) return;
-
     const todayPrefix = `${today}::`;
 
     setScheduleAssignments((current) => {
@@ -13284,8 +13264,6 @@ export default function LocalPage({
   };
 
   const swapPostedRecordKeys = (sourceKey: string, targetKey: string): void => {
-    if (!requestWriteAccess()) return;
-
     setPostedRecords((current) => {
       const sourceRecord = current.find(
         (record) => record.slotId === sourceKey,
@@ -13322,8 +13300,6 @@ export default function LocalPage({
     targetKey: string,
     productId: string,
   ): void => {
-    if (!requestWriteAccess()) return;
-
     if (!sourceKey || sourceKey === targetKey) return;
 
     setScheduleAssignments((current) => {
@@ -13369,8 +13345,6 @@ export default function LocalPage({
     slotIndex: number,
     taskIndex = 0,
   ): void => {
-    if (!requestWriteAccess()) return;
-
     const postedKey = createPostedKey(date, slotIndex, taskIndex);
 
     setPostedRecords((current) => {
@@ -17716,8 +17690,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                    : "border-white/5 bg-white/[0.02] text-slate-500"
+                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                  : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
