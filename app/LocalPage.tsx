@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import {
   useCallback,
@@ -3939,11 +3939,37 @@ const normalizeCommentPrice = (priceText: string): string => {
     : `${normalizedPrice}tr`;
 };
 
+const formatCommentPriceTypography = (priceText: string): string => {
+  const digitMap: Record<string, string> = {
+    "0": "𝟎",
+    "1": "𝟏",
+    "2": "𝟐",
+    "3": "𝟑",
+    "4": "𝟒",
+    "5": "𝟓",
+    "6": "𝟔",
+    "7": "𝟕",
+    "8": "𝟖",
+    "9": "𝟗",
+  };
+
+  return priceText
+    .replace(/[0-9]/gu, (digit) => digitMap[digit] ?? digit)
+    .replace(/tr/giu, "𝐭𝐫");
+};
+
 const normalizeRealEstateCommentPrice = (priceText: string): string => {
   return priceText
     .trim()
     .replace(/^(?:💰|📌)?\s*giá(?:\s*bán)?\s*:\s*/iu, "")
     .trim();
+};
+
+const extractCommentBulletLines = (value: string): string[] => {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => /^[+•]/u.test(line));
 };
 
 const buildCommentContentText = (
@@ -3957,14 +3983,17 @@ const buildCommentContentText = (
   const cleanTitle = title.trim();
 
   if (isPropertyContentType(contentType)) {
-    const realEstatePrice = normalizeRealEstateCommentPrice(priceText);
+    const realEstatePrice = formatCommentPriceTypography(
+      normalizeRealEstateCommentPrice(priceText),
+    );
+    const commentLines = extractCommentBulletLines(realEstateComment);
     const heading = [
       cleanTitle,
       realEstatePrice ? `GIÁ ${realEstatePrice}` : "",
     ]
       .filter(Boolean)
       .join(" - ");
-    const content = [heading, realEstateComment.trim()]
+    const content = [heading, commentLines.join("\n")]
       .filter(Boolean)
       .join("\n\n");
 
@@ -3976,11 +4005,10 @@ const buildCommentContentText = (
     );
   }
 
-  const commentPrice = normalizeCommentPrice(priceText);
-  const plusLines = description
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("+"));
+  const commentPrice = formatCommentPriceTypography(
+    normalizeCommentPrice(priceText),
+  );
+  const bulletLines = extractCommentBulletLines(description);
 
   const headingLines = [
     cleanTitle,
@@ -3991,7 +4019,7 @@ const buildCommentContentText = (
 
   const content = [
     headingLines,
-    plusLines.length > 0 ? plusLines.join("\n") : "",
+    bulletLines.length > 0 ? bulletLines.join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -17690,8 +17718,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                  : "border-white/5 bg-white/[0.02] text-slate-500"
+                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                    : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
