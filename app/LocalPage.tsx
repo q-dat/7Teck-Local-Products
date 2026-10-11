@@ -3440,20 +3440,29 @@ const buildMergedProductListText = (
     category: string;
     products: LocalProduct[];
   }[],
+  normalizeProductContent = false,
 ): string => {
   return groups
     .map((group) => {
       const lines = group.products.map((product, index) => {
-        const price = product.priceText.trim();
+        const cleanName = removeDoneProductPrefix(product.name);
+        const cleanPrice = product.priceText.trim();
+        const productName = normalizeProductContent
+          ? normalizeCopiedText(cleanName)
+          : cleanName;
+        const price = normalizeProductContent
+          ? normalizeCopiedText(cleanPrice)
+          : cleanPrice;
 
         return [
-          `${index + 1}. ${removeDoneProductPrefix(product.name)}`,
+          `${index + 1}. ${productName}`,
           price ? `Giá: ${price}` : "",
         ]
           .filter(Boolean)
           .join(" | ");
       });
 
+      // Tên danh mục luôn giữ font Unicode đặc biệt, độc lập với tùy chọn NFKC.
       return [`📌 ${toUnicodeBoldText(group.category)}`, ...lines].join("\n");
     })
     .join("\n\n")
@@ -10629,6 +10638,20 @@ export default function LocalPage({
       return [...current, match.category];
     });
     setProductMergeCategorySearch("");
+    setProductMergeCopied(false);
+  };
+
+  const removeProductMergeCategory = (category: string): void => {
+    const categoryKey = normalizeTextKey(category);
+    if (!categoryKey) return;
+
+    setProductMergeCategoryOrder((current) =>
+      current.filter((item) => normalizeTextKey(item) !== categoryKey),
+    );
+    if (productMergeDraggingKey === categoryKey) {
+      resetProductMergeDrag();
+    }
+    setProductMergeCopied(false);
   };
 
   const handleProductMergeCategorySearchKeyDown = (
@@ -10728,30 +10751,6 @@ export default function LocalPage({
     resetProductMergeDrag();
   };
 
-  const saveProductMergeCategoryOrder = (): void => {
-    if (!requestWriteAccess()) return;
-
-    const knownKeys = new Set(
-      categories.map((category) => normalizeTextKey(category)),
-    );
-    const mergedOrder = [
-      ...productMergeCategoryOrder,
-      ...categories.filter(
-        (category) =>
-          !productMergeCategoryOrder.some(
-            (selected) => normalizeTextKey(selected) === normalizeTextKey(category),
-          ),
-      ),
-    ].filter((category) => knownKeys.has(normalizeTextKey(category)));
-
-    setSettings((current) => ({
-      ...current,
-      categoryOrder: mergedOrder,
-    }));
-
-    Toastify("Đã lưu thứ tự danh mục", 200);
-  };
-
   const handleCopyMergedProductList = async (): Promise<void> => {
     if (!productMergeText) {
       Toastify("Không có dữ liệu để copy", 300);
@@ -10759,7 +10758,9 @@ export default function LocalPage({
     }
 
     try {
-      await copyText(productMergeText);
+      await writeClipboardText(
+        buildMergedProductListText(productMergeGroups, isCopyNfkcEnabled),
+      );
       setProductMergeCopied(true);
       Toastify("Đã copy danh sách gộp", 200);
 
@@ -18224,23 +18225,36 @@ export default function LocalPage({
                             const isDragging = productMergeDraggingKey === categoryKey;
                             const dropPosition = productMergeDropTarget?.key === categoryKey ? productMergeDropTarget.position : null;
                             return (
-                              <button
+                              <div
                                 key={categoryKey}
-                                type="button"
-                                draggable
-                                onDragStart={(event) => handleProductMergeDragStart(event, group.category)}
-                                onDragOver={(event) => handleProductMergeDragOver(event, group.category)}
-                                onDrop={(event) => handleProductMergeDrop(event, group.category)}
-                                onDragEnd={resetProductMergeDrag}
-                                className={`relative flex h-9 min-w-0 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-left transition ${isDragging ? "border-cyan-300/45 bg-cyan-300/[0.09]" : "border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]"}`}
-                                title="Kéo để sắp xếp"
+                                className="flex min-w-0 items-stretch gap-1"
                               >
-                                {dropPosition === "before" ? <span className="pointer-events-none absolute left-1 right-1 top-0 h-0.5 rounded-full bg-cyan-300" /> : null}
-                                {dropPosition === "after" ? <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-cyan-300" /> : null}
-                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 bg-white/[0.04] font-mono text-[8px] font-black text-slate-500">{String(index + 1).padStart(2, "0")}</span>
-                                <span className="min-w-0 flex-1 truncate text-[9px] font-black text-slate-100">{group.category}</span>
-                                <span className="shrink-0 rounded border border-white/10 bg-white/[0.035] px-1 py-0.5 font-mono text-[8px] font-bold text-slate-500">{group.products.length}</span>
-                              </button>
+                                <button
+                                  type="button"
+                                  draggable
+                                  onDragStart={(event) => handleProductMergeDragStart(event, group.category)}
+                                  onDragOver={(event) => handleProductMergeDragOver(event, group.category)}
+                                  onDrop={(event) => handleProductMergeDrop(event, group.category)}
+                                  onDragEnd={resetProductMergeDrag}
+                                  className={`relative flex h-9 min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md border px-2 text-left transition ${isDragging ? "border-cyan-300/45 bg-cyan-300/[0.09]" : "border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]"}`}
+                                  title="Kéo để sắp xếp"
+                                >
+                                  {dropPosition === "before" ? <span className="pointer-events-none absolute left-1 right-1 top-0 h-0.5 rounded-full bg-cyan-300" /> : null}
+                                  {dropPosition === "after" ? <span className="pointer-events-none absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-cyan-300" /> : null}
+                                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/10 bg-white/[0.04] font-mono text-[8px] font-black text-slate-500">{String(index + 1).padStart(2, "0")}</span>
+                                  <span className="min-w-0 flex-1 truncate text-[9px] font-black text-slate-100">{group.category}</span>
+                                  <span className="shrink-0 rounded border border-white/10 bg-white/[0.035] px-1 py-0.5 font-mono text-[8px] font-bold text-slate-500">{group.products.length}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeProductMergeCategory(group.category)}
+                                  aria-label={`Gỡ danh mục ${group.category} khỏi danh sách gộp`}
+                                  title={`Gỡ ${group.category} khỏi danh sách gộp`}
+                                  className="flex h-9 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300/20 bg-rose-300/[0.045] text-rose-200/80 transition hover:border-rose-300/45 hover:bg-rose-300/[0.12] hover:text-rose-100"
+                                >
+                                  <FiX aria-hidden="true" className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             );
                           })}
                         </div>
@@ -18272,7 +18286,6 @@ export default function LocalPage({
 
                   <div className="flex min-w-0 shrink-0 items-center justify-end gap-2 border-t border-white/10 pt-2">
                     <button type="button" className="rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[9px] font-black text-slate-200 transition hover:bg-slate-700" onClick={closeModal}>Đóng</button>
-                    <button type="button" className="rounded-md border border-cyan-300/25 bg-cyan-300/[0.07] px-3 py-2 text-[9px] font-black text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-300/[0.12]" onClick={saveProductMergeCategoryOrder}>Lưu thứ tự</button>
                   </div>
                 </section>
               ) : null}
