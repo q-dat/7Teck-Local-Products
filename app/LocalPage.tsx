@@ -13,6 +13,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -63,6 +64,28 @@ type ProductImage = {
   createdAt: string;
   publicId: string;
   version: number;
+};
+
+type LocalImageOverlayTemplate = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  createdAt: string;
+  blob: Blob;
+};
+
+type LocalImageOverlayTemplatePreview = LocalImageOverlayTemplate & {
+  previewUrl: string;
+};
+
+type ImageOverlayEditorSession = {
+  productId: string;
+  productTitle: string;
+  baseImage: ProductImage;
+  baseImageUrl: string;
+  width: number;
+  height: number;
 };
 
 type ImageBlobCacheRecord = {
@@ -817,6 +840,7 @@ type ModalName =
   | "importExport"
   | "slotDetail"
   | "imageAlbum"
+  | "imageOverlayEditor"
   | "imageDownload"
   | "localImageManager"
   | "facebookLinkSettings"
@@ -4829,12 +4853,130 @@ const deleteIndexedDbDatabase = (databaseName: string): Promise<void> => {
   });
 };
 
+const IMAGE_OVERLAY_TEMPLATE_DATABASE_NAME = "local-products-image-overlay-templates-v1";
+const IMAGE_OVERLAY_TEMPLATE_DATABASE_VERSION = 1;
+const IMAGE_OVERLAY_TEMPLATE_STORE_NAME = "templates";
+
+type StoredImageOverlayTemplate = LocalImageOverlayTemplate;
+
+const normalizeStoredImageOverlayTemplate = (
+  value: unknown,
+): StoredImageOverlayTemplate | null => {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.name !== "string" ||
+    typeof record.type !== "string" ||
+    typeof record.size !== "number" ||
+    typeof record.createdAt !== "string" ||
+    !(record.blob instanceof Blob)
+  ) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    name: record.name,
+    type: record.type,
+    size: record.size,
+    createdAt: record.createdAt,
+    blob: record.blob,
+  };
+};
+
+const openImageOverlayTemplateDatabase = async (): Promise<IDBDatabase> =>
+  new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) {
+      reject(new Error("IndexedDB không khả dụng trên thiết bị này"));
+      return;
+    }
+
+    const request = window.indexedDB.open(
+      IMAGE_OVERLAY_TEMPLATE_DATABASE_NAME,
+      IMAGE_OVERLAY_TEMPLATE_DATABASE_VERSION,
+    );
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(IMAGE_OVERLAY_TEMPLATE_STORE_NAME)) {
+        database.createObjectStore(IMAGE_OVERLAY_TEMPLATE_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Không thể mở kho ảnh mẫu"));
+    request.onblocked = () => reject(new Error("Kho ảnh mẫu đang bị tab khác khóa"));
+  });
+
+const readImageOverlayTemplates = async (): Promise<StoredImageOverlayTemplate[]> => {
+  const database = await openImageOverlayTemplateDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(IMAGE_OVERLAY_TEMPLATE_STORE_NAME, "readonly");
+      const request = transaction.objectStore(IMAGE_OVERLAY_TEMPLATE_STORE_NAME).getAll();
+      request.onsuccess = () => {
+        const values = request.result as unknown[];
+        resolve(values
+          .map(normalizeStoredImageOverlayTemplate)
+          .filter((item): item is StoredImageOverlayTemplate => item !== null)
+          .sort((first, second) => second.createdAt.localeCompare(first.createdAt)));
+      };
+      request.onerror = () => reject(request.error ?? new Error("Không thể đọc kho ảnh mẫu"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Đọc kho ảnh mẫu bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const writeImageOverlayTemplate = async (
+  template: StoredImageOverlayTemplate,
+): Promise<void> => {
+  const database = await openImageOverlayTemplateDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(IMAGE_OVERLAY_TEMPLATE_STORE_NAME, "readwrite");
+      transaction.objectStore(IMAGE_OVERLAY_TEMPLATE_STORE_NAME).put(template);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Không thể lưu ảnh mẫu"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Lưu ảnh mẫu bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const deleteImageOverlayTemplate = async (id: string): Promise<void> => {
+  const database = await openImageOverlayTemplateDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(IMAGE_OVERLAY_TEMPLATE_STORE_NAME, "readwrite");
+      transaction.objectStore(IMAGE_OVERLAY_TEMPLATE_STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Không thể xóa ảnh mẫu"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Xóa ảnh mẫu bị hủy"));
+    });
+  } finally {
+    database.close();
+  }
+};
+
+const loadImageElement = (source: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Không thể đọc dữ liệu ảnh để ghép"));
+    image.src = source;
+  });
+
 const clearAllBrowserLocalData = async (): Promise<void> => {
   if (typeof window === "undefined") return;
 
   await Promise.all([
     deleteIndexedDbDatabase(BOOTSTRAP_CACHE_DATABASE_NAME),
     deleteIndexedDbDatabase(LOCAL_IMAGE_DIRECTORY_DATABASE_NAME),
+    deleteIndexedDbDatabase(IMAGE_OVERLAY_TEMPLATE_DATABASE_NAME),
   ]);
 
   window.localStorage.clear();
@@ -5927,6 +6069,59 @@ export default function LocalPage({
     Set<string>
   >(() => new Set<string>());
   const [albumSource, setAlbumSource] = useState<AlbumSource | null>(null);
+  const [imageOverlayEditor, setImageOverlayEditor] =
+    useState<ImageOverlayEditorSession | null>(null);
+  const [selectedOverlayBlob, setSelectedOverlayBlob] = useState<Blob | null>(null);
+  const [selectedOverlayUrl, setSelectedOverlayUrl] = useState<string>("");
+  const [selectedOverlayName, setSelectedOverlayName] = useState<string>("");
+  const [imageOverlayX, setImageOverlayX] = useState<number>(50);
+  const [imageOverlayY, setImageOverlayY] = useState<number>(50);
+  const [imageOverlayPreviewZoom, setImageOverlayPreviewZoom] = useState<number>(1);
+  const imageOverlayPreviewRef = useRef<HTMLDivElement | null>(null);
+  const imageOverlayViewportRef = useRef<HTMLDivElement | null>(null);
+  const [imageOverlayViewportSize, setImageOverlayViewportSize] = useState<{
+    width: number;
+    height: number;
+  }>({ width: 0, height: 0 });
+  const imageOverlayAspectRatio = imageOverlayEditor
+    ? imageOverlayEditor.width / Math.max(imageOverlayEditor.height, 1)
+    : 1;
+  const imageOverlayPreviewBaseWidth = Math.max(
+    1,
+    Math.min(
+      Math.max(1, imageOverlayViewportSize.width - 24),
+      Math.max(1, imageOverlayViewportSize.height - 24) * imageOverlayAspectRatio,
+    ),
+  );
+  const imageOverlayPreviewWidth = imageOverlayPreviewBaseWidth * imageOverlayPreviewZoom;
+  const imageOverlayPreviewHeight = imageOverlayPreviewWidth / imageOverlayAspectRatio;
+  const imageOverlayPreviewCanvasWidth = Math.max(
+    imageOverlayViewportSize.width,
+    imageOverlayPreviewWidth + 24,
+  );
+  const imageOverlayPreviewCanvasHeight = Math.max(
+    imageOverlayViewportSize.height,
+    imageOverlayPreviewHeight + 24,
+  );
+  const imageOverlayDragRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startX: number;
+    startY: number;
+    previewWidth: number;
+    previewHeight: number;
+  } | null>(null);
+  const [isImageOverlayDragging, setIsImageOverlayDragging] = useState<boolean>(false);
+  const [imageOverlayWidthPercent, setImageOverlayWidthPercent] = useState<number>(25);
+  const [imageOverlayOpacity, setImageOverlayOpacity] = useState<number>(100);
+  const [imageOverlayRotation, setImageOverlayRotation] = useState<number>(0);
+  const [imageOverlayTemplateName, setImageOverlayTemplateName] = useState<string>("");
+  const [localOverlayTemplates, setLocalOverlayTemplates] =
+    useState<LocalImageOverlayTemplatePreview[]>([]);
+  const [isOverlayTemplatesLoading, setIsOverlayTemplatesLoading] =
+    useState<boolean>(false);
+  const [isOverlayEditorBusy, setIsOverlayEditorBusy] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string>("");
   const [selectedDescriptionCopy, setSelectedDescriptionCopy] =
     useState<SelectedDescriptionCopy | null>(null);
@@ -5936,6 +6131,130 @@ export default function LocalPage({
   const [postedRecords, setPostedRecords] = useState<PostedRecord[]>([]);
   const [nowTick, setNowTick] = useState<Date>(new Date());
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(() => loadScheduleConfig());
+
+  useEffect(() => {
+    const url = imageOverlayEditor?.baseImageUrl;
+    return () => {
+      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    };
+  }, [imageOverlayEditor?.baseImageUrl]);
+
+  useEffect(() => {
+    const url = selectedOverlayUrl;
+    return () => {
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    };
+  }, [selectedOverlayUrl]);
+
+  useEffect(() => {
+    const urls = localOverlayTemplates.map((template) => template.previewUrl);
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+  }, [localOverlayTemplates]);
+
+  useEffect(() => {
+    if (activeModal !== "imageOverlayEditor") return;
+
+    const viewport = imageOverlayViewportRef.current;
+    if (!viewport) return;
+
+    const measureViewport = (): void => {
+      // Measure the fixed viewport box, not clientWidth/clientHeight.
+      // client dimensions shrink when scrollbars appear at high zoom and can
+      // create a ResizeObserver feedback loop that makes the preview flicker.
+      const bounds = viewport.getBoundingClientRect();
+      const styles = window.getComputedStyle(viewport);
+      const borderWidth =
+        (Number.parseFloat(styles.borderLeftWidth) || 0) +
+        (Number.parseFloat(styles.borderRightWidth) || 0);
+      const borderHeight =
+        (Number.parseFloat(styles.borderTopWidth) || 0) +
+        (Number.parseFloat(styles.borderBottomWidth) || 0);
+      const nextSize = {
+        width: Math.max(1, bounds.width - borderWidth),
+        height: Math.max(1, bounds.height - borderHeight),
+      };
+      setImageOverlayViewportSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height
+          ? current
+          : nextSize,
+      );
+    };
+
+    measureViewport();
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measureViewport)
+        : null;
+    resizeObserver?.observe(viewport);
+    window.addEventListener("resize", measureViewport);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measureViewport);
+    };
+  }, [activeModal, imageOverlayEditor?.width, imageOverlayEditor?.height]);
+
+  useEffect(() => {
+    if (activeModal !== "imageOverlayEditor") return;
+
+    const viewport = imageOverlayViewportRef.current;
+    if (!viewport) return;
+
+    // Center only when the editor opens or the viewport genuinely resizes.
+    // Do not recenter on every zoom tick: the disappearing/appearing X/Y
+    // scrollbars otherwise fight the image dimensions and cause visible jumps.
+    const frame = window.requestAnimationFrame(() => {
+      const preview = imageOverlayPreviewRef.current;
+      if (!preview || !viewport.isConnected || !preview.isConnected) return;
+      const viewportBounds = viewport.getBoundingClientRect();
+      const previewBounds = preview.getBoundingClientRect();
+      const previewCenterX =
+        viewport.scrollLeft +
+        previewBounds.left -
+        viewportBounds.left +
+        previewBounds.width / 2;
+      const previewCenterY =
+        viewport.scrollTop +
+        previewBounds.top -
+        viewportBounds.top +
+        previewBounds.height / 2;
+      viewport.scrollLeft = Math.max(0, previewCenterX - viewport.clientWidth / 2);
+      viewport.scrollTop = Math.max(0, previewCenterY - viewport.clientHeight / 2);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeModal, imageOverlayViewportSize.width, imageOverlayViewportSize.height]);
+
+  useEffect(() => {
+    if (activeModal !== "imageOverlayEditor") return;
+
+    let cancelled = false;
+    setIsOverlayTemplatesLoading(true);
+    void readImageOverlayTemplates()
+      .then((templates) => {
+        const previews = templates.map((template) => ({
+          ...template,
+          previewUrl: URL.createObjectURL(template.blob),
+        }));
+        if (cancelled) {
+          previews.forEach((template) => URL.revokeObjectURL(template.previewUrl));
+          return;
+        }
+        setLocalOverlayTemplates(previews);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          Toastify(error instanceof Error ? error.message : "Không thể tải kho ảnh mẫu", 400);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsOverlayTemplatesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeModal]);
   const [pictureInPictureWindow, setPictureInPictureWindow] =
     useState<Window | null>(null);
   const [hourlyNotificationConfig, setHourlyNotificationConfig] =
@@ -9847,6 +10166,14 @@ export default function LocalPage({
         setAlbumSource(null);
       }
 
+      if (closingModal === "imageOverlayEditor") {
+        setImageOverlayEditor(null);
+        setSelectedOverlayBlob(null);
+        setSelectedOverlayUrl("");
+        setSelectedOverlayName("");
+        setLocalOverlayTemplates([]);
+      }
+
       if (closingModal === "imageDownload") {
         setImageDownloadCategory("all");
         setExcludedImageDownloadCategories(new Set<string>());
@@ -9894,6 +10221,11 @@ export default function LocalPage({
     setSelectedAlbumImageId("");
     setSelectedAlbumImageIds(new Set<string>());
     setAlbumSource(null);
+    setImageOverlayEditor(null);
+    setSelectedOverlayBlob(null);
+    setSelectedOverlayUrl("");
+    setSelectedOverlayName("");
+    setLocalOverlayTemplates([]);
     setImageDownloadCategory("all");
     setLocalImageView("active");
     setPendingConfirm(null);
@@ -11809,6 +12141,333 @@ export default function LocalPage({
         }
       },
     });
+  };
+
+  const refreshLocalImageOverlayTemplates = async (): Promise<void> => {
+    const templates = await readImageOverlayTemplates();
+    const previews = templates.map((template) => ({
+      ...template,
+      previewUrl: URL.createObjectURL(template.blob),
+    }));
+    setLocalOverlayTemplates(previews);
+  };
+
+  const centerImageOverlayPreviewInViewport = (): void => {
+    const viewport = imageOverlayViewportRef.current;
+    const preview = imageOverlayPreviewRef.current;
+    if (!viewport || !preview || !viewport.isConnected || !preview.isConnected) return;
+
+    const viewportBounds = viewport.getBoundingClientRect();
+    const previewBounds = preview.getBoundingClientRect();
+    const previewCenterX =
+      viewport.scrollLeft +
+      previewBounds.left -
+      viewportBounds.left +
+      previewBounds.width / 2;
+    const previewCenterY =
+      viewport.scrollTop +
+      previewBounds.top -
+      viewportBounds.top +
+      previewBounds.height / 2;
+
+    viewport.scrollTo({
+      left: Math.max(0, previewCenterX - viewport.clientWidth / 2),
+      top: Math.max(0, previewCenterY - viewport.clientHeight / 2),
+      behavior: "auto",
+    });
+  };
+
+  const scheduleImageOverlayPreviewCenter = (): void => {
+    // Wait for React to commit the new zoomed dimensions before measuring.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(centerImageOverlayPreviewInViewport);
+    });
+  };
+
+  const setImageOverlayPreviewZoomAndCenter = (nextZoom: number): void => {
+    setImageOverlayPreviewZoom(Math.min(3, Math.max(0.5, nextZoom)));
+    scheduleImageOverlayPreviewCenter();
+  };
+
+  const handleImageOverlayPointerDown = (
+    event: ReactPointerEvent<HTMLImageElement>,
+  ): void => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const preview = imageOverlayPreviewRef.current;
+    if (!preview || !selectedOverlayUrl) return;
+
+    const bounds = preview.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    imageOverlayDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: imageOverlayX,
+      startY: imageOverlayY,
+      previewWidth: bounds.width,
+      previewHeight: bounds.height,
+    };
+    setIsImageOverlayDragging(true);
+  };
+
+  const handleImageOverlayPointerMove = (
+    event: ReactPointerEvent<HTMLImageElement>,
+  ): void => {
+    const drag = imageOverlayDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    const deltaXPercent = ((event.clientX - drag.startClientX) / drag.previewWidth) * 100;
+    const deltaYPercent = ((event.clientY - drag.startClientY) / drag.previewHeight) * 100;
+    setImageOverlayX(Math.min(100, Math.max(0, drag.startX + deltaXPercent)));
+    setImageOverlayY(Math.min(100, Math.max(0, drag.startY + deltaYPercent)));
+  };
+
+  const handleImageOverlayPointerUp = (
+    event: ReactPointerEvent<HTMLImageElement>,
+  ): void => {
+    const drag = imageOverlayDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    imageOverlayDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsImageOverlayDragging(false);
+  };
+
+  const openImageOverlayEditor = async (
+    source: AlbumSource,
+    baseImage: ProductImage,
+  ): Promise<void> => {
+    let previewUrl = "";
+    try {
+      const imageBlob = await getProductImageBlob(baseImage);
+      previewUrl = URL.createObjectURL(imageBlob);
+      const dimensions = await loadImageElement(previewUrl);
+      setImageOverlayEditor({
+        productId: source.productId,
+        productTitle: source.title,
+        baseImage,
+        baseImageUrl: previewUrl,
+        width: dimensions.naturalWidth,
+        height: dimensions.naturalHeight,
+      });
+      setSelectedOverlayBlob(null);
+      setSelectedOverlayUrl("");
+      setSelectedOverlayName("");
+      imageOverlayDragRef.current = null;
+      setIsImageOverlayDragging(false);
+      setImageOverlayX(50);
+      setImageOverlayY(50);
+      setImageOverlayPreviewZoom(1);
+      setImageOverlayWidthPercent(25);
+      setImageOverlayOpacity(100);
+      setImageOverlayRotation(0);
+      setImageOverlayTemplateName("");
+      openModal("imageOverlayEditor");
+    } catch (error) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      Toastify(
+        error instanceof Error ? error.message : "Không thể mở công cụ ghép ảnh",
+        400,
+      );
+    }
+  };
+
+  const handleImageOverlayFileInput = (
+    event: ChangeEvent<HTMLInputElement>,
+  ): void => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      Toastify("Vui lòng chọn file ảnh hợp lệ", 400);
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedOverlayBlob(file);
+    setSelectedOverlayUrl(previewUrl);
+    setSelectedOverlayName(file.name);
+    setImageOverlayTemplateName(file.name.replace(/\.[^.]+$/u, ""));
+  };
+
+  const selectImageOverlayTemplate = (template: LocalImageOverlayTemplate): void => {
+    setSelectedOverlayBlob(template.blob);
+    setSelectedOverlayUrl(URL.createObjectURL(template.blob));
+    setSelectedOverlayName(template.name);
+    setImageOverlayTemplateName(template.name);
+  };
+
+  const saveSelectedImageAsLocalOverlayTemplate = async (): Promise<void> => {
+    if (!selectedOverlayBlob) {
+      Toastify("Hãy chọn một ảnh phủ trước khi lưu mẫu", 300);
+      return;
+    }
+
+    const templateName = imageOverlayTemplateName.trim() || selectedOverlayName.trim();
+    if (!templateName) {
+      Toastify("Vui lòng nhập tên ảnh mẫu", 300);
+      return;
+    }
+
+    try {
+      await writeImageOverlayTemplate({
+        id: crypto.randomUUID(),
+        name: templateName,
+        type: selectedOverlayBlob.type || "image/png",
+        size: selectedOverlayBlob.size,
+        createdAt: new Date().toISOString(),
+        blob: selectedOverlayBlob,
+      });
+      await refreshLocalImageOverlayTemplates();
+      Toastify("Đã lưu ảnh phủ vào kho mẫu trên thiết bị này", 200);
+    } catch (error) {
+      Toastify(
+        error instanceof Error ? error.message : "Không thể lưu ảnh mẫu trên thiết bị",
+        400,
+      );
+    }
+  };
+
+  const removeLocalImageOverlayTemplate = async (id: string): Promise<void> => {
+    try {
+      await deleteImageOverlayTemplate(id);
+      await refreshLocalImageOverlayTemplates();
+      Toastify("Đã gỡ ảnh mẫu khỏi thiết bị này", 200);
+    } catch (error) {
+      Toastify(
+        error instanceof Error ? error.message : "Không thể xóa ảnh mẫu",
+        400,
+      );
+    }
+  };
+
+  const saveCompositedImageToProduct = async (): Promise<void> => {
+    if (!imageOverlayEditor || !selectedOverlayBlob || !selectedOverlayUrl) {
+      Toastify("Hãy chọn ảnh phủ trước khi lưu ảnh ghép", 300);
+      return;
+    }
+    if (!requestWriteAccess()) return;
+
+    const currentProduct = productsRef.current.find(
+      (product) => product.id === imageOverlayEditor.productId,
+    );
+    if (!currentProduct) {
+      Toastify("Không tìm thấy sản phẩm gốc để lưu ảnh ghép", 400);
+      return;
+    }
+
+    setIsOverlayEditorBusy(true);
+    let uploadedImage: ProductImage | null = null;
+    try {
+      const baseElement = await loadImageElement(imageOverlayEditor.baseImageUrl);
+      const overlayElement = await loadImageElement(selectedOverlayUrl);
+      const canvas = document.createElement("canvas");
+      canvas.width = baseElement.naturalWidth;
+      canvas.height = baseElement.naturalHeight;
+
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Trình duyệt không thể khởi tạo canvas ghép ảnh");
+
+      context.drawImage(baseElement, 0, 0, canvas.width, canvas.height);
+
+      const overlayAspectRatio =
+        overlayElement.naturalWidth / Math.max(overlayElement.naturalHeight, 1);
+      const overlayWidth = Math.max(1, canvas.width * (imageOverlayWidthPercent / 100));
+      const overlayHeight = overlayWidth / Math.max(overlayAspectRatio, 0.0001);
+      const centerX = canvas.width * (imageOverlayX / 100);
+      const centerY = canvas.height * (imageOverlayY / 100);
+
+      context.save();
+      context.globalAlpha = imageOverlayOpacity / 100;
+      context.translate(centerX, centerY);
+      context.rotate((imageOverlayRotation * Math.PI) / 180);
+      context.drawImage(
+        overlayElement,
+        -overlayWidth / 2,
+        -overlayHeight / 2,
+        overlayWidth,
+        overlayHeight,
+      );
+      context.restore();
+
+      const outputBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Không thể xuất ảnh ghép"));
+        }, "image/png");
+      });
+
+      const baseName = imageOverlayEditor.baseImage.name.replace(/\.[^.]+$/u, "");
+      const outputFile = new File(
+        [outputBlob],
+        `${baseName || "image"}-overlay.png`,
+        { type: "image/png", lastModified: Date.now() },
+      );
+      uploadedImage = await uploadOriginalImageToCloudinary(outputFile);
+
+      const imageField: ProductImageField = currentProduct.images.some(
+        (image) => image.id === imageOverlayEditor.baseImage.id,
+      )
+        ? "images"
+        : "internalImages";
+      const currentFieldImages = currentProduct[imageField];
+      const baseImageIndex = currentFieldImages.findIndex(
+        (image) => image.id === imageOverlayEditor.baseImage.id,
+      );
+      const insertAt = baseImageIndex >= 0 ? baseImageIndex + 1 : currentFieldImages.length;
+      const nextFieldImages = [...currentFieldImages];
+      nextFieldImages.splice(insertAt, 0, uploadedImage);
+      const nextProduct: LocalProduct = {
+        ...currentProduct,
+        [imageField]: renameDraftImagesByField(nextFieldImages, imageField),
+        updatedAt: new Date().toISOString(),
+      };
+
+      await saveProductToDb(nextProduct);
+      commitLocalProduct(nextProduct);
+      await cacheProductImageBlob(uploadedImage, outputBlob).catch(() => undefined);
+
+      setAlbumSource((current) => current && current.productId === nextProduct.id
+        ? {
+          productId: nextProduct.id,
+          title: nextProduct.name,
+          description: nextProduct.description,
+          priceText: nextProduct.priceText,
+          contentType: nextProduct.contentType,
+          realEstateComment: nextProduct.realEstateComment,
+          images: nextProduct.images,
+          internalImages: nextProduct.internalImages,
+        }
+        : current);
+      setSelectedAlbumImageId(uploadedImage.id);
+      setImageOverlayEditor(null);
+      setSelectedOverlayBlob(null);
+      setSelectedOverlayUrl("");
+      setSelectedOverlayName("");
+      setLocalOverlayTemplates([]);
+      setModalStack((current) => current[current.length - 1] === "imageOverlayEditor"
+        ? current.slice(0, -1)
+        : current.filter((modalName) => modalName !== "imageOverlayEditor"));
+      Toastify("Đã ghép ảnh và lưu thành ảnh mới vào sản phẩm", 200);
+    } catch (error) {
+      if (uploadedImage?.publicId) {
+        await deleteUnattachedCloudinaryImages([uploadedImage.publicId]).catch(
+          () => undefined,
+        );
+      }
+      Toastify(
+        error instanceof Error ? error.message : "Không thể ghép và lưu ảnh",
+        400,
+      );
+    } finally {
+      setIsOverlayEditorBusy(false);
+    }
   };
 
   const openImageAlbum = (source: AlbumSource): void => {
@@ -17229,6 +17888,9 @@ export default function LocalPage({
                   {activeModal === "imageAlbum" ? (
                     <FiImage aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "imageOverlayEditor" ? (
+                    <FiEdit3 aria-hidden="true" className={iconClassName} />
+                  ) : null}
                   {activeModal === "imageDownload" ? (
                     <FiDownload aria-hidden="true" className={iconClassName} />
                   ) : null}
@@ -17281,6 +17943,7 @@ export default function LocalPage({
                       : null}
                     {activeModal === "slotDetail" ? "Chi tiết bài đăng" : null}
                     {activeModal === "imageAlbum" ? "Album ảnh" : null}
+                    {activeModal === "imageOverlayEditor" ? "Chèn ảnh lên ảnh" : null}
                     {activeModal === "imageDownload" ? "Tải ảnh" : null}
                     {activeModal === "localImageManager"
                       ? "Quản lý ảnh trên máy"
@@ -17301,8 +17964,235 @@ export default function LocalPage({
             </div>
 
             <div
-              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : "overflow-y-auto"}`}
+              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : activeModal === "imageOverlayEditor" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto"}`}
             >
+              {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
+                <section className="grid min-h-full grid-cols-1 gap-3 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_330px]">
+                  <article className="flex min-h-[48dvh] min-w-0 flex-col gap-2 rounded-md border border-white/10 bg-slate-950/60 p-2 xl:min-h-0">
+                    <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.025] px-2.5 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[10px] font-black text-white">{imageOverlayEditor.productTitle}</p>
+                        <p className="truncate text-[9px] text-slate-400">Ảnh gốc: {imageOverlayEditor.baseImage.name}</p>
+                      </div>
+                      <span className="shrink-0 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[9px] text-slate-400">
+                        {imageOverlayEditor.width} × {imageOverlayEditor.height}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
+                      <span className="text-[9px] text-slate-400">Kích thước preview: {Math.round(imageOverlayPreviewZoom * 100)}%</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title="Thu nhỏ preview"
+                          aria-label="Thu nhỏ preview"
+                          disabled={imageOverlayPreviewZoom <= 0.5}
+                          className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
+                          onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom - 0.25) * 100) / 100)}
+                        >−</button>
+                        <button
+                          type="button"
+                          title="Vừa khung preview"
+                          aria-label="Vừa khung preview"
+                          className="h-7 border border-cyan-300/25 bg-cyan-300/[0.06] px-2 text-[9px] font-black text-cyan-100"
+                          onClick={() => setImageOverlayPreviewZoomAndCenter(1)}
+                        >Vừa khung</button>
+                        <button
+                          type="button"
+                          title="Phóng to preview"
+                          aria-label="Phóng to preview"
+                          disabled={imageOverlayPreviewZoom >= 3}
+                          className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
+                          onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom + 0.25) * 100) / 100)}
+                        >+</button>
+                        <input
+                          type="range"
+                          min={50}
+                          max={300}
+                          step={25}
+                          value={Math.round(imageOverlayPreviewZoom * 100)}
+                          aria-label="Mức phóng to preview"
+                          onChange={(event) => setImageOverlayPreviewZoom(Number(event.currentTarget.value) / 100)}
+                          onPointerUp={scheduleImageOverlayPreviewCenter}
+                          onKeyUp={scheduleImageOverlayPreviewCenter}
+                          className="ml-1 w-20 accent-cyan-300 xl:w-28"
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      ref={imageOverlayViewportRef}
+                      className="relative box-border flex min-h-[50dvh] min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable] xl:min-h-0"
+                    >
+                      <div
+                        className="m-auto flex shrink-0 items-center justify-center"
+                        style={{
+                          width: `${imageOverlayPreviewCanvasWidth}px`,
+                          height: `${imageOverlayPreviewCanvasHeight}px`,
+                        }}
+                      >
+                        <div
+                          ref={imageOverlayPreviewRef}
+                          className="relative max-w-none shrink-0 overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+                          style={{
+                            aspectRatio: `${imageOverlayEditor.width} / ${imageOverlayEditor.height}`,
+                            width: `${imageOverlayPreviewWidth}px`,
+                            height: `${imageOverlayPreviewHeight}px`,
+                          }}
+                        >
+                          <img
+                            src={imageOverlayEditor.baseImageUrl}
+                            alt={imageOverlayEditor.baseImage.name}
+                            draggable={false}
+                            className="absolute inset-0 h-full w-full select-none object-fill"
+                          />
+                          {selectedOverlayUrl ? (
+                            <img
+                              src={selectedOverlayUrl}
+                              alt={selectedOverlayName || "Ảnh phủ"}
+                              draggable={false}
+                              onDragStart={(event) => event.preventDefault()}
+                              onPointerDown={handleImageOverlayPointerDown}
+                              onPointerMove={handleImageOverlayPointerMove}
+                              onPointerUp={handleImageOverlayPointerUp}
+                              onPointerCancel={handleImageOverlayPointerUp}
+                              className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging ? "cursor-grabbing" : "cursor-grab"}`}
+                              style={{
+                                left: `${imageOverlayX}%`,
+                                top: `${imageOverlayY}%`,
+                                width: `${imageOverlayWidthPercent}%`,
+                                opacity: imageOverlayOpacity / 100,
+                                transform: `translate(-50%, -50%) rotate(${imageOverlayRotation}deg)`,
+                                transformOrigin: "center center",
+                              }}
+                            />
+                          ) : (
+                            <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
+                              Chọn ảnh phủ hoặc ảnh mẫu ở phần điều khiển
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[9px] leading-4 text-slate-500">Kéo để di chuyển ảnh phủ · Dùng nút +/- hoặc thanh trượt để phóng to preview. Thu phóng preview không làm thay đổi kích thước ảnh xuất ra. Ảnh gốc được giữ nguyên.</p>
+                  </article>
+
+                  <aside className="box-border flex w-full min-w-0 max-w-full flex-col gap-2 overflow-x-clip rounded-md border border-white/10 bg-slate-900/80 p-2 xl:min-h-0 xl:overflow-x-clip xl:overflow-y-auto">
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                      <h3 className="text-[10px] font-black uppercase tracking-wide text-white">1. Chọn ảnh phủ</h3>
+                      <label className="mt-2 flex w-full min-w-0 max-w-full box-border cursor-pointer flex-wrap items-center justify-center gap-2 border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2.5 text-center text-[10px] font-black text-cyan-100 transition hover:bg-cyan-300/10">
+                        <FiImage aria-hidden="true" className="h-3.5 w-3.5" />
+                        Chọn ảnh từ thiết bị
+                        <input type="file" accept="image/*" className="hidden" onChange={handleImageOverlayFileInput} />
+                      </label>
+                      <p className="mt-1.5 break-words text-[9px] text-slate-400">{selectedOverlayName || "Chưa chọn ảnh phủ"}</p>
+                      <div className="mt-2 flex min-w-0 max-w-full gap-1.5">
+                        <input
+                          value={imageOverlayTemplateName}
+                          onChange={(event) => setImageOverlayTemplateName(event.currentTarget.value)}
+                          placeholder="Tên ảnh mẫu"
+                          aria-label="Tên ảnh mẫu"
+                          className="min-w-0 flex-1 rounded border border-white/10 bg-black/30 px-2 py-1.5 text-[10px] text-white outline-none focus:border-cyan-300/40"
+                        />
+                        <button
+                          type="button"
+                          disabled={!selectedOverlayBlob}
+                          className="shrink-0 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 disabled:opacity-40"
+                          onClick={() => void saveSelectedImageAsLocalOverlayTemplate()}
+                        >Lưu mẫu Local</button>
+                      </div>
+                    </section>
+
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h3 className="text-[10px] font-black uppercase tracking-wide text-white">2. Điều chỉnh ảnh phủ</h3>
+                        <button
+                          type="button"
+                          className="text-[9px] font-bold text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-white"
+                          onClick={() => {
+                            imageOverlayDragRef.current = null;
+                            setIsImageOverlayDragging(false);
+                            setImageOverlayX(50);
+                            setImageOverlayY(50);
+                            setImageOverlayPreviewZoom(1);
+                            scheduleImageOverlayPreviewCenter();
+                            setImageOverlayWidthPercent(25);
+                            setImageOverlayOpacity(100);
+                            setImageOverlayRotation(0);
+                          }}
+                        >Đặt lại</button>
+                      </div>
+                      <div className="space-y-2.5">
+                        <div className="rounded border border-cyan-300/15 bg-cyan-300/[0.04] px-2 py-2 text-[9px] leading-4 text-cyan-100/80">
+                          Kéo trực tiếp ảnh phủ trong khung xem trước để di chuyển. Dùng được với chuột hoặc thao tác chạm trên điện thoại.
+                          <span className="mt-1 block font-mono text-cyan-100/60">Vị trí hiện tại: X {Math.round(imageOverlayX)}% · Y {Math.round(imageOverlayY)}%</span>
+                        </div>
+                        <label className="block text-[9px] font-bold text-slate-300">
+                          Kích thước: {imageOverlayWidthPercent}% chiều ngang ảnh gốc
+                          <input type="range" min={5} max={100} value={imageOverlayWidthPercent} onChange={(event) => setImageOverlayWidthPercent(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
+                        </label>
+                        <label className="block text-[9px] font-bold text-slate-300">
+                          Độ đục: {imageOverlayOpacity}%
+                          <input type="range" min={10} max={100} value={imageOverlayOpacity} onChange={(event) => setImageOverlayOpacity(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
+                        </label>
+                        <label className="block text-[9px] font-bold text-slate-300">
+                          Xoay: {imageOverlayRotation}°
+                          <input type="range" min={-180} max={180} value={imageOverlayRotation} onChange={(event) => setImageOverlayRotation(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
+                        </label>
+                      </div>
+                    </section>
+
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <h3 className="text-[10px] font-black uppercase tracking-wide text-white">3. Kho ảnh mẫu trên thiết bị</h3>
+                        <span className="rounded border border-white/10 px-1.5 py-0.5 text-[8px] font-mono text-slate-400">{localOverlayTemplates.length}</span>
+                      </div>
+                      {isOverlayTemplatesLoading ? (
+                        <p className="py-3 text-center text-[9px] text-slate-400">Đang tải kho ảnh mẫu…</p>
+                      ) : localOverlayTemplates.length > 0 ? (
+                        <div className="grid max-h-52 grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
+                          {localOverlayTemplates.map((template) => (
+                            <div key={template.id} className="min-w-0 overflow-hidden rounded border border-white/10 bg-black/25">
+                              <button
+                                type="button"
+                                className={`block w-full p-1 text-left transition ${selectedOverlayName === template.name ? "bg-cyan-300/10 ring-1 ring-inset ring-cyan-300/40" : "hover:bg-white/[0.04]"}`}
+                                title={`Dùng mẫu ${template.name}`}
+                                onClick={() => selectImageOverlayTemplate(template)}
+                              >
+                                <span className="flex aspect-square items-center justify-center overflow-hidden rounded bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:10px_10px] bg-[position:0_0,0_5px,5px_-5px,-5px_0px]">
+                                  <img src={template.previewUrl} alt={template.name} className="max-h-full max-w-full object-contain" />
+                                </span>
+                                <span className="mt-1 block truncate text-[8px] font-bold text-slate-300">{template.name}</span>
+                              </button>
+                              <button
+                                type="button"
+                                title={`Xóa mẫu ${template.name}`}
+                                aria-label={`Xóa mẫu ${template.name}`}
+                                className="flex w-full items-center justify-center gap-1 border-t border-white/10 py-1 text-[8px] font-bold text-rose-200/80 hover:bg-rose-300/[0.07]"
+                                onClick={() => void removeLocalImageOverlayTemplate(template.id)}
+                              ><FiTrash2 aria-hidden="true" className="h-2.5 w-2.5" />Gỡ mẫu</button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="py-2 text-[9px] leading-4 text-slate-500">Chưa có mẫu. Chọn ảnh phủ rồi bấm “Lưu mẫu Local” để tái sử dụng trên thiết bị này.</p>
+                      )}
+                    </section>
+
+                    <button
+                      type="button"
+                      disabled={!selectedOverlayBlob || isOverlayEditorBusy}
+                      className="flex items-center justify-center gap-2 border border-emerald-300/35 bg-emerald-300/10 px-3 py-3 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={() => void saveCompositedImageToProduct()}
+                    >
+                      {isOverlayEditorBusy ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-100/30 border-t-emerald-100" /> : <FiCheckCircle aria-hidden="true" className="h-3.5 w-3.5" />}
+                      {isOverlayEditorBusy ? "Đang ghép và lưu…" : "Lưu ảnh ghép vào sản phẩm"}
+                    </button>
+                    <p className="text-[8px] leading-4 text-slate-500">Ảnh kết quả được upload lên Cloudinary và lưu thông tin vào MongoDB. Kho ảnh mẫu chỉ lưu trên trình duyệt/thiết bị hiện tại.</p>
+                  </aside>
+                </section>
+              ) : null}
+
               {activeModal === "shortcuts" ? (
                 <section className="flex w-full min-w-0 flex-col gap-2 py-1">
                   <div className="relative min-w-0 overflow-hidden rounded-md border border-white/10 bg-slate-950/45 shadow-[0_12px_34px_rgba(0,0,0,0.24)]">
@@ -17719,8 +18609,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                    : "border-white/5 bg-white/[0.02] text-slate-500"
+                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                  : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
@@ -21101,6 +21991,22 @@ export default function LocalPage({
                       <div className="flex shrink-0 gap-1 overflow-x-auto pb-1 xl:justify-end xl:overflow-visible xl:pb-0">
                         <button
                           type="button"
+                          data-luxury-accent="amber"
+                          className={albumActionButtonBaseClassName}
+                          disabled={!selectedAlbumImage}
+                          title="Chèn ảnh phủ lên ảnh đang chọn"
+                          aria-label="Chèn ảnh phủ lên ảnh đang chọn"
+                          onClick={() => {
+                            if (selectedAlbumImage) {
+                              void openImageOverlayEditor(albumSource, selectedAlbumImage);
+                            }
+                          }}
+                        >
+                          <FiEdit3 aria-hidden="true" className={iconClassName} />
+                          Ghép ảnh
+                        </button>
+                        <button
+                          type="button"
                           data-luxury-accent="indigo"
                           className={albumActionButtonBaseClassName}
                           onClick={() =>
@@ -22507,3 +23413,5 @@ export default function LocalPage({
     </>
   );
 }
+
+
