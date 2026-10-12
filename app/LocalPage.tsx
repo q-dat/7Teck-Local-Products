@@ -6226,6 +6226,31 @@ export default function LocalPage({
   }, [activeModal, imageOverlayViewportSize.width, imageOverlayViewportSize.height]);
 
   useEffect(() => {
+    if (activeModal !== "imageOverlayEditor" || !imageOverlayEditor) return;
+    if (!isMobileAlbumViewport()) return;
+
+    // Mobile starts in fit-to-frame mode each time an image is opened.
+    // A zoom level of 100% means the image uses the largest dimensions that
+    // fit entirely inside the measured preview viewport; zoom controls remain
+    // available after the editor has opened.
+    setImageOverlayPreviewZoom(1);
+
+    let secondFrame: number | null = null;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const viewport = imageOverlayViewportRef.current;
+        if (!viewport?.isConnected) return;
+        viewport.scrollTo({ left: 0, top: 0, behavior: "auto" });
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [activeModal, imageOverlayEditor?.baseImageUrl]);
+
+  useEffect(() => {
     if (activeModal !== "imageOverlayEditor") return;
 
     let cancelled = false;
@@ -12435,15 +12460,15 @@ export default function LocalPage({
 
       setAlbumSource((current) => current && current.productId === nextProduct.id
         ? {
-          productId: nextProduct.id,
-          title: nextProduct.name,
-          description: nextProduct.description,
-          priceText: nextProduct.priceText,
-          contentType: nextProduct.contentType,
-          realEstateComment: nextProduct.realEstateComment,
-          images: nextProduct.images,
-          internalImages: nextProduct.internalImages,
-        }
+            productId: nextProduct.id,
+            title: nextProduct.name,
+            description: nextProduct.description,
+            priceText: nextProduct.priceText,
+            contentType: nextProduct.contentType,
+            realEstateComment: nextProduct.realEstateComment,
+            images: nextProduct.images,
+            internalImages: nextProduct.internalImages,
+          }
         : current);
       setSelectedAlbumImageId(uploadedImage.id);
       setImageOverlayEditor(null);
@@ -17967,62 +17992,11 @@ export default function LocalPage({
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : activeModal === "imageOverlayEditor" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto"}`}
             >
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
-                <section className="grid min-h-full grid-cols-1 gap-3 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_330px]">
-                  <article className="flex min-h-[48dvh] min-w-0 flex-col gap-2 rounded-md border border-white/10 bg-slate-950/60 p-2 xl:min-h-0">
-                    <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.025] px-2.5 py-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-[10px] font-black text-white">{imageOverlayEditor.productTitle}</p>
-                        <p className="truncate text-[9px] text-slate-400">Ảnh gốc: {imageOverlayEditor.baseImage.name}</p>
-                      </div>
-                      <span className="shrink-0 rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-[9px] text-slate-400">
-                        {imageOverlayEditor.width} × {imageOverlayEditor.height}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/10 bg-black/20 px-2 py-1.5">
-                      <span className="text-[9px] text-slate-400">Kích thước preview: {Math.round(imageOverlayPreviewZoom * 100)}%</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          title="Thu nhỏ preview"
-                          aria-label="Thu nhỏ preview"
-                          disabled={imageOverlayPreviewZoom <= 0.5}
-                          className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
-                          onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom - 0.25) * 100) / 100)}
-                        >−</button>
-                        <button
-                          type="button"
-                          title="Vừa khung preview"
-                          aria-label="Vừa khung preview"
-                          className="h-7 border border-cyan-300/25 bg-cyan-300/[0.06] px-2 text-[9px] font-black text-cyan-100"
-                          onClick={() => setImageOverlayPreviewZoomAndCenter(1)}
-                        >Vừa khung</button>
-                        <button
-                          type="button"
-                          title="Phóng to preview"
-                          aria-label="Phóng to preview"
-                          disabled={imageOverlayPreviewZoom >= 3}
-                          className="flex h-7 w-7 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
-                          onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom + 0.25) * 100) / 100)}
-                        >+</button>
-                        <input
-                          type="range"
-                          min={50}
-                          max={300}
-                          step={25}
-                          value={Math.round(imageOverlayPreviewZoom * 100)}
-                          aria-label="Mức phóng to preview"
-                          onChange={(event) => setImageOverlayPreviewZoom(Number(event.currentTarget.value) / 100)}
-                          onPointerUp={scheduleImageOverlayPreviewCenter}
-                          onKeyUp={scheduleImageOverlayPreviewCenter}
-                          className="ml-1 w-20 accent-cyan-300 xl:w-28"
-                        />
-                      </div>
-                    </div>
-
+                <section className="grid min-h-full grid-cols-1 gap-2 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <article className="flex min-h-[55dvh] min-w-0 flex-col gap-1.5 rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full xl:min-h-0">
                     <div
                       ref={imageOverlayViewportRef}
-                      className="relative box-border flex min-h-[50dvh] min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable] xl:min-h-0"
+                      className="relative box-border flex min-h-[58dvh] min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable] xl:min-h-0"
                     >
                       <div
                         className="m-auto flex shrink-0 items-center justify-center"
@@ -18040,45 +18014,96 @@ export default function LocalPage({
                             height: `${imageOverlayPreviewHeight}px`,
                           }}
                         >
+                        <img
+                          src={imageOverlayEditor.baseImageUrl}
+                          alt={imageOverlayEditor.baseImage.name}
+                          draggable={false}
+                          className="absolute inset-0 h-full w-full select-none object-fill"
+                        />
+                        {selectedOverlayUrl ? (
                           <img
-                            src={imageOverlayEditor.baseImageUrl}
-                            alt={imageOverlayEditor.baseImage.name}
+                            src={selectedOverlayUrl}
+                            alt={selectedOverlayName || "Ảnh phủ"}
                             draggable={false}
-                            className="absolute inset-0 h-full w-full select-none object-fill"
+                            onDragStart={(event) => event.preventDefault()}
+                            onPointerDown={handleImageOverlayPointerDown}
+                            onPointerMove={handleImageOverlayPointerMove}
+                            onPointerUp={handleImageOverlayPointerUp}
+                            onPointerCancel={handleImageOverlayPointerUp}
+                            className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging ? "cursor-grabbing" : "cursor-grab"}`}
+                            style={{
+                              left: `${imageOverlayX}%`,
+                              top: `${imageOverlayY}%`,
+                              width: `${imageOverlayWidthPercent}%`,
+                              opacity: imageOverlayOpacity / 100,
+                              transform: `translate(-50%, -50%) rotate(${imageOverlayRotation}deg)`,
+                              transformOrigin: "center center",
+                            }}
                           />
-                          {selectedOverlayUrl ? (
-                            <img
-                              src={selectedOverlayUrl}
-                              alt={selectedOverlayName || "Ảnh phủ"}
-                              draggable={false}
-                              onDragStart={(event) => event.preventDefault()}
-                              onPointerDown={handleImageOverlayPointerDown}
-                              onPointerMove={handleImageOverlayPointerMove}
-                              onPointerUp={handleImageOverlayPointerUp}
-                              onPointerCancel={handleImageOverlayPointerUp}
-                              className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging ? "cursor-grabbing" : "cursor-grab"}`}
-                              style={{
-                                left: `${imageOverlayX}%`,
-                                top: `${imageOverlayY}%`,
-                                width: `${imageOverlayWidthPercent}%`,
-                                opacity: imageOverlayOpacity / 100,
-                                transform: `translate(-50%, -50%) rotate(${imageOverlayRotation}deg)`,
-                                transformOrigin: "center center",
-                              }}
-                            />
-                          ) : (
-                            <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
-                              Chọn ảnh phủ hoặc ảnh mẫu ở phần điều khiển
-                            </div>
-                          )}
+                        ) : (
+                          <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
+                            Chọn ảnh phủ hoặc ảnh mẫu ở phần điều khiển
+                          </div>
+                        )}
                         </div>
                       </div>
                     </div>
-                    <p className="text-[9px] leading-4 text-slate-500">Kéo để di chuyển ảnh phủ · Dùng nút +/- hoặc thanh trượt để phóng to preview. Thu phóng preview không làm thay đổi kích thước ảnh xuất ra. Ảnh gốc được giữ nguyên.</p>
                   </article>
 
-                  <aside className="box-border flex w-full min-w-0 max-w-full flex-col gap-2 overflow-x-clip rounded-md border border-white/10 bg-slate-900/80 p-2 xl:min-h-0 xl:overflow-x-clip xl:overflow-y-auto">
-                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                  <aside className="box-border flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-x-clip rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:min-h-0 xl:overflow-x-clip xl:overflow-y-auto">
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[10px] font-black text-white" title={imageOverlayEditor.productTitle}>{imageOverlayEditor.productTitle}</p>
+                          <p className="truncate text-[9px] text-slate-400" title={imageOverlayEditor.baseImage.name}>Ảnh gốc: {imageOverlayEditor.baseImage.name}</p>
+                        </div>
+                        <span className="shrink-0 rounded border border-white/10 bg-black/30 px-1.5 py-1 font-mono text-[9px] text-slate-400">
+                          {imageOverlayEditor.width} × {imageOverlayEditor.height}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex min-w-0 flex-col gap-1.5">
+                        <span className="text-[9px] text-slate-400">Preview {Math.round(imageOverlayPreviewZoom * 100)}%</span>
+                        <div className="flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            title="Thu nhỏ preview"
+                            aria-label="Thu nhỏ preview"
+                            disabled={imageOverlayPreviewZoom <= 0.5}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
+                            onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom - 0.25) * 100) / 100)}
+                          >−</button>
+                          <button
+                            type="button"
+                            title="Vừa khung preview"
+                            aria-label="Vừa khung preview"
+                            className="h-7 shrink-0 border border-cyan-300/25 bg-cyan-300/[0.06] px-2 text-[9px] font-black text-cyan-100"
+                            onClick={() => setImageOverlayPreviewZoomAndCenter(1)}
+                          >Vừa khung</button>
+                          <button
+                            type="button"
+                            title="Phóng to preview"
+                            aria-label="Phóng to preview"
+                            disabled={imageOverlayPreviewZoom >= 3}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center border border-white/10 bg-white/[0.04] text-sm font-black text-white disabled:opacity-30"
+                            onClick={() => setImageOverlayPreviewZoomAndCenter(Math.round((imageOverlayPreviewZoom + 0.25) * 100) / 100)}
+                          >+</button>
+                          <input
+                            type="range"
+                            min={50}
+                            max={300}
+                            step={25}
+                            value={Math.round(imageOverlayPreviewZoom * 100)}
+                            aria-label="Mức phóng to preview"
+                            onChange={(event) => setImageOverlayPreviewZoom(Number(event.currentTarget.value) / 100)}
+                            onPointerUp={scheduleImageOverlayPreviewCenter}
+                            onKeyUp={scheduleImageOverlayPreviewCenter}
+                            className="ml-1 min-w-0 flex-1 accent-cyan-300"
+                          />
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <h3 className="text-[10px] font-black uppercase tracking-wide text-white">1. Chọn ảnh phủ</h3>
                       <label className="mt-2 flex w-full min-w-0 max-w-full box-border cursor-pointer flex-wrap items-center justify-center gap-2 border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2.5 text-center text-[10px] font-black text-cyan-100 transition hover:bg-cyan-300/10">
                         <FiImage aria-hidden="true" className="h-3.5 w-3.5" />
@@ -18103,7 +18128,7 @@ export default function LocalPage({
                       </div>
                     </section>
 
-                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <h3 className="text-[10px] font-black uppercase tracking-wide text-white">2. Điều chỉnh ảnh phủ</h3>
                         <button
@@ -18122,11 +18147,8 @@ export default function LocalPage({
                           }}
                         >Đặt lại</button>
                       </div>
-                      <div className="space-y-2.5">
-                        <div className="rounded border border-cyan-300/15 bg-cyan-300/[0.04] px-2 py-2 text-[9px] leading-4 text-cyan-100/80">
-                          Kéo trực tiếp ảnh phủ trong khung xem trước để di chuyển. Dùng được với chuột hoặc thao tác chạm trên điện thoại.
-                          <span className="mt-1 block font-mono text-cyan-100/60">Vị trí hiện tại: X {Math.round(imageOverlayX)}% · Y {Math.round(imageOverlayY)}%</span>
-                        </div>
+                      <div className="space-y-2">
+                        <div className="text-right font-mono text-[8px] text-cyan-100/55">X {Math.round(imageOverlayX)}% · Y {Math.round(imageOverlayY)}%</div>
                         <label className="block text-[9px] font-bold text-slate-300">
                           Kích thước: {imageOverlayWidthPercent}% chiều ngang ảnh gốc
                           <input type="range" min={5} max={100} value={imageOverlayWidthPercent} onChange={(event) => setImageOverlayWidthPercent(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
@@ -18142,7 +18164,7 @@ export default function LocalPage({
                       </div>
                     </section>
 
-                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2.5">
+                    <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <h3 className="text-[10px] font-black uppercase tracking-wide text-white">3. Kho ảnh mẫu trên thiết bị</h3>
                         <span className="rounded border border-white/10 px-1.5 py-0.5 text-[8px] font-mono text-slate-400">{localOverlayTemplates.length}</span>
@@ -18150,7 +18172,7 @@ export default function LocalPage({
                       {isOverlayTemplatesLoading ? (
                         <p className="py-3 text-center text-[9px] text-slate-400">Đang tải kho ảnh mẫu…</p>
                       ) : localOverlayTemplates.length > 0 ? (
-                        <div className="grid max-h-52 grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
+                        <div className="grid max-h-44 grid-cols-3 gap-1.5 overflow-y-auto pr-0.5">
                           {localOverlayTemplates.map((template) => (
                             <div key={template.id} className="min-w-0 overflow-hidden rounded border border-white/10 bg-black/25">
                               <button
@@ -18609,8 +18631,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                  : "border-white/5 bg-white/[0.02] text-slate-500"
+                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                    : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
@@ -23413,5 +23435,3 @@ export default function LocalPage({
     </>
   );
 }
-
-
