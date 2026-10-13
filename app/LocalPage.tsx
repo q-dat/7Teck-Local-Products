@@ -76,8 +76,40 @@ type LocalImageOverlayTemplate = {
 };
 
 type LocalImageOverlayTemplatePreview = LocalImageOverlayTemplate & {
+  previewBlob: Blob;
   previewUrl: string;
 };
+
+type ImageOverlayLayer = {
+  id: string;
+  name: string;
+  blob: Blob;
+  previewUrl: string;
+  templateId?: string;
+  x: number;
+  y: number;
+  widthPercent: number;
+  opacity: number;
+  rotation: number;
+};
+
+type ImageOverlayDragState = {
+  pointerId: number;
+  layerId: string;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  previewWidth: number;
+  previewHeight: number;
+};
+
+const MAX_IMAGE_OVERLAY_LAYERS = 12;
+const BASE_IMAGE_PREVIEW_MAX_DIMENSION = 1200;
+const OVERLAY_PREVIEW_MAX_DIMENSION = 720;
+const OVERLAY_TEMPLATE_PREVIEW_MAX_DIMENSION = 280;
 
 type ImageOverlayEditorSession = {
   productId: string;
@@ -4962,13 +4994,93 @@ const deleteImageOverlayTemplate = async (id: string): Promise<void> => {
   }
 };
 
+type ResizedImagePreview = {
+  blob: Blob;
+  width: number;
+  height: number;
+};
+
 const loadImageElement = (source: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Không thể đọc dữ liệu ảnh để ghép"));
+    image.onerror = () => reject(new Error("Không thể đọc dữ liệu ảnh để tạo preview"));
     image.src = source;
   });
+
+const createResizedImagePreview = async (
+  sourceBlob: Blob,
+  maxDimension: number,
+): Promise<ResizedImagePreview> => {
+  let drawable: ImageBitmap | HTMLImageElement | null = null;
+  let bitmapToClose: ImageBitmap | null = null;
+  let temporaryUrl = "";
+  let canvas: HTMLCanvasElement | null = null;
+
+  try {
+    if (typeof createImageBitmap === "function") {
+      bitmapToClose = await createImageBitmap(sourceBlob);
+      drawable = bitmapToClose;
+    } else {
+      // Fallback for browsers without createImageBitmap; the temporary URL is
+      // released in finally even if image decoding fails.
+      temporaryUrl = URL.createObjectURL(sourceBlob);
+      drawable = await loadImageElement(temporaryUrl);
+    }
+
+    const width = bitmapToClose ? bitmapToClose.width : (drawable as HTMLImageElement).naturalWidth;
+    const height = bitmapToClose ? bitmapToClose.height : (drawable as HTMLImageElement).naturalHeight;
+    const scale = Math.min(1, maxDimension / Math.max(width, height));
+    if (scale >= 1) return { blob: sourceBlob, width, height };
+
+    canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    if (!context || !drawable) throw new Error("Không thể tạo preview ảnh");
+    context.drawImage(drawable, 0, 0, canvas.width, canvas.height);
+    const previewType = sourceBlob.type === "image/jpeg" ? "image/jpeg" : "image/png";
+    const previewBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas?.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("Không thể tạo preview ảnh")),
+        previewType,
+        previewType === "image/jpeg" ? 0.86 : undefined,
+      );
+    });
+    return { blob: previewBlob, width, height };
+  } finally {
+    if (bitmapToClose) bitmapToClose.close();
+    if (temporaryUrl) URL.revokeObjectURL(temporaryUrl);
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+};
+
+const createImageOverlayTemplatePreviews = async (
+  templates: StoredImageOverlayTemplate[],
+): Promise<LocalImageOverlayTemplatePreview[]> => {
+  const previews: LocalImageOverlayTemplatePreview[] = [];
+  try {
+    // Process one template at a time to avoid decoding many large images in parallel.
+    for (const template of templates) {
+      const preview = await createResizedImagePreview(
+        template.blob,
+        OVERLAY_TEMPLATE_PREVIEW_MAX_DIMENSION,
+      );
+      previews.push({
+        ...template,
+        previewBlob: preview.blob,
+        previewUrl: URL.createObjectURL(preview.blob),
+      });
+    }
+    return previews;
+  } catch (error) {
+    previews.forEach((template) => URL.revokeObjectURL(template.previewUrl));
+    throw error;
+  }
+};
 
 const clearAllBrowserLocalData = async (): Promise<void> => {
   if (typeof window === "undefined") return;
@@ -6071,11 +6183,12 @@ export default function LocalPage({
   const [albumSource, setAlbumSource] = useState<AlbumSource | null>(null);
   const [imageOverlayEditor, setImageOverlayEditor] =
     useState<ImageOverlayEditorSession | null>(null);
-  const [selectedOverlayBlob, setSelectedOverlayBlob] = useState<Blob | null>(null);
-  const [selectedOverlayUrl, setSelectedOverlayUrl] = useState<string>("");
-  const [selectedOverlayName, setSelectedOverlayName] = useState<string>("");
-  const [imageOverlayX, setImageOverlayX] = useState<number>(50);
-  const [imageOverlayY, setImageOverlayY] = useState<number>(50);
+  const [imageOverlayLayers, setImageOverlayLayers] = useState<ImageOverlayLayer[]>([]);
+  const [selectedImageOverlayLayerId, setSelectedImageOverlayLayerId] = useState<string>("");
+  const selectedImageOverlayLayer =
+    imageOverlayLayers.find((layer) => layer.id === selectedImageOverlayLayerId) ??
+    imageOverlayLayers[0] ??
+    null;
   const [imageOverlayPreviewZoom, setImageOverlayPreviewZoom] = useState<number>(1);
   const imageOverlayPreviewRef = useRef<HTMLDivElement | null>(null);
   const imageOverlayViewportRef = useRef<HTMLDivElement | null>(null);
@@ -6103,19 +6216,17 @@ export default function LocalPage({
     imageOverlayViewportSize.height,
     imageOverlayPreviewHeight + 24,
   );
-  const imageOverlayDragRef = useRef<{
+  const imageOverlayDragRef = useRef<ImageOverlayDragState | null>(null);
+  const imageOverlayViewportPanRef = useRef<{
     pointerId: number;
     startClientX: number;
     startClientY: number;
-    startX: number;
-    startY: number;
-    previewWidth: number;
-    previewHeight: number;
+    startScrollLeft: number;
+    startScrollTop: number;
   } | null>(null);
   const [isImageOverlayDragging, setIsImageOverlayDragging] = useState<boolean>(false);
-  const [imageOverlayWidthPercent, setImageOverlayWidthPercent] = useState<number>(25);
-  const [imageOverlayOpacity, setImageOverlayOpacity] = useState<number>(100);
-  const [imageOverlayRotation, setImageOverlayRotation] = useState<number>(0);
+  const [isImageOverlayViewportPanning, setIsImageOverlayViewportPanning] =
+    useState<boolean>(false);
   const [imageOverlayTemplateName, setImageOverlayTemplateName] = useState<string>("");
   const [localOverlayTemplates, setLocalOverlayTemplates] =
     useState<LocalImageOverlayTemplatePreview[]>([]);
@@ -6138,13 +6249,6 @@ export default function LocalPage({
       if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
     };
   }, [imageOverlayEditor?.baseImageUrl]);
-
-  useEffect(() => {
-    const url = selectedOverlayUrl;
-    return () => {
-      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
-    };
-  }, [selectedOverlayUrl]);
 
   useEffect(() => {
     const urls = localOverlayTemplates.map((template) => template.previewUrl);
@@ -6255,11 +6359,8 @@ export default function LocalPage({
     let cancelled = false;
     setIsOverlayTemplatesLoading(true);
     void readImageOverlayTemplates()
-      .then((templates) => {
-        const previews = templates.map((template) => ({
-          ...template,
-          previewUrl: URL.createObjectURL(template.blob),
-        }));
+      .then((templates) => createImageOverlayTemplatePreviews(templates))
+      .then((previews) => {
         if (cancelled) {
           previews.forEach((template) => URL.revokeObjectURL(template.previewUrl));
           return;
@@ -10192,9 +10293,13 @@ export default function LocalPage({
 
       if (closingModal === "imageOverlayEditor") {
         setImageOverlayEditor(null);
-        setSelectedOverlayBlob(null);
-        setSelectedOverlayUrl("");
-        setSelectedOverlayName("");
+        imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
+        setImageOverlayLayers([]);
+        setSelectedImageOverlayLayerId("");
+        imageOverlayDragRef.current = null;
+        imageOverlayViewportPanRef.current = null;
+        setIsImageOverlayDragging(false);
+        setIsImageOverlayViewportPanning(false);
         setLocalOverlayTemplates([]);
       }
 
@@ -10246,9 +10351,15 @@ export default function LocalPage({
     setSelectedAlbumImageIds(new Set<string>());
     setAlbumSource(null);
     setImageOverlayEditor(null);
-    setSelectedOverlayBlob(null);
-    setSelectedOverlayUrl("");
-    setSelectedOverlayName("");
+    imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
+    setImageOverlayLayers([]);
+    setSelectedImageOverlayLayerId("");
+    imageOverlayDragRef.current = null;
+    imageOverlayViewportPanRef.current = null;
+    setIsImageOverlayDragging(false);
+    setIsImageOverlayViewportPanning(false);
+    setImageOverlayTemplateName("");
+    setImageOverlayPreviewZoom(1);
     setLocalOverlayTemplates([]);
     setImageDownloadCategory("all");
     setLocalImageView("active");
@@ -12169,10 +12280,7 @@ export default function LocalPage({
 
   const refreshLocalImageOverlayTemplates = async (): Promise<void> => {
     const templates = await readImageOverlayTemplates();
-    const previews = templates.map((template) => ({
-      ...template,
-      previewUrl: URL.createObjectURL(template.blob),
-    }));
+    const previews = await createImageOverlayTemplatePreviews(templates);
     setLocalOverlayTemplates(previews);
   };
 
@@ -12184,15 +12292,9 @@ export default function LocalPage({
     const viewportBounds = viewport.getBoundingClientRect();
     const previewBounds = preview.getBoundingClientRect();
     const previewCenterX =
-      viewport.scrollLeft +
-      previewBounds.left -
-      viewportBounds.left +
-      previewBounds.width / 2;
+      viewport.scrollLeft + previewBounds.left - viewportBounds.left + previewBounds.width / 2;
     const previewCenterY =
-      viewport.scrollTop +
-      previewBounds.top -
-      viewportBounds.top +
-      previewBounds.height / 2;
+      viewport.scrollTop + previewBounds.top - viewportBounds.top + previewBounds.height / 2;
 
     viewport.scrollTo({
       left: Math.max(0, previewCenterX - viewport.clientWidth / 2),
@@ -12202,10 +12304,64 @@ export default function LocalPage({
   };
 
   const scheduleImageOverlayPreviewCenter = (): void => {
-    // Wait for React to commit the new zoomed dimensions before measuring.
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(centerImageOverlayPreviewInViewport);
     });
+  };
+
+  const handleImageOverlayViewportPointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+
+    // Dragging an overlay layer moves that layer. Dragging the empty preview
+    // area pans the zoomed canvas, so users do not need the X/Y scrollbars.
+    const target = event.target as (EventTarget & { closest?: (selector: string) => Element | null }) | null;
+    if (target?.closest?.("[data-overlay-layer-id]")) return;
+
+    const viewport = imageOverlayViewportRef.current;
+    if (!viewport) return;
+
+    const canPanHorizontally = viewport.scrollWidth > viewport.clientWidth + 1;
+    const canPanVertically = viewport.scrollHeight > viewport.clientHeight + 1;
+    if (!canPanHorizontally && !canPanVertically) return;
+
+    event.preventDefault();
+    viewport.setPointerCapture(event.pointerId);
+    imageOverlayViewportPanRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+    };
+    setIsImageOverlayViewportPanning(true);
+  };
+
+  const handleImageOverlayViewportPointerMove = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    const pan = imageOverlayViewportPanRef.current;
+    const viewport = imageOverlayViewportRef.current;
+    if (!pan || !viewport || pan.pointerId !== event.pointerId) return;
+
+    event.preventDefault();
+    viewport.scrollLeft = pan.startScrollLeft - (event.clientX - pan.startClientX);
+    viewport.scrollTop = pan.startScrollTop - (event.clientY - pan.startClientY);
+  };
+
+  const handleImageOverlayViewportPointerUp = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    const pan = imageOverlayViewportPanRef.current;
+    const viewport = imageOverlayViewportRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+
+    imageOverlayViewportPanRef.current = null;
+    if (viewport?.hasPointerCapture(event.pointerId)) {
+      viewport.releasePointerCapture(event.pointerId);
+    }
+    setIsImageOverlayViewportPanning(false);
   };
 
   const setImageOverlayPreviewZoomAndCenter = (nextZoom: number): void => {
@@ -12213,24 +12369,88 @@ export default function LocalPage({
     scheduleImageOverlayPreviewCenter();
   };
 
+  const updateSelectedImageOverlayLayer = (
+    patch: Partial<Pick<ImageOverlayLayer, "x" | "y" | "widthPercent" | "opacity" | "rotation">>,
+  ): void => {
+    const layerId = selectedImageOverlayLayerId;
+    if (!layerId) return;
+    setImageOverlayLayers((current) => current.map((layer) =>
+      layer.id === layerId ? { ...layer, ...patch } : layer,
+    ));
+  };
+
+  const addImageOverlayLayer = async (
+    blob: Blob,
+    name: string,
+    templateId?: string,
+  ): Promise<void> => {
+    if (imageOverlayLayers.length >= MAX_IMAGE_OVERLAY_LAYERS) {
+      Toastify(`Tối đa ${MAX_IMAGE_OVERLAY_LAYERS} ảnh phủ mỗi lần ghép để hạn chế RAM`, 300);
+      return;
+    }
+
+    let previewUrl = "";
+    try {
+      const previewData = await createResizedImagePreview(blob, OVERLAY_PREVIEW_MAX_DIMENSION);
+      previewUrl = URL.createObjectURL(previewData.blob);
+      const layer: ImageOverlayLayer = {
+        id: crypto.randomUUID(),
+        name,
+        blob,
+        previewUrl,
+        ...(templateId ? { templateId } : {}),
+        x: 50,
+        y: 50,
+        widthPercent: 25,
+        opacity: 100,
+        rotation: 0,
+      };
+      setImageOverlayLayers((current) => [...current, layer]);
+      setSelectedImageOverlayLayerId(layer.id);
+      setImageOverlayTemplateName(name.replace(/\.[^.]+$/u, ""));
+    } catch (error) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      Toastify(error instanceof Error ? error.message : "Không thể mở ảnh phủ", 400);
+    }
+  };
+
+  const removeImageOverlayLayer = (layerId: string): void => {
+    const layer = imageOverlayLayers.find((item) => item.id === layerId);
+    if (!layer) return;
+    URL.revokeObjectURL(layer.previewUrl);
+    const nextLayers = imageOverlayLayers.filter((item) => item.id !== layerId);
+    setImageOverlayLayers(nextLayers);
+    if (selectedImageOverlayLayerId === layerId) {
+      setSelectedImageOverlayLayerId(nextLayers[nextLayers.length - 1]?.id ?? "");
+    }
+    if (imageOverlayDragRef.current?.layerId === layerId) {
+      imageOverlayDragRef.current = null;
+      setIsImageOverlayDragging(false);
+    }
+  };
+
   const handleImageOverlayPointerDown = (
     event: ReactPointerEvent<HTMLImageElement>,
+    layer: ImageOverlayLayer,
   ): void => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     const preview = imageOverlayPreviewRef.current;
-    if (!preview || !selectedOverlayUrl) return;
-
+    if (!preview) return;
     const bounds = preview.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return;
 
     event.preventDefault();
+    setSelectedImageOverlayLayerId(layer.id);
     event.currentTarget.setPointerCapture(event.pointerId);
     imageOverlayDragRef.current = {
       pointerId: event.pointerId,
+      layerId: layer.id,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startX: imageOverlayX,
-      startY: imageOverlayY,
+      startX: layer.x,
+      startY: layer.y,
+      currentX: layer.x,
+      currentY: layer.y,
       previewWidth: bounds.width,
       previewHeight: bounds.height,
     };
@@ -12244,10 +12464,16 @@ export default function LocalPage({
     if (!drag || drag.pointerId !== event.pointerId) return;
 
     event.preventDefault();
-    const deltaXPercent = ((event.clientX - drag.startClientX) / drag.previewWidth) * 100;
-    const deltaYPercent = ((event.clientY - drag.startClientY) / drag.previewHeight) * 100;
-    setImageOverlayX(Math.min(100, Math.max(0, drag.startX + deltaXPercent)));
-    setImageOverlayY(Math.min(100, Math.max(0, drag.startY + deltaYPercent)));
+    // Move the active DOM node directly during pointer motion. React state is
+    // committed once on pointer-up instead of rerendering every layer per event.
+    drag.currentX = Math.min(100, Math.max(0,
+      drag.startX + ((event.clientX - drag.startClientX) / drag.previewWidth) * 100,
+    ));
+    drag.currentY = Math.min(100, Math.max(0,
+      drag.startY + ((event.clientY - drag.startClientY) / drag.previewHeight) * 100,
+    ));
+    event.currentTarget.style.left = `${drag.currentX}%`;
+    event.currentTarget.style.top = `${drag.currentY}%`;
   };
 
   const handleImageOverlayPointerUp = (
@@ -12260,6 +12486,11 @@ export default function LocalPage({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    setImageOverlayLayers((current) => current.map((layer) =>
+      layer.id === drag.layerId
+        ? { ...layer, x: drag.currentX, y: drag.currentY }
+        : layer,
+    ));
     setIsImageOverlayDragging(false);
   };
 
@@ -12270,27 +12501,27 @@ export default function LocalPage({
     let previewUrl = "";
     try {
       const imageBlob = await getProductImageBlob(baseImage);
-      previewUrl = URL.createObjectURL(imageBlob);
-      const dimensions = await loadImageElement(previewUrl);
+      const previewData = await createResizedImagePreview(
+        imageBlob,
+        BASE_IMAGE_PREVIEW_MAX_DIMENSION,
+      );
+      previewUrl = URL.createObjectURL(previewData.blob);
+      imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
       setImageOverlayEditor({
         productId: source.productId,
         productTitle: source.title,
         baseImage,
         baseImageUrl: previewUrl,
-        width: dimensions.naturalWidth,
-        height: dimensions.naturalHeight,
+        width: previewData.width,
+        height: previewData.height,
       });
-      setSelectedOverlayBlob(null);
-      setSelectedOverlayUrl("");
-      setSelectedOverlayName("");
+      setImageOverlayLayers([]);
+      setSelectedImageOverlayLayerId("");
       imageOverlayDragRef.current = null;
+      imageOverlayViewportPanRef.current = null;
       setIsImageOverlayDragging(false);
-      setImageOverlayX(50);
-      setImageOverlayY(50);
+      setIsImageOverlayViewportPanning(false);
       setImageOverlayPreviewZoom(1);
-      setImageOverlayWidthPercent(25);
-      setImageOverlayOpacity(100);
-      setImageOverlayRotation(0);
       setImageOverlayTemplateName("");
       openModal("imageOverlayEditor");
     } catch (error) {
@@ -12305,35 +12536,42 @@ export default function LocalPage({
   const handleImageOverlayFileInput = (
     event: ChangeEvent<HTMLInputElement>,
   ): void => {
-    const file = event.currentTarget.files?.[0];
+    const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      Toastify("Vui lòng chọn file ảnh hợp lệ", 400);
+    if (files.length === 0) return;
+
+    const validFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (validFiles.length !== files.length) {
+      Toastify("Một số file bị bỏ qua vì không phải ảnh hợp lệ", 300);
+    }
+    const availableSlots = Math.max(0, MAX_IMAGE_OVERLAY_LAYERS - imageOverlayLayers.length);
+    if (availableSlots === 0) {
+      Toastify(`Đã đạt giới hạn ${MAX_IMAGE_OVERLAY_LAYERS} ảnh phủ để hạn chế RAM`, 300);
       return;
     }
+    if (validFiles.length > availableSlots) {
+      Toastify(`Chỉ thêm tối đa ${availableSlots} ảnh nữa trong lần ghép này`, 300);
+    }
 
-    const previewUrl = URL.createObjectURL(file);
-    setSelectedOverlayBlob(file);
-    setSelectedOverlayUrl(previewUrl);
-    setSelectedOverlayName(file.name);
-    setImageOverlayTemplateName(file.name.replace(/\.[^.]+$/u, ""));
+    void (async () => {
+      for (const file of validFiles.slice(0, availableSlots)) {
+        await addImageOverlayLayer(file, file.name);
+      }
+    })();
   };
 
-  const selectImageOverlayTemplate = (template: LocalImageOverlayTemplate): void => {
-    setSelectedOverlayBlob(template.blob);
-    setSelectedOverlayUrl(URL.createObjectURL(template.blob));
-    setSelectedOverlayName(template.name);
-    setImageOverlayTemplateName(template.name);
+  const selectImageOverlayTemplate = (template: LocalImageOverlayTemplatePreview): void => {
+    void addImageOverlayLayer(template.blob, template.name, template.id);
   };
 
   const saveSelectedImageAsLocalOverlayTemplate = async (): Promise<void> => {
-    if (!selectedOverlayBlob) {
+    const selectedLayer = selectedImageOverlayLayer;
+    if (!selectedLayer) {
       Toastify("Hãy chọn một ảnh phủ trước khi lưu mẫu", 300);
       return;
     }
 
-    const templateName = imageOverlayTemplateName.trim() || selectedOverlayName.trim();
+    const templateName = imageOverlayTemplateName.trim() || selectedLayer.name.trim();
     if (!templateName) {
       Toastify("Vui lòng nhập tên ảnh mẫu", 300);
       return;
@@ -12343,10 +12581,10 @@ export default function LocalPage({
       await writeImageOverlayTemplate({
         id: crypto.randomUUID(),
         name: templateName,
-        type: selectedOverlayBlob.type || "image/png",
-        size: selectedOverlayBlob.size,
+        type: selectedLayer.blob.type || "image/png",
+        size: selectedLayer.blob.size,
         createdAt: new Date().toISOString(),
-        blob: selectedOverlayBlob,
+        blob: selectedLayer.blob,
       });
       await refreshLocalImageOverlayTemplates();
       Toastify("Đã lưu ảnh phủ vào kho mẫu trên thiết bị này", 200);
@@ -12372,8 +12610,8 @@ export default function LocalPage({
   };
 
   const saveCompositedImageToProduct = async (): Promise<void> => {
-    if (!imageOverlayEditor || !selectedOverlayBlob || !selectedOverlayUrl) {
-      Toastify("Hãy chọn ảnh phủ trước khi lưu ảnh ghép", 300);
+    if (!imageOverlayEditor || imageOverlayLayers.length === 0) {
+      Toastify("Hãy thêm ít nhất một ảnh phủ trước khi lưu ảnh ghép", 300);
       return;
     }
     if (!requestWriteAccess()) return;
@@ -12388,44 +12626,63 @@ export default function LocalPage({
 
     setIsOverlayEditorBusy(true);
     let uploadedImage: ProductImage | null = null;
+    let canvas: HTMLCanvasElement | null = null;
     try {
-      const baseElement = await loadImageElement(imageOverlayEditor.baseImageUrl);
-      const overlayElement = await loadImageElement(selectedOverlayUrl);
-      const canvas = document.createElement("canvas");
-      canvas.width = baseElement.naturalWidth;
-      canvas.height = baseElement.naturalHeight;
+      // The editor only keeps downscaled thumbnails in the preview. Load the
+      // original base image and each source overlay only at export time.
+      const baseBlob = await getProductImageBlob(imageOverlayEditor.baseImage);
+      const baseBitmap = await createImageBitmap(baseBlob);
+      canvas = document.createElement("canvas");
+      canvas.width = baseBitmap.width;
+      canvas.height = baseBitmap.height;
 
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Trình duyệt không thể khởi tạo canvas ghép ảnh");
+      if (!context) {
+        baseBitmap.close();
+        throw new Error("Trình duyệt không thể khởi tạo canvas ghép ảnh");
+      }
+      context.drawImage(baseBitmap, 0, 0, canvas.width, canvas.height);
+      baseBitmap.close();
 
-      context.drawImage(baseElement, 0, 0, canvas.width, canvas.height);
+      // Draw one overlay bitmap at a time to keep temporary decoded memory low.
+      for (const layer of imageOverlayLayers) {
+        const overlayBitmap = await createImageBitmap(layer.blob);
+        try {
+          const overlayAspectRatio =
+            overlayBitmap.width / Math.max(overlayBitmap.height, 1);
+          const overlayWidth = Math.max(1, canvas.width * (layer.widthPercent / 100));
+          const overlayHeight = overlayWidth / Math.max(overlayAspectRatio, 0.0001);
+          const centerX = canvas.width * (layer.x / 100);
+          const centerY = canvas.height * (layer.y / 100);
 
-      const overlayAspectRatio =
-        overlayElement.naturalWidth / Math.max(overlayElement.naturalHeight, 1);
-      const overlayWidth = Math.max(1, canvas.width * (imageOverlayWidthPercent / 100));
-      const overlayHeight = overlayWidth / Math.max(overlayAspectRatio, 0.0001);
-      const centerX = canvas.width * (imageOverlayX / 100);
-      const centerY = canvas.height * (imageOverlayY / 100);
+          context.save();
+          context.globalAlpha = layer.opacity / 100;
+          context.translate(centerX, centerY);
+          context.rotate((layer.rotation * Math.PI) / 180);
+          context.drawImage(
+            overlayBitmap,
+            -overlayWidth / 2,
+            -overlayHeight / 2,
+            overlayWidth,
+            overlayHeight,
+          );
+          context.restore();
+        } finally {
+          overlayBitmap.close();
+        }
+      }
 
-      context.save();
-      context.globalAlpha = imageOverlayOpacity / 100;
-      context.translate(centerX, centerY);
-      context.rotate((imageOverlayRotation * Math.PI) / 180);
-      context.drawImage(
-        overlayElement,
-        -overlayWidth / 2,
-        -overlayHeight / 2,
-        overlayWidth,
-        overlayHeight,
-      );
-      context.restore();
-
+      const outputCanvas = canvas;
+      if (!outputCanvas) throw new Error("Canvas xuất ảnh chưa sẵn sàng");
       const outputBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => {
+        outputCanvas.toBlob((blob) => {
           if (blob) resolve(blob);
           else reject(new Error("Không thể xuất ảnh ghép"));
         }, "image/png");
       });
+      outputCanvas.width = 0;
+      outputCanvas.height = 0;
+      canvas = null;
 
       const baseName = imageOverlayEditor.baseImage.name.replace(/\.[^.]+$/u, "");
       const outputFile = new File(
@@ -12470,16 +12727,22 @@ export default function LocalPage({
           }
         : current);
       setSelectedAlbumImageId(uploadedImage.id);
+      imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
+      setImageOverlayLayers([]);
+      setSelectedImageOverlayLayerId("");
+      imageOverlayViewportPanRef.current = null;
+      setIsImageOverlayViewportPanning(false);
       setImageOverlayEditor(null);
-      setSelectedOverlayBlob(null);
-      setSelectedOverlayUrl("");
-      setSelectedOverlayName("");
       setLocalOverlayTemplates([]);
       setModalStack((current) => current[current.length - 1] === "imageOverlayEditor"
         ? current.slice(0, -1)
         : current.filter((modalName) => modalName !== "imageOverlayEditor"));
-      Toastify("Đã ghép ảnh và lưu thành ảnh mới vào sản phẩm", 200);
+      Toastify(`Đã ghép ${imageOverlayLayers.length} lớp ảnh và lưu thành ảnh mới`, 200);
     } catch (error) {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
       if (uploadedImage?.publicId) {
         await deleteUnattachedCloudinaryImages([uploadedImage.publicId]).catch(
           () => undefined,
@@ -17993,9 +18256,15 @@ export default function LocalPage({
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
                 <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px]">
                   <article className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full">
+                    <style>{`.image-overlay-preview-viewport { scrollbar-width: none; -ms-overflow-style: none; touch-action: none; user-select: none; } .image-overlay-preview-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }`}</style>
                     <div
                       ref={imageOverlayViewportRef}
-                      className="relative box-border flex min-h-0 min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable]"
+                      onPointerDown={handleImageOverlayViewportPointerDown}
+                      onPointerMove={handleImageOverlayViewportPointerMove}
+                      onPointerUp={handleImageOverlayViewportPointerUp}
+                      onPointerCancel={handleImageOverlayViewportPointerUp}
+                      onLostPointerCapture={handleImageOverlayViewportPointerUp}
+                      className={`image-overlay-preview-viewport relative box-border flex min-h-0 min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] ${isImageOverlayViewportPanning ? "cursor-grabbing" : "cursor-grab"}`}
                     >
                       <div
                         className="m-auto flex shrink-0 items-center justify-center"
@@ -18019,29 +18288,34 @@ export default function LocalPage({
                           draggable={false}
                           className="absolute inset-0 h-full w-full select-none object-fill"
                         />
-                        {selectedOverlayUrl ? (
+                        {imageOverlayLayers.length > 0 ? imageOverlayLayers.map((layer) => (
                           <img
-                            src={selectedOverlayUrl}
-                            alt={selectedOverlayName || "Ảnh phủ"}
+                            key={layer.id}
+                            data-overlay-layer-id={layer.id}
+                            src={layer.previewUrl}
+                            alt={layer.name}
                             draggable={false}
+                            onClick={() => setSelectedImageOverlayLayerId(layer.id)}
                             onDragStart={(event) => event.preventDefault()}
-                            onPointerDown={handleImageOverlayPointerDown}
+                            onPointerDown={(event) => handleImageOverlayPointerDown(event, layer)}
                             onPointerMove={handleImageOverlayPointerMove}
                             onPointerUp={handleImageOverlayPointerUp}
                             onPointerCancel={handleImageOverlayPointerUp}
-                            className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging ? "cursor-grabbing" : "cursor-grab"}`}
+                            className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging && imageOverlayDragRef.current?.layerId === layer.id ? "cursor-grabbing" : "cursor-grab"}`}
                             style={{
-                              left: `${imageOverlayX}%`,
-                              top: `${imageOverlayY}%`,
-                              width: `${imageOverlayWidthPercent}%`,
-                              opacity: imageOverlayOpacity / 100,
-                              transform: `translate(-50%, -50%) rotate(${imageOverlayRotation}deg)`,
+                              left: `${layer.x}%`,
+                              top: `${layer.y}%`,
+                              width: `${layer.widthPercent}%`,
+                              opacity: layer.opacity / 100,
+                              transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
                               transformOrigin: "center center",
+                              outline: selectedImageOverlayLayerId === layer.id ? "1px solid rgba(103,232,249,0.9)" : "none",
+                              outlineOffset: "2px",
                             }}
                           />
-                        ) : (
+                        )) : (
                           <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
-                            Chọn ảnh phủ hoặc ảnh mẫu ở phần điều khiển
+                            Chọn một hoặc nhiều ảnh phủ ở phần điều khiển
                           </div>
                         )}
                         </div>
@@ -18106,10 +18380,52 @@ export default function LocalPage({
                       <h3 className="text-[10px] font-black uppercase tracking-wide text-white">1. Chọn ảnh phủ</h3>
                       <label className="mt-2 flex w-full min-w-0 max-w-full box-border cursor-pointer flex-wrap items-center justify-center gap-2 border border-cyan-300/25 bg-cyan-300/[0.06] px-3 py-2.5 text-center text-[10px] font-black text-cyan-100 transition hover:bg-cyan-300/10">
                         <FiImage aria-hidden="true" className="h-3.5 w-3.5" />
-                        Chọn ảnh từ thiết bị
-                        <input type="file" accept="image/*" className="hidden" onChange={handleImageOverlayFileInput} />
+                        Chọn thêm ảnh phủ
+                        <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageOverlayFileInput} />
                       </label>
-                      <p className="mt-1.5 break-words text-[9px] text-slate-400">{selectedOverlayName || "Chưa chọn ảnh phủ"}</p>
+                      <div className="mt-2 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[9px] text-slate-400">
+                        <span>{imageOverlayLayers.length}/{MAX_IMAGE_OVERLAY_LAYERS} lớp ảnh</span>
+                        <span className="min-w-0 break-words">Chọn từng lớp để chỉnh riêng</span>
+                      </div>
+                      {imageOverlayLayers.length > 0 ? (
+                        <div className="mt-1.5 grid w-full min-w-0 max-w-full gap-1 overflow-x-hidden">
+                          {imageOverlayLayers.map((layer, index) => (
+                            <div key={layer.id} className={`flex w-full min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border ${selectedImageOverlayLayerId === layer.id ? "border-cyan-300/35 bg-cyan-300/[0.07]" : "border-white/10 bg-black/20"}`}>
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] px-2 py-1.5 text-left text-[9px] font-bold text-slate-200"
+                                title={layer.name}
+                                onClick={() => setSelectedImageOverlayLayerId(layer.id)}
+                              >{index + 1}. {layer.name}</button>
+                              <button type="button" title="Đưa lên trên" aria-label={`Đưa ${layer.name} lên trên`} disabled={index === imageOverlayLayers.length - 1} className="flex h-7 w-7 shrink-0 items-center justify-center text-[10px] text-slate-300 disabled:opacity-25" onClick={() => {
+                                setSelectedImageOverlayLayerId(layer.id);
+                                setImageOverlayLayers((current) => {
+                                  const at = current.findIndex((item) => item.id === layer.id);
+                                  if (at < 0 || at === current.length - 1) return current;
+                                  const next = [...current];
+                                  const [item] = next.splice(at, 1);
+                                  next.splice(at + 1, 0, item);
+                                  return next;
+                                });
+                              }}>↑</button>
+                              <button type="button" title="Đưa xuống dưới" aria-label={`Đưa ${layer.name} xuống dưới`} disabled={index === 0} className="flex h-7 w-7 shrink-0 items-center justify-center text-[10px] text-slate-300 disabled:opacity-25" onClick={() => {
+                                setSelectedImageOverlayLayerId(layer.id);
+                                setImageOverlayLayers((current) => {
+                                  const at = current.findIndex((item) => item.id === layer.id);
+                                  if (at <= 0) return current;
+                                  const next = [...current];
+                                  const [item] = next.splice(at, 1);
+                                  next.splice(at - 1, 0, item);
+                                  return next;
+                                });
+                              }}>↓</button>
+                              <button type="button" title="Gỡ ảnh phủ" aria-label={`Gỡ ${layer.name}`} className="flex h-7 w-7 shrink-0 items-center justify-center text-rose-200" onClick={() => removeImageOverlayLayer(layer.id)}><FiX aria-hidden="true" className="h-3 w-3" /></button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-1.5 text-[9px] text-slate-500">Chưa có ảnh phủ.</p>
+                      )}
                       <div className="mt-2 flex min-w-0 max-w-full gap-1.5">
                         <input
                           value={imageOverlayTemplateName}
@@ -18120,7 +18436,7 @@ export default function LocalPage({
                         />
                         <button
                           type="button"
-                          disabled={!selectedOverlayBlob}
+                          disabled={!selectedImageOverlayLayer}
                           className="shrink-0 border border-cyan-300/30 bg-cyan-300/[0.08] px-2 py-1.5 text-[9px] font-black text-cyan-100 disabled:opacity-40"
                           onClick={() => void saveSelectedImageAsLocalOverlayTemplate()}
                         >Lưu mẫu Local</button>
@@ -18129,38 +18445,46 @@ export default function LocalPage({
 
                     <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <h3 className="text-[10px] font-black uppercase tracking-wide text-white">2. Điều chỉnh ảnh phủ</h3>
+                        <div className="min-w-0">
+                          <h3 className="text-[10px] font-black uppercase tracking-wide text-white">2. Điều chỉnh ảnh phủ</h3>
+                          <p className="mt-0.5 truncate text-[8px] text-cyan-100/65">{selectedImageOverlayLayer?.name ?? "Chọn một lớp ảnh"}</p>
+                        </div>
                         <button
                           type="button"
-                          className="text-[9px] font-bold text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-white"
+                          disabled={!selectedImageOverlayLayer}
+                          className="shrink-0 text-[9px] font-bold text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-white disabled:opacity-30"
                           onClick={() => {
                             imageOverlayDragRef.current = null;
                             setIsImageOverlayDragging(false);
-                            setImageOverlayX(50);
-                            setImageOverlayY(50);
-                            setImageOverlayPreviewZoom(1);
-                            scheduleImageOverlayPreviewCenter();
-                            setImageOverlayWidthPercent(25);
-                            setImageOverlayOpacity(100);
-                            setImageOverlayRotation(0);
+                            updateSelectedImageOverlayLayer({
+                              x: 50,
+                              y: 50,
+                              widthPercent: 25,
+                              opacity: 100,
+                              rotation: 0,
+                            });
                           }}
                         >Đặt lại</button>
                       </div>
-                      <div className="space-y-2">
-                        <div className="text-right font-mono text-[8px] text-cyan-100/55">X {Math.round(imageOverlayX)}% · Y {Math.round(imageOverlayY)}%</div>
-                        <label className="block text-[9px] font-bold text-slate-300">
-                          Kích thước: {imageOverlayWidthPercent}% chiều ngang ảnh gốc
-                          <input type="range" min={5} max={100} value={imageOverlayWidthPercent} onChange={(event) => setImageOverlayWidthPercent(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
-                        </label>
-                        <label className="block text-[9px] font-bold text-slate-300">
-                          Độ đục: {imageOverlayOpacity}%
-                          <input type="range" min={10} max={100} value={imageOverlayOpacity} onChange={(event) => setImageOverlayOpacity(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
-                        </label>
-                        <label className="block text-[9px] font-bold text-slate-300">
-                          Xoay: {imageOverlayRotation}°
-                          <input type="range" min={-180} max={180} value={imageOverlayRotation} onChange={(event) => setImageOverlayRotation(Number(event.currentTarget.value))} className="mt-1 block w-full accent-cyan-300" />
-                        </label>
-                      </div>
+                      {selectedImageOverlayLayer ? (
+                        <div className="space-y-2">
+                          <div className="text-right font-mono text-[8px] text-cyan-100/55">X {Math.round(selectedImageOverlayLayer.x)}% · Y {Math.round(selectedImageOverlayLayer.y)}%</div>
+                          <label className="block text-[9px] font-bold text-slate-300">
+                            Kích thước: {selectedImageOverlayLayer.widthPercent}% chiều ngang ảnh gốc
+                            <input type="range" min={1} max={100} value={selectedImageOverlayLayer.widthPercent} onChange={(event) => updateSelectedImageOverlayLayer({ widthPercent: Number(event.currentTarget.value) })} className="mt-1 block w-full accent-cyan-300" />
+                          </label>
+                          <label className="block text-[9px] font-bold text-slate-300">
+                            Độ đục: {selectedImageOverlayLayer.opacity}%
+                            <input type="range" min={10} max={100} value={selectedImageOverlayLayer.opacity} onChange={(event) => updateSelectedImageOverlayLayer({ opacity: Number(event.currentTarget.value) })} className="mt-1 block w-full accent-cyan-300" />
+                          </label>
+                          <label className="block text-[9px] font-bold text-slate-300">
+                            Xoay: {selectedImageOverlayLayer.rotation}°
+                            <input type="range" min={-180} max={180} value={selectedImageOverlayLayer.rotation} onChange={(event) => updateSelectedImageOverlayLayer({ rotation: Number(event.currentTarget.value) })} className="mt-1 block w-full accent-cyan-300" />
+                          </label>
+                        </div>
+                      ) : (
+                        <p className="py-2 text-[9px] text-slate-500">Thêm ảnh phủ rồi chọn một lớp để chỉnh vị trí, kích thước và hiệu ứng riêng.</p>
+                      )}
                     </section>
 
                     <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
@@ -18176,8 +18500,8 @@ export default function LocalPage({
                             <div key={template.id} className="min-w-0 overflow-hidden rounded border border-white/10 bg-black/25">
                               <button
                                 type="button"
-                                className={`block w-full p-1 text-left transition ${selectedOverlayName === template.name ? "bg-cyan-300/10 ring-1 ring-inset ring-cyan-300/40" : "hover:bg-white/[0.04]"}`}
-                                title={`Dùng mẫu ${template.name}`}
+                                className={`block w-full p-1 text-left transition ${selectedImageOverlayLayer?.templateId === template.id ? "bg-cyan-300/10 ring-1 ring-inset ring-cyan-300/40" : "hover:bg-white/[0.04]"}`}
+                                title={`Thêm lớp ${template.name}`}
                                 onClick={() => selectImageOverlayTemplate(template)}
                               >
                                 <span className="flex aspect-square items-center justify-center overflow-hidden rounded bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:10px_10px] bg-[position:0_0,0_5px,5px_-5px,-5px_0px]">
@@ -18196,20 +18520,20 @@ export default function LocalPage({
                           ))}
                         </div>
                       ) : (
-                        <p className="py-2 text-[9px] leading-4 text-slate-500">Chưa có mẫu. Chọn ảnh phủ rồi bấm “Lưu mẫu Local” để tái sử dụng trên thiết bị này.</p>
+                        <p className="py-2 text-[9px] leading-4 text-slate-500">Chưa có mẫu. Chọn lớp ảnh rồi bấm “Lưu mẫu Local” để tái sử dụng trên thiết bị này.</p>
                       )}
                     </section>
 
                     <button
                       type="button"
-                      disabled={!selectedOverlayBlob || isOverlayEditorBusy}
+                      disabled={imageOverlayLayers.length === 0 || isOverlayEditorBusy}
                       className="flex items-center justify-center gap-2 border border-emerald-300/35 bg-emerald-300/10 px-3 py-3 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-40"
                       onClick={() => void saveCompositedImageToProduct()}
                     >
                       {isOverlayEditorBusy ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-100/30 border-t-emerald-100" /> : <FiCheckCircle aria-hidden="true" className="h-3.5 w-3.5" />}
                       {isOverlayEditorBusy ? "Đang ghép và lưu…" : "Lưu ảnh ghép vào sản phẩm"}
                     </button>
-                    <p className="text-[8px] leading-4 text-slate-500">Ảnh kết quả được upload lên Cloudinary và lưu thông tin vào MongoDB. Kho ảnh mẫu chỉ lưu trên trình duyệt/thiết bị hiện tại.</p>
+                    <p className="text-[8px] leading-4 text-slate-500">Tối đa {MAX_IMAGE_OVERLAY_LAYERS} lớp để hạn chế RAM. Preview dùng ảnh thu nhỏ; ảnh gốc được dùng khi xuất. Ảnh kết quả lưu vào sản phẩm, mẫu lưu trên thiết bị.</p>
                   </aside>
                 </section>
               ) : null}
