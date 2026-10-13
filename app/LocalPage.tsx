@@ -4112,7 +4112,10 @@ const normalizeImageExtension = (image: Pick<ProductImage, "type" | "name">): st
   return fromName || "img";
 };
 
-const createCloudinaryThumbnailUrl = (sourceUrl: string): string => {
+const createCloudinaryThumbnailUrl = (
+  sourceUrl: string,
+  requestedWidth = 640,
+): string => {
   try {
     const url = new URL(sourceUrl);
     const uploadPathMarker = "/image/upload/";
@@ -4124,9 +4127,10 @@ const createCloudinaryThumbnailUrl = (sourceUrl: string): string => {
       return sourceUrl;
     }
 
+    const width = Math.min(1920, Math.max(64, Math.round(requestedWidth)));
     url.pathname = url.pathname.replace(
       uploadPathMarker,
-      `${uploadPathMarker}f_auto,q_auto:good,c_limit,w_640,dpr_auto/`,
+      `${uploadPathMarker}f_auto,q_auto:good,c_limit,w_${width},dpr_auto/`,
     );
     return url.toString();
   } catch {
@@ -12716,15 +12720,15 @@ export default function LocalPage({
 
       setAlbumSource((current) => current && current.productId === nextProduct.id
         ? {
-            productId: nextProduct.id,
-            title: nextProduct.name,
-            description: nextProduct.description,
-            priceText: nextProduct.priceText,
-            contentType: nextProduct.contentType,
-            realEstateComment: nextProduct.realEstateComment,
-            images: nextProduct.images,
-            internalImages: nextProduct.internalImages,
-          }
+          productId: nextProduct.id,
+          title: nextProduct.name,
+          description: nextProduct.description,
+          priceText: nextProduct.priceText,
+          contentType: nextProduct.contentType,
+          realEstateComment: nextProduct.realEstateComment,
+          images: nextProduct.images,
+          internalImages: nextProduct.internalImages,
+        }
         : current);
       setSelectedAlbumImageId(uploadedImage.id);
       imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
@@ -12770,7 +12774,8 @@ export default function LocalPage({
 
     const firstImageId = allImages[0]?.id ?? "";
 
-    scheduleProductImageBlobCache(allImages);
+    // Full-resolution Blobs are loaded only when a share/download/edit action needs them.
+    // Opening the album should not prefetch every original image into memory/cache.
     setAlbumSource(source);
     setSelectedAlbumImageId(firstImageId);
     setSelectedAlbumImageIds(
@@ -17246,10 +17251,16 @@ export default function LocalPage({
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
                           {product.images[0] ? (
                             <img
-                              src={product.images[0].dataUrl}
+                              src={createCloudinaryThumbnailUrl(
+                                product.images[0].dataUrl,
+                                96,
+                              )}
                               alt=""
-                              width={64}
-                              height={64}
+                              width={96}
+                              height={96}
+                              loading="lazy"
+                              decoding="async"
+                              fetchPriority="low"
                               className="h-full w-full object-contain"
                             />
                           ) : (
@@ -17738,18 +17749,15 @@ export default function LocalPage({
                           <img
                             src={createCloudinaryThumbnailUrl(
                               product.images[0].dataUrl,
+                              480,
                             )}
                             alt={product.name}
-                            width={1200}
-                            height={1200}
+                            width={480}
+                            height={480}
                             loading={index < 4 ? "eager" : "lazy"}
                             decoding="async"
-                            onLoad={() =>
-                              scheduleProductImageBlobCache([
-                                product.images[0]!,
-                              ])
-                            }
-                            className={`h-full w-full object-contain transition glass duration-500 group-hover:scale-105 ${productDone ? "blur-[2px] grayscale opacity-40" : ""
+                            fetchPriority={index < 4 ? "high" : "low"}
+                            className={`h-full w-full object-contain transition glass duration-300 group-hover:scale-[1.02] ${productDone ? "blur-[2px] grayscale opacity-40" : ""
                               }`}
                           />
                         ) : (
@@ -18282,42 +18290,42 @@ export default function LocalPage({
                             height: `${imageOverlayPreviewHeight}px`,
                           }}
                         >
-                        <img
-                          src={imageOverlayEditor.baseImageUrl}
-                          alt={imageOverlayEditor.baseImage.name}
-                          draggable={false}
-                          className="absolute inset-0 h-full w-full select-none object-fill"
-                        />
-                        {imageOverlayLayers.length > 0 ? imageOverlayLayers.map((layer) => (
                           <img
-                            key={layer.id}
-                            data-overlay-layer-id={layer.id}
-                            src={layer.previewUrl}
-                            alt={layer.name}
+                            src={imageOverlayEditor.baseImageUrl}
+                            alt={imageOverlayEditor.baseImage.name}
                             draggable={false}
-                            onClick={() => setSelectedImageOverlayLayerId(layer.id)}
-                            onDragStart={(event) => event.preventDefault()}
-                            onPointerDown={(event) => handleImageOverlayPointerDown(event, layer)}
-                            onPointerMove={handleImageOverlayPointerMove}
-                            onPointerUp={handleImageOverlayPointerUp}
-                            onPointerCancel={handleImageOverlayPointerUp}
-                            className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging && imageOverlayDragRef.current?.layerId === layer.id ? "cursor-grabbing" : "cursor-grab"}`}
-                            style={{
-                              left: `${layer.x}%`,
-                              top: `${layer.y}%`,
-                              width: `${layer.widthPercent}%`,
-                              opacity: layer.opacity / 100,
-                              transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
-                              transformOrigin: "center center",
-                              outline: selectedImageOverlayLayerId === layer.id ? "1px solid rgba(103,232,249,0.9)" : "none",
-                              outlineOffset: "2px",
-                            }}
+                            className="absolute inset-0 h-full w-full select-none object-fill"
                           />
-                        )) : (
-                          <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
-                            Chọn một hoặc nhiều ảnh phủ ở phần điều khiển
-                          </div>
-                        )}
+                          {imageOverlayLayers.length > 0 ? imageOverlayLayers.map((layer) => (
+                            <img
+                              key={layer.id}
+                              data-overlay-layer-id={layer.id}
+                              src={layer.previewUrl}
+                              alt={layer.name}
+                              draggable={false}
+                              onClick={() => setSelectedImageOverlayLayerId(layer.id)}
+                              onDragStart={(event) => event.preventDefault()}
+                              onPointerDown={(event) => handleImageOverlayPointerDown(event, layer)}
+                              onPointerMove={handleImageOverlayPointerMove}
+                              onPointerUp={handleImageOverlayPointerUp}
+                              onPointerCancel={handleImageOverlayPointerUp}
+                              className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging && imageOverlayDragRef.current?.layerId === layer.id ? "cursor-grabbing" : "cursor-grab"}`}
+                              style={{
+                                left: `${layer.x}%`,
+                                top: `${layer.y}%`,
+                                width: `${layer.widthPercent}%`,
+                                opacity: layer.opacity / 100,
+                                transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
+                                transformOrigin: "center center",
+                                outline: selectedImageOverlayLayerId === layer.id ? "1px solid rgba(103,232,249,0.9)" : "none",
+                                outlineOffset: "2px",
+                              }}
+                            />
+                          )) : (
+                            <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
+                              Chọn một hoặc nhiều ảnh phủ ở phần điều khiển
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -18954,8 +18962,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                    : "border-white/5 bg-white/[0.02] text-slate-500"
+                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                  : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
@@ -20350,12 +20358,16 @@ export default function LocalPage({
                                         }
                                       >
                                         {assignedProduct?.images[0] ? (<img
-                                          src={
-                                            assignedProduct.images[0].dataUrl
-                                          }
+                                          src={createCloudinaryThumbnailUrl(
+                                            assignedProduct.images[0].dataUrl,
+                                            240,
+                                          )}
                                           alt={assignedProduct.name}
-                                          width={1200}
-                                          height={1200}
+                                          width={240}
+                                          height={240}
+                                          loading="lazy"
+                                          decoding="async"
+                                          fetchPriority="low"
                                           className="h-full w-full object-contain"
                                         />
                                         ) : (
@@ -20522,10 +20534,16 @@ export default function LocalPage({
                                   }}
                                 >
                                   {product.images[0] ? (<img
-                                    src={product.images[0].dataUrl}
+                                    src={createCloudinaryThumbnailUrl(
+                                      product.images[0].dataUrl,
+                                      240,
+                                    )}
                                     alt={product.name}
-                                    width={1200}
-                                    height={1200}
+                                    width={240}
+                                    height={240}
+                                    loading="lazy"
+                                    decoding="async"
+                                    fetchPriority="low"
                                     className="h-full w-full object-contain"
                                   />
                                   ) : (
@@ -22122,10 +22140,16 @@ export default function LocalPage({
                         }
                       >
                         {selectedAssignedSlot.product.images[0] ? (<img
-                          src={selectedAssignedSlot.product.images[0].dataUrl}
+                          src={createCloudinaryThumbnailUrl(
+                            selectedAssignedSlot.product.images[0].dataUrl,
+                            320,
+                          )}
                           alt={selectedAssignedSlot.product.name}
-                          width={1200}
-                          height={1200}
+                          width={320}
+                          height={320}
+                          loading="lazy"
+                          decoding="async"
+                          fetchPriority="low"
                           className="h-full w-full object-contain"
                         />
                         ) : (
@@ -22162,10 +22186,16 @@ export default function LocalPage({
                                   })
                                 }
                               > <img
-                                  src={image.dataUrl}
+                                  src={createCloudinaryThumbnailUrl(
+                                    image.dataUrl,
+                                    240,
+                                  )}
                                   alt={image.name}
-                                  width={1200}
-                                  height={1200}
+                                  width={240}
+                                  height={240}
+                                  loading="lazy"
+                                  decoding="async"
+                                  fetchPriority="low"
                                   className="h-full w-full object-contain"
                                 />
                               </button>
@@ -22474,11 +22504,17 @@ export default function LocalPage({
                             aria-label="Mở ảnh toàn màn hình"
                           >
                             <img
-                              src={selectedAlbumImage.dataUrl}
+                              src={createCloudinaryThumbnailUrl(
+                                selectedAlbumImage.dataUrl,
+                                1280,
+                              )}
                               alt={selectedAlbumImage.name}
-                              width={1600}
-                              height={1600}
-                              className="block h-auto max-h-full w-auto max-w-full object-contain transition duration-300 group-hover:scale-[1.01]"
+                              width={1280}
+                              height={1280}
+                              loading="eager"
+                              decoding="async"
+                              fetchPriority="high"
+                              className="block h-auto max-h-full w-auto max-w-full object-contain"
                             />
                             <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 border border-white/10 bg-black/60 px-2 py-1 text-[9px] font-black text-slate-200 opacity-0 backdrop-blur transition duration-200 group-hover:opacity-100">
                               Bấm để xem toàn màn hình
@@ -22526,11 +22562,14 @@ export default function LocalPage({
                             title={`${internal ? "Ảnh nội bộ" : "Ảnh chính"} ${index + 1}`}
                           >
                             <img
-                              src={image.dataUrl}
+                              src={createCloudinaryThumbnailUrl(image.dataUrl, 240)}
                               alt={image.name}
-                              width={1200}
-                              height={1200}
-                              className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                              width={240}
+                              height={240}
+                              loading="lazy"
+                              decoding="async"
+                              fetchPriority="low"
+                              className="h-full w-full object-cover"
                             />
                             <span
                               className={`absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-black ${active
@@ -22591,6 +22630,9 @@ export default function LocalPage({
                   src={albumImages[albumLightboxIndex].dataUrl}
                   alt={albumImages[albumLightboxIndex].name}
                   draggable={false}
+                  loading="eager"
+                  decoding="async"
+                  fetchPriority="high"
                   className="block h-dvh w-dvw object-contain will-change-transform xl:transition-transform xl:duration-200"
                   style={{
                     transform:
