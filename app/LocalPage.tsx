@@ -52,8 +52,6 @@ import {
   FiChevronLeft,
   FiChevronRight,
 } from "react-icons/fi";
-import { FaFacebookF, FaTiktok } from "react-icons/fa6";
-import { SiZalo } from "react-icons/si";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
@@ -917,7 +915,6 @@ type NativeShareNavigator = Navigator & {
 };
 
 type ShareContentMode = "post" | "comment" | "imagesOnly";
-type DirectImageApp = "Facebook" | "TikTok" | "Zalo";
 
 type ShareDialogStep = "share" | "facebookGroup";
 
@@ -12723,15 +12720,15 @@ export default function LocalPage({
 
       setAlbumSource((current) => current && current.productId === nextProduct.id
         ? {
-            productId: nextProduct.id,
-            title: nextProduct.name,
-            description: nextProduct.description,
-            priceText: nextProduct.priceText,
-            contentType: nextProduct.contentType,
-            realEstateComment: nextProduct.realEstateComment,
-            images: nextProduct.images,
-            internalImages: nextProduct.internalImages,
-          }
+          productId: nextProduct.id,
+          title: nextProduct.name,
+          description: nextProduct.description,
+          priceText: nextProduct.priceText,
+          contentType: nextProduct.contentType,
+          realEstateComment: nextProduct.realEstateComment,
+          images: nextProduct.images,
+          internalImages: nextProduct.internalImages,
+        }
         : current);
       setSelectedAlbumImageId(uploadedImage.id);
       imageOverlayLayers.forEach((layer) => URL.revokeObjectURL(layer.previewUrl));
@@ -12908,58 +12905,6 @@ export default function LocalPage({
       product.realEstateComment,
       selectedContactId,
     );
-  };
-
-  const handleMobileSocialImageShare = async (
-    app: DirectImageApp,
-  ): Promise<void> => {
-    if (isShareExecuting || !pendingShare) return;
-
-    // Social shortcut buttons are mobile-only and always share main images only.
-    // Never include internal images and never copy/download text or image files here.
-    if (!window.matchMedia("(max-width: 767px)").matches) return;
-
-    const images = pendingShare.images;
-    if (images.length === 0) {
-      Toastify("Chưa có ảnh chính để chia sẻ", 300);
-      return;
-    }
-
-    const shareNavigator = getNativeShareNavigator();
-    if (!shareNavigator?.share) {
-      Toastify("Trình duyệt này chưa hỗ trợ Share Sheet với ảnh", 400);
-      return;
-    }
-
-    setIsShareExecuting(true);
-    try {
-      const files = await createShareFiles(images);
-      if (files.length === 0) {
-        Toastify("Chưa có ảnh chính để chia sẻ", 300);
-        return;
-      }
-
-      const shareData: NativeShareData = { files };
-      const canShareFiles = shareNavigator.canShare?.(shareData) ?? true;
-      if (!canShareFiles) {
-        Toastify("Thiết bị không hỗ trợ chia sẻ các ảnh đã chọn", 400);
-        return;
-      }
-
-      await shareNavigator.share(shareData);
-      Toastify(
-        `Đã mở Share Sheet với ${files.length} ảnh chính. Chọn ${app} trong danh sách ứng dụng để tiếp tục.`,
-        200,
-      );
-    } catch (error: unknown) {
-      if (isAbortError(error)) return;
-      const message = error instanceof Error
-        ? error.message
-        : "Không thể chia sẻ ảnh";
-      Toastify(`Không thể mở Share Sheet: ${message}`, 400);
-    } finally {
-      setIsShareExecuting(false);
-    }
   };
 
   const handleShareSelectedAlbumImages = (): void => {
@@ -18345,42 +18290,42 @@ export default function LocalPage({
                             height: `${imageOverlayPreviewHeight}px`,
                           }}
                         >
-                        <img
-                          src={imageOverlayEditor.baseImageUrl}
-                          alt={imageOverlayEditor.baseImage.name}
-                          draggable={false}
-                          className="absolute inset-0 h-full w-full select-none object-fill"
-                        />
-                        {imageOverlayLayers.length > 0 ? imageOverlayLayers.map((layer) => (
                           <img
-                            key={layer.id}
-                            data-overlay-layer-id={layer.id}
-                            src={layer.previewUrl}
-                            alt={layer.name}
+                            src={imageOverlayEditor.baseImageUrl}
+                            alt={imageOverlayEditor.baseImage.name}
                             draggable={false}
-                            onClick={() => setSelectedImageOverlayLayerId(layer.id)}
-                            onDragStart={(event) => event.preventDefault()}
-                            onPointerDown={(event) => handleImageOverlayPointerDown(event, layer)}
-                            onPointerMove={handleImageOverlayPointerMove}
-                            onPointerUp={handleImageOverlayPointerUp}
-                            onPointerCancel={handleImageOverlayPointerUp}
-                            className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging && imageOverlayDragRef.current?.layerId === layer.id ? "cursor-grabbing" : "cursor-grab"}`}
-                            style={{
-                              left: `${layer.x}%`,
-                              top: `${layer.y}%`,
-                              width: `${layer.widthPercent}%`,
-                              opacity: layer.opacity / 100,
-                              transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
-                              transformOrigin: "center center",
-                              outline: selectedImageOverlayLayerId === layer.id ? "1px solid rgba(103,232,249,0.9)" : "none",
-                              outlineOffset: "2px",
-                            }}
+                            className="absolute inset-0 h-full w-full select-none object-fill"
                           />
-                        )) : (
-                          <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
-                            Chọn một hoặc nhiều ảnh phủ ở phần điều khiển
-                          </div>
-                        )}
+                          {imageOverlayLayers.length > 0 ? imageOverlayLayers.map((layer) => (
+                            <img
+                              key={layer.id}
+                              data-overlay-layer-id={layer.id}
+                              src={layer.previewUrl}
+                              alt={layer.name}
+                              draggable={false}
+                              onClick={() => setSelectedImageOverlayLayerId(layer.id)}
+                              onDragStart={(event) => event.preventDefault()}
+                              onPointerDown={(event) => handleImageOverlayPointerDown(event, layer)}
+                              onPointerMove={handleImageOverlayPointerMove}
+                              onPointerUp={handleImageOverlayPointerUp}
+                              onPointerCancel={handleImageOverlayPointerUp}
+                              className={`absolute max-w-none select-none touch-none ${isImageOverlayDragging && imageOverlayDragRef.current?.layerId === layer.id ? "cursor-grabbing" : "cursor-grab"}`}
+                              style={{
+                                left: `${layer.x}%`,
+                                top: `${layer.y}%`,
+                                width: `${layer.widthPercent}%`,
+                                opacity: layer.opacity / 100,
+                                transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,
+                                transformOrigin: "center center",
+                                outline: selectedImageOverlayLayerId === layer.id ? "1px solid rgba(103,232,249,0.9)" : "none",
+                                outlineOffset: "2px",
+                              }}
+                            />
+                          )) : (
+                            <div className="absolute inset-x-3 bottom-3 rounded border border-white/20 bg-black/70 px-2 py-2 text-center text-[10px] font-bold text-white/80 backdrop-blur">
+                              Chọn một hoặc nhiều ảnh phủ ở phần điều khiển
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -19017,8 +18962,8 @@ export default function LocalPage({
                               <label
                                 key={category.name}
                                 className={`flex cursor-pointer items-center justify-between gap-2 border px-2.5 py-2 transition ${isEnabled
-                                    ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
-                                    : "border-white/5 bg-white/[0.02] text-slate-500"
+                                  ? "border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-50"
+                                  : "border-white/5 bg-white/[0.02] text-slate-500"
                                   }`}
                               >
                                 <span className="min-w-0">
@@ -22653,7 +22598,6 @@ export default function LocalPage({
                         );
                       })}
                     </div>
-
                   </aside>
                 </section>
               ) : null}
@@ -23249,41 +23193,6 @@ export default function LocalPage({
                   >
                     Chỉ hình ảnh
                   </button>
-                  <div className="col-span-2 hidden grid-cols-3 gap-1.5 max-[767px]:grid">
-                    <button
-                      type="button"
-                      disabled={isShareExecuting || pendingShare.images.length === 0}
-                      className="flex min-w-0 min-h-10 items-center justify-center gap-1.5 rounded-md border border-[#1877f2]/40 bg-[#1877f2]/10 px-1.5 py-2 text-[10px] font-bold text-blue-100 transition hover:bg-[#1877f2]/20 active:scale-[0.98] disabled:cursor-wait disabled:opacity-40"
-                      onClick={() => void handleMobileSocialImageShare("Facebook")}
-                      title="Mở Share Sheet để chọn Facebook · chỉ ảnh chính"
-                      aria-label="Chia sẻ ảnh chính qua Share Sheet để chọn Facebook"
-                    >
-                      <FaFacebookF aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">Facebook</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isShareExecuting || pendingShare.images.length === 0}
-                      className="flex min-w-0 min-h-10 items-center justify-center gap-1.5 rounded-md border border-white/15 bg-white/[0.04] px-1.5 py-2 text-[10px] font-bold text-slate-100 transition hover:bg-white/[0.09] active:scale-[0.98] disabled:cursor-wait disabled:opacity-40"
-                      onClick={() => void handleMobileSocialImageShare("TikTok")}
-                      title="Mở Share Sheet để chọn TikTok · chỉ ảnh chính"
-                      aria-label="Chia sẻ ảnh chính qua Share Sheet để chọn TikTok"
-                    >
-                      <FaTiktok aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">TikTok</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isShareExecuting || pendingShare.images.length === 0}
-                      className="flex min-w-0 min-h-10 items-center justify-center gap-1.5 rounded-md border border-sky-300/30 bg-sky-300/[0.08] px-1.5 py-2 text-[10px] font-bold text-sky-100 transition hover:bg-sky-300/[0.14] active:scale-[0.98] disabled:cursor-wait disabled:opacity-40"
-                      onClick={() => void handleMobileSocialImageShare("Zalo")}
-                      title="Mở Share Sheet để chọn Zalo · chỉ ảnh chính"
-                      aria-label="Chia sẻ ảnh chính qua Share Sheet để chọn Zalo"
-                    >
-                      <SiZalo aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">Zalo</span>
-                    </button>
-                  </div>
                   <button
                     type="button"
                     disabled={isShareExecuting}
