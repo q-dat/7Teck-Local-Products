@@ -6229,10 +6229,9 @@ export default function LocalPage({
     if (activeModal !== "imageOverlayEditor" || !imageOverlayEditor) return;
     if (!isMobileAlbumViewport()) return;
 
-    // Mobile starts in fit-to-frame mode each time an image is opened.
-    // A zoom level of 100% means the image uses the largest dimensions that
-    // fit entirely inside the measured preview viewport; zoom controls remain
-    // available after the editor has opened.
+    // Mobile always opens in fit-to-frame mode. Preview zoom controls are
+    // hidden on mobile, and the viewport has a fixed flex layout so scrolling
+    // the zoomable canvas cannot increase the modal/page height.
     setImageOverlayPreviewZoom(1);
 
     let secondFrame: number | null = null;
@@ -17989,14 +17988,14 @@ export default function LocalPage({
             </div>
 
             <div
-              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" ? "overflow-hidden" : activeModal === "imageOverlayEditor" ? "overflow-y-auto xl:overflow-hidden" : "overflow-y-auto"}`}
+              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" || activeModal === "imageOverlayEditor" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
-                <section className="grid min-h-full grid-cols-1 gap-2 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <article className="flex min-h-[55dvh] min-w-0 flex-col gap-1.5 rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full xl:min-h-0">
+                <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px]">
+                  <article className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full">
                     <div
                       ref={imageOverlayViewportRef}
-                      className="relative box-border flex min-h-[58dvh] min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable] xl:min-h-0"
+                      className="relative box-border flex min-h-0 min-w-0 flex-1 items-start justify-start overflow-auto overscroll-contain rounded-md border border-white/10 bg-[linear-gradient(45deg,#151a22_25%,transparent_25%),linear-gradient(-45deg,#151a22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#151a22_75%),linear-gradient(-45deg,transparent_75%,#151a22_75%)] bg-[length:18px_18px] bg-[position:0_0,0_9px,9px_-9px,-9px_0px] [scrollbar-gutter:stable]"
                     >
                       <div
                         className="m-auto flex shrink-0 items-center justify-center"
@@ -18050,7 +18049,7 @@ export default function LocalPage({
                     </div>
                   </article>
 
-                  <aside className="box-border flex w-full min-w-0 max-w-full flex-col gap-1.5 overflow-x-clip rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:min-h-0 xl:overflow-x-clip xl:overflow-y-auto">
+                  <aside className="box-border flex max-h-[36dvh] w-full min-w-0 max-w-full shrink-0 flex-col gap-1.5 overflow-x-clip overflow-y-auto rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:h-full xl:max-h-none xl:min-h-0">
                     <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -18061,7 +18060,7 @@ export default function LocalPage({
                           {imageOverlayEditor.width} × {imageOverlayEditor.height}
                         </span>
                       </div>
-                      <div className="mt-2 flex min-w-0 flex-col gap-1.5">
+                      <div className="mt-2 hidden min-w-0 flex-col gap-1.5 xl:flex">
                         <span className="text-[9px] text-slate-400">Preview {Math.round(imageOverlayPreviewZoom * 100)}%</span>
                         <div className="flex min-w-0 items-center gap-1">
                           <button
