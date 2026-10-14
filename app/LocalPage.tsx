@@ -274,6 +274,7 @@ type CategoryDropPosition = "before" | "after";
 type AutoCopyContentSource = {
   postText: string;
   commentText: string;
+  commentTextIsVerbatim?: boolean;
 };
 
 type CategoryColorMap = Record<string, string>;
@@ -925,6 +926,7 @@ type ShareRequest = {
   internalImages?: ProductImage[];
   postText: string;
   commentText: string;
+  commentTextIsVerbatim?: boolean;
   shareKey: string;
   successMessage: string;
 };
@@ -3925,6 +3927,18 @@ const getSelectedContactText = (
   );
 };
 
+const appendContactTextWithoutTransformingContent = (
+  value: string,
+  contactText: string,
+): string => {
+  const cleanContactText = contactText.trim();
+
+  if (!cleanContactText || value.endsWith(cleanContactText)) return value;
+  if (!value) return cleanContactText;
+
+  return `${value}\n\n${cleanContactText}`;
+};
+
 const composeCopyText = (
   value: string,
   contactText: string,
@@ -4051,22 +4065,20 @@ const buildCommentContentText = (
     const realEstatePrice = formatCommentPriceTypography(
       normalizeRealEstateCommentPrice(priceText),
     );
-    const commentLines = extractCommentBulletLines(realEstateComment);
     const heading = [
       cleanTitle,
       realEstatePrice ? `GIÁ ${realEstatePrice}` : "",
     ]
       .filter(Boolean)
       .join(" - ");
-    const content = [heading, commentLines.join("\n")]
-      .filter(Boolean)
-      .join("\n\n");
+    const sections: string[] = [];
 
-    return composeCopyText(
-      content,
+    if (heading) sections.push(heading);
+    if (realEstateComment.length > 0) sections.push(realEstateComment);
+
+    return appendContactTextWithoutTransformingContent(
+      sections.join("\n\n"),
       contactText,
-      false,
-      realEstateComment,
     );
   }
 
@@ -12029,11 +12041,16 @@ export default function LocalPage({
     if (autoCopyShareMode === "comment") {
       return {
         label: "Cmt",
-        text: composeCopyText(
-          source.commentText,
-          contactText,
-          false,
-        ),
+        text: source.commentTextIsVerbatim
+          ? appendContactTextWithoutTransformingContent(
+              source.commentText,
+              contactText,
+            )
+          : composeCopyText(
+              source.commentText,
+              contactText,
+              false,
+            ),
       };
     }
 
@@ -12232,6 +12249,7 @@ export default function LocalPage({
           product.contentType,
           product.realEstateComment,
         ),
+        commentTextIsVerbatim: isPropertyContentType(product.contentType),
       },
     };
 
@@ -12824,6 +12842,7 @@ export default function LocalPage({
           contentType,
           realEstateComment,
         ),
+        commentTextIsVerbatim: isPropertyContentType(contentType),
       },
       contactText,
     );
@@ -12846,6 +12865,7 @@ export default function LocalPage({
       {
         postText: pendingShare.postText,
         commentText: pendingShare.commentText,
+        commentTextIsVerbatim: pendingShare.commentTextIsVerbatim === true,
       },
       contactText,
     );
@@ -12892,6 +12912,7 @@ export default function LocalPage({
         product.contentType,
         product.realEstateComment,
       ),
+      commentTextIsVerbatim: isPropertyContentType(product.contentType),
       shareKey,
       successMessage: "Đã mở bảng chia sẻ sản phẩm",
     });
@@ -12945,6 +12966,7 @@ export default function LocalPage({
         albumSource.contentType,
         albumSource.realEstateComment,
       ),
+      commentTextIsVerbatim: isPropertyContentType(albumSource.contentType),
       shareKey,
       successMessage: "Đã mở bảng chia sẻ ảnh",
     });
@@ -13502,6 +13524,7 @@ export default function LocalPage({
           albumSource.contentType,
           albumSource.realEstateComment,
         ),
+        commentTextIsVerbatim: isPropertyContentType(albumSource.contentType),
       },
     });
   };
@@ -13546,6 +13569,7 @@ export default function LocalPage({
           albumSource.contentType,
           albumSource.realEstateComment,
         ),
+        commentTextIsVerbatim: isPropertyContentType(albumSource.contentType),
       },
     });
   };
@@ -13635,6 +13659,9 @@ export default function LocalPage({
       copyContent: {
         postText: activeDescriptions,
         commentText: activeComments,
+        commentTextIsVerbatim: filteredImageDownloadProducts.some((product) =>
+          isPropertyContentType(product.contentType),
+        ),
       },
     });
   };
