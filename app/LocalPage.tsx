@@ -12648,11 +12648,19 @@ export default function LocalPage({
 
     setIsOverlayEditorBusy(true);
     let uploadedImage: ProductImage | null = null;
+    let shouldKeepUploadedAsset = false;
     let canvas: HTMLCanvasElement | null = null;
+    let cleanup = emptyCloudinaryCleanup();
+    let databaseSyncPending = false;
+
     try {
-      // The editor only keeps downscaled thumbnails in the preview. Load the
-      // original base image and each source overlay only at export time.
-      const baseBlob = await getProductImageBlob(imageOverlayEditor.baseImage);
+      // Preview giữ ảnh thu nhỏ; chỉ đọc ảnh gốc khi kết xuất kết quả cuối.
+      const baseImage = imageOverlayEditor.baseImage;
+      const baseBlob = await getProductImageBlob(baseImage);
+      if (baseBlob.size === 0) {
+        throw new Error("Ảnh gốc không có dữ liệu để ghép");
+      }
+
       const baseBitmap = await createImageBitmap(baseBlob);
       canvas = document.createElement("canvas");
       canvas.width = baseBitmap.width;
@@ -12666,13 +12674,16 @@ export default function LocalPage({
       context.drawImage(baseBitmap, 0, 0, canvas.width, canvas.height);
       baseBitmap.close();
 
-      // Draw one overlay bitmap at a time to keep temporary decoded memory low.
+      // Giải mã từng lớp lần lượt để hạn chế RAM khi ghép ảnh lớn.
       for (const layer of imageOverlayLayers) {
         const overlayBitmap = await createImageBitmap(layer.blob);
         try {
           const overlayAspectRatio =
             overlayBitmap.width / Math.max(overlayBitmap.height, 1);
-          const overlayWidth = Math.max(1, canvas.width * (layer.widthPercent / 100));
+          const overlayWidth = Math.max(
+            1,
+            canvas.width * (layer.widthPercent / 100),
+          );
           const overlayHeight = overlayWidth / Math.max(overlayAspectRatio, 0.0001);
           const centerX = canvas.width * (layer.x / 100);
           const centerY = canvas.height * (layer.y / 100);
@@ -12695,46 +12706,115 @@ export default function LocalPage({
       }
 
       const outputCanvas = canvas;
-      if (!outputCanvas) throw new Error("Canvas xuất ảnh chưa sẵn sàng");
       const outputBlob = await new Promise<Blob>((resolve, reject) => {
         outputCanvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error("Không thể xuất ảnh ghép"));
+          if (blob && blob.size > 0) resolve(blob);
+          else reject(new Error("Không thể xuất ảnh ghép hoặc ảnh kết quả rỗng"));
         }, "image/png");
       });
       outputCanvas.width = 0;
       outputCanvas.height = 0;
       canvas = null;
 
-      const baseName = imageOverlayEditor.baseImage.name.replace(/\.[^.]+$/u, "");
+      const baseName = baseImage.name.replace(/\.[^.]+$/u, "");
       const outputFile = new File(
         [outputBlob],
         `${baseName || "image"}-overlay.png`,
         { type: "image/png", lastModified: Date.now() },
       );
-      uploadedImage = await uploadOriginalImageToCloudinary(outputFile);
 
-      const imageField: ProductImageField = currentProduct.images.some(
-        (image) => image.id === imageOverlayEditor.baseImage.id,
+      // Nếu ảnh gốc vẫn đang nằm trong hàng đợi upload, dừng tác vụ cũ trước.
+      // Nếu không, tác vụ cũ có thể hoàn tất sau và ghi đè ảnh ghép bằng ảnh gốc.
+      if (pendingImageUploadsRef.current.has(baseImage.id)) {
+        cancelPendingImageUpload(baseImage.id);
+        await pendingImageQueueWriteRef.current.catch(() => undefined);
+        while (pendingImageUploadPumpRef.current) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+        }
+        // Loại bỏ bản ghi cũ lần cuối sau khi worker đã dừng, tránh việc một
+        // lần ghi IndexedDB đang chờ làm sống lại tác vụ upload ảnh nguyên bản.
+        await removePendingImageUploadRecord(baseImage.id).catch(() => undefined);
+      }
+
+      const latestProduct =
+        productsRef.current.find((product) => product.id === currentProduct.id) ??
+        currentProduct;
+      const imageField: ProductImageField = latestProduct.images.some(
+        (image) => image.id === baseImage.id,
       )
         ? "images"
         : "internalImages";
-      const currentFieldImages = currentProduct[imageField];
+      const currentFieldImages = latestProduct[imageField];
       const baseImageIndex = currentFieldImages.findIndex(
-        (image) => image.id === imageOverlayEditor.baseImage.id,
+        (image) => image.id === baseImage.id,
       );
-      const insertAt = baseImageIndex >= 0 ? baseImageIndex + 1 : currentFieldImages.length;
+
+      if (baseImageIndex < 0) {
+        throw new Error(
+          "Ảnh gốc không còn trong danh sách sản phẩm. Hãy mở lại album rồi thử tiếp.",
+        );
+      }
+
+      // Upload kết quả trước, rồi giữ nguyên ID để thay thế đúng ảnh đang chọn.
+      uploadedImage = await uploadOriginalImageToCloudinary(outputFile, baseImage);
+      if (!uploadedImage.publicId.trim() || !uploadedImage.dataUrl.trim()) {
+        throw new Error("Cloudinary không trả về URL hoặc public ID của ảnh ghép");
+      }
+
       const nextFieldImages = [...currentFieldImages];
-      nextFieldImages.splice(insertAt, 0, uploadedImage);
+      nextFieldImages.splice(baseImageIndex, 1, uploadedImage);
       const nextProduct: LocalProduct = {
-        ...currentProduct,
+        ...latestProduct,
         [imageField]: renameDraftImagesByField(nextFieldImages, imageField),
         updatedAt: new Date().toISOString(),
       };
 
-      await saveProductToDb(nextProduct);
+      // Từ đây ảnh mới đã được gắn với sản phẩm. Không tự xóa asset nếu DB tạm lỗi;
+      // hàng đợi sẽ thử ghi metadata lên DB lại thay vì làm mất ảnh vừa upload.
+      shouldKeepUploadedAsset = true;
       commitLocalProduct(nextProduct);
       await cacheProductImageBlob(uploadedImage, outputBlob).catch(() => undefined);
+      await removeProductImageBlobCaches(baseImage).catch(() => undefined);
+
+      try {
+        cleanup = await saveProductToDb(nextProduct);
+      } catch (databaseError) {
+        databaseSyncPending = true;
+        console.error(
+          "Ảnh ghép đã upload nhưng chưa xác nhận được cập nhật MongoDB; chuyển sang hàng đợi đồng bộ",
+          databaseError,
+        );
+
+        const pendingRecord: PendingImageUploadRecord = {
+          ...createPendingImageUploadRecord(
+            latestProduct,
+            imageField,
+            baseImageIndex,
+            baseImage,
+            outputFile,
+          ),
+          uploadedImage,
+        };
+        enqueuePendingImageUploads([pendingRecord]);
+      }
+
+      // Tải ảnh nguyên bản về máy; ảnh ghép đã thay thế ảnh trong dữ liệu sản phẩm.
+      try {
+        const originalFileName = baseImage.name.trim() || createSystemImageFilename(
+          baseImageIndex,
+          baseImage.id,
+          normalizeImageExtension(baseImage),
+        );
+        downloadBlob(baseBlob, originalFileName);
+      } catch (downloadError) {
+        console.error("Không thể tự động tải ảnh gốc về máy", downloadError);
+        Toastify(
+          databaseSyncPending
+            ? "Ảnh ghép đã được giữ và đưa vào hàng đợi đồng bộ; trình duyệt không tải được ảnh gốc tự động"
+            : "Đã cập nhật ảnh trên DB nhưng trình duyệt không tải được ảnh gốc tự động",
+          300,
+        );
+      }
 
       setAlbumSource((current) => current && current.productId === nextProduct.id
         ? {
@@ -12759,13 +12839,27 @@ export default function LocalPage({
       setModalStack((current) => current[current.length - 1] === "imageOverlayEditor"
         ? current.slice(0, -1)
         : current.filter((modalName) => modalName !== "imageOverlayEditor"));
-      Toastify(`Đã ghép ${imageOverlayLayers.length} lớp ảnh và lưu thành ảnh mới`, 200);
+
+      if (databaseSyncPending) {
+        Toastify(
+          "Đã upload ảnh ghép và thay ảnh trong giao diện; DB chưa xác nhận nên ảnh đã được đưa vào hàng đợi đồng bộ",
+          300,
+        );
+      } else {
+        Toastify(
+          cleanup.failed.length > 0
+            ? `Đã lưu ảnh ghép lên DB và tải ảnh gốc về máy; còn ${cleanup.failed.length} ảnh Cloudinary cũ chưa xóa được`
+            : "Đã lưu ảnh ghép lên DB, thay ảnh gốc và tải ảnh nguyên bản về máy",
+          cleanup.failed.length > 0 ? 300 : 200,
+        );
+      }
     } catch (error) {
       if (canvas) {
         canvas.width = 0;
         canvas.height = 0;
       }
-      if (uploadedImage?.publicId) {
+      // Chỉ xóa asset khi chưa gắn nó vào sản phẩm. Tránh xóa ảnh cần giữ/retry.
+      if (uploadedImage?.publicId && !shouldKeepUploadedAsset) {
         await deleteUnattachedCloudinaryImages([uploadedImage.publicId]).catch(
           () => undefined,
         );
@@ -18566,9 +18660,9 @@ export default function LocalPage({
                       onClick={() => void saveCompositedImageToProduct()}
                     >
                       {isOverlayEditorBusy ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-100/30 border-t-emerald-100" /> : <FiCheckCircle aria-hidden="true" className="h-3.5 w-3.5" />}
-                      {isOverlayEditorBusy ? "Đang ghép và lưu…" : "Lưu ảnh ghép vào sản phẩm"}
+                      {isOverlayEditorBusy ? "Đang ghép và thay ảnh…" : "Thay ảnh gốc bằng ảnh ghép"}
                     </button>
-                    <p className="text-[8px] leading-4 text-slate-500">Tối đa {MAX_IMAGE_OVERLAY_LAYERS} lớp để hạn chế RAM. Preview dùng ảnh thu nhỏ; ảnh gốc được dùng khi xuất. Ảnh kết quả lưu vào sản phẩm, mẫu lưu trên thiết bị.</p>
+                    <p className="text-[8px] leading-4 text-slate-500">Tối đa {MAX_IMAGE_OVERLAY_LAYERS} lớp để hạn chế RAM. Khi lưu, ảnh ghép sẽ thay thế ảnh gốc trên sản phẩm; ảnh gốc được tự động tải về máy. Mẫu ảnh phủ lưu trên thiết bị.</p>
                   </aside>
                 </section>
               ) : null}
