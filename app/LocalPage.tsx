@@ -7484,7 +7484,7 @@ export default function LocalPage({
   // Lưu điểm chạm để phát hiện thao tác vuốt ngang
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Thanh tab danh mục — giữ lại một tab phía trước tab đang chọn
+  // Thanh tab danh mục — giữ lại tối đa năm tab phía trước tab đang chọn
   const categoryTabsRef = useRef<HTMLDivElement | null>(null);
   const previousCategoryTabRef = useRef(activeCategoryTab);
 
@@ -7520,7 +7520,7 @@ export default function LocalPage({
     if (activeButtonIndex < 0) return;
 
     const leadingButton =
-      categoryButtons[Math.max(0, activeButtonIndex - 1)] ??
+      categoryButtons[Math.max(0, activeButtonIndex - 5)] ?? // Số danh mục trong tab trước danh mục hiện tại
       categoryButtons[activeButtonIndex];
     if (!leadingButton) return;
 
@@ -12043,14 +12043,14 @@ export default function LocalPage({
         label: "Cmt",
         text: source.commentTextIsVerbatim
           ? appendContactTextWithoutTransformingContent(
-              source.commentText,
-              contactText,
-            )
+            source.commentText,
+            contactText,
+          )
           : composeCopyText(
-              source.commentText,
-              contactText,
-              false,
-            ),
+            source.commentText,
+            contactText,
+            false,
+          ),
       };
     }
 
