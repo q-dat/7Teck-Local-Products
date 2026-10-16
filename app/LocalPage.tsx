@@ -17942,83 +17942,83 @@ export default function LocalPage({
                   </div>
 
                   <div
-                    className="max-h-[150px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
+                    className="max-h-[150px] xl:max-h-[300px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
                     style={{ scrollbarWidth: "thin" }}
                   >
                     {searchSuggestions.map((suggestion) => {
                       const { product } = suggestion;
 
                       return (
-                      <button
-                        key={product.id}
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          setQuery(product.name);
-                          setIsSearchSuggestionsOpen(false);
-                        }}
-                        className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
-                          {product.images[0] ? (
-                            <img
-                              src={createCloudinaryThumbnailUrl(
-                                product.images[0].dataUrl,
-                                96,
-                              )}
-                              alt=""
-                              width={96}
-                              height={96}
-                              loading="lazy"
-                              decoding="async"
-                              fetchPriority="low"
-                              className="h-full w-full object-contain"
-                            />
-                          ) : (
-                            <FiSearch
-                              aria-hidden="true"
-                              className="h-3.5 w-3.5 text-slate-600"
-                            />
-                          )}
-                        </span>
-
-                        <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-                          <span className="block min-w-0 truncate text-[11px] font-bold text-[#fffdf5]">
-                            {product.name}
+                        <button
+                          key={product.id}
+                          type="button"
+                          role="option"
+                          aria-selected="false"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            setQuery(product.name);
+                            setIsSearchSuggestionsOpen(false);
+                          }}
+                          className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
+                            {product.images[0] ? (
+                              <img
+                                src={createCloudinaryThumbnailUrl(
+                                  product.images[0].dataUrl,
+                                  96,
+                                )}
+                                alt=""
+                                width={96}
+                                height={96}
+                                loading="lazy"
+                                decoding="async"
+                                fetchPriority="low"
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <FiSearch
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5 text-slate-600"
+                              />
+                            )}
                           </span>
-                          {suggestion.snippet ? (
-                            <span className="mt-0.5 block min-w-0 max-w-full truncate text-[10px] font-medium text-slate-400">
-                              {splitSearchSnippetByHighlights(
-                                suggestion.snippet,
-                                suggestion.highlightRanges,
-                              ).map((part, index) =>
-                                part.highlighted ? (
-                                  <strong
-                                    key={`${index}-${part.text}`}
-                                    className="font-black text-[#f0d58b] underline decoration-[#f0d58b]/40 underline-offset-2"
-                                  >
-                                    {part.text}
-                                  </strong>
-                                ) : (
-                                  <span key={`${index}-${part.text}`}>{part.text}</span>
-                                ),
-                              )}
+
+                          <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                            <span className="block min-w-0 truncate text-[11px] font-bold text-[#fffdf5]">
+                              {product.name}
                             </span>
-                          ) : null}
-                          <span className="mt-0.5 flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-[9px] font-semibold text-slate-500">
-                            {product.category ? (
-                              <span className="min-w-0 truncate">{product.category}</span>
-                            ) : null}
-                            {product.priceText ? (
-                              <span className="shrink-0 truncate text-[#d8c99f]">
-                                {product.priceText}
+                            {suggestion.snippet ? (
+                              <span className="mt-0.5 block min-w-0 max-w-full truncate text-[10px] font-medium text-slate-400">
+                                {splitSearchSnippetByHighlights(
+                                  suggestion.snippet,
+                                  suggestion.highlightRanges,
+                                ).map((part, index) =>
+                                  part.highlighted ? (
+                                    <strong
+                                      key={`${index}-${part.text}`}
+                                      className="font-black text-[#f0d58b] underline decoration-[#f0d58b]/40 underline-offset-2"
+                                    >
+                                      {part.text}
+                                    </strong>
+                                  ) : (
+                                    <span key={`${index}-${part.text}`}>{part.text}</span>
+                                  ),
+                                )}
                               </span>
                             ) : null}
+                            <span className="mt-0.5 flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-[9px] font-semibold text-slate-500">
+                              {product.category ? (
+                                <span className="min-w-0 truncate">{product.category}</span>
+                              ) : null}
+                              {product.priceText ? (
+                                <span className="shrink-0 truncate text-[#d8c99f]">
+                                  {product.priceText}
+                                </span>
+                              ) : null}
+                            </span>
                           </span>
-                        </span>
-                      </button>
+                        </button>
                       );
                     })}
                   </div>
