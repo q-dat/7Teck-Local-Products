@@ -1783,6 +1783,217 @@ const normalizeTextKey = (value: string): string => {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 };
 
+type SearchHighlightRange = {
+  start: number;
+  end: number;
+};
+
+type IndexedSearchToken = {
+  value: string;
+  ranges: SearchHighlightRange[];
+};
+
+type SearchTextIndex = {
+  tokens: IndexedSearchToken[];
+  compactValue: string;
+  compactRanges: SearchHighlightRange[];
+};
+
+type SearchTextMatch = {
+  ranges: SearchHighlightRange[];
+  start: number;
+  end: number;
+};
+
+type ProductSearchSuggestion = {
+  product: LocalProduct;
+  snippet: string;
+  highlightRanges: SearchHighlightRange[];
+  score: number;
+};
+
+const normalizeSearchText = (value: string): string => {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLocaleLowerCase("vi")
+    .replace(/đ/gu, "d")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+};
+
+const buildSearchTextIndex = (value: string): SearchTextIndex => {
+  const tokens: IndexedSearchToken[] = [];
+  const compactRanges: SearchHighlightRange[] = [];
+  const compactCharacters: string[] = [];
+  let tokenCharacters: Array<{
+    value: string;
+    range: SearchHighlightRange;
+  }> = [];
+  let sourceOffset = 0;
+
+  const flushToken = (): void => {
+    if (tokenCharacters.length === 0) return;
+
+    tokens.push({
+      value: tokenCharacters.map((character) => character.value).join(""),
+      ranges: tokenCharacters.map((character) => character.range),
+    });
+    tokenCharacters = [];
+  };
+
+  for (const sourceCharacter of value) {
+    const start = sourceOffset;
+    sourceOffset += sourceCharacter.length;
+
+    const normalizedCharacters = sourceCharacter
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLocaleLowerCase("vi")
+      .replace(/đ/gu, "d");
+
+    // Standalone combining marks must not split a word.
+    if (!normalizedCharacters) continue;
+
+    for (const normalizedCharacter of normalizedCharacters) {
+      if (/[\p{L}\p{N}]/u.test(normalizedCharacter)) {
+        const range = { start, end: sourceOffset };
+        tokenCharacters.push({ value: normalizedCharacter, range });
+        compactCharacters.push(normalizedCharacter);
+        compactRanges.push(range);
+      } else {
+        flushToken();
+      }
+    }
+  }
+
+  flushToken();
+
+  return {
+    tokens,
+    compactValue: compactCharacters.join(""),
+    compactRanges,
+  };
+};
+
+const findFlexibleSearchMatch = (
+  content: string,
+  query: string,
+): SearchTextMatch | null => {
+  if (!query.trim()) return null;
+
+  const queryIndex = buildSearchTextIndex(query);
+  const contentIndex = buildSearchTextIndex(content);
+  const compactQuery = queryIndex.compactValue;
+
+  if (!compactQuery || contentIndex.compactValue.length === 0) return null;
+
+  // Match only one continuous phrase after ignoring whitespace and punctuation.
+  // For example, "14 Pro" matches "14Pro", "14 Pro" and "14-Pro", but not
+  // text where "14" and "Pro" occur in separate parts of the post.
+  const compactMatchStart = contentIndex.compactValue.indexOf(compactQuery);
+
+  if (compactMatchStart < 0) return null;
+
+  const firstRange = contentIndex.compactRanges[compactMatchStart];
+  const lastRange =
+    contentIndex.compactRanges[compactMatchStart + compactQuery.length - 1];
+
+  if (!firstRange || !lastRange) return null;
+
+  return {
+    ranges: [{ start: firstRange.start, end: lastRange.end }],
+    start: firstRange.start,
+    end: lastRange.end,
+  };
+};
+
+const matchesFlexibleSearch = (content: string, query: string): boolean => {
+  if (!query.trim()) return true;
+  return findFlexibleSearchMatch(content, query) !== null;
+};
+
+const buildSearchMatchSnippet = (
+  content: string,
+  match: SearchTextMatch,
+  maxLength = 80,
+): { text: string; highlightRanges: SearchHighlightRange[] } => {
+  // Keep the match near the beginning so it remains visible on narrow screens.
+  let start = Math.max(0, match.start - 18);
+  let end = Math.min(content.length, match.end + 32);
+
+  if (end - start > maxLength) {
+    start = Math.max(0, match.start - Math.floor(maxLength * 0.38));
+    end = Math.min(content.length, start + maxLength);
+    if (end < match.end) {
+      start = Math.max(0, match.end - maxLength);
+      end = Math.min(content.length, start + maxLength);
+    }
+  }
+
+  // Keep whole words at the edges without cutting through the matched text.
+  if (start > 0 && start < match.start) {
+    const nextSpace = content.indexOf(" ", start);
+    if (nextSpace >= 0 && nextSpace < match.start) start = nextSpace + 1;
+  }
+
+  if (end < content.length && end > match.end) {
+    const previousSpace = content.lastIndexOf(" ", end);
+    if (previousSpace > match.end) end = previousSpace;
+  }
+
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < content.length ? "…" : "";
+  const excerpt = content.slice(start, end).replace(/[\r\n]/gu, " ");
+  const text = `${prefix}${excerpt}${suffix}`;
+  const prefixLength = prefix.length;
+  const highlightRanges = match.ranges
+    .map((range) => ({
+      start: Math.max(range.start, start) - start + prefixLength,
+      end: Math.min(range.end, end) - start + prefixLength,
+    }))
+    .filter((range) => range.end > range.start);
+
+  return { text, highlightRanges };
+};
+
+const splitSearchSnippetByHighlights = (
+  text: string,
+  ranges: SearchHighlightRange[],
+): Array<{ text: string; highlighted: boolean }> => {
+  const sortedRanges = ranges
+    .map((range) => ({
+      start: Math.max(0, Math.min(text.length, range.start)),
+      end: Math.max(0, Math.min(text.length, range.end)),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((first, second) => first.start - second.start);
+
+  const parts: Array<{ text: string; highlighted: boolean }> = [];
+  let cursor = 0;
+
+  for (const range of sortedRanges) {
+    const start = Math.max(cursor, range.start);
+    const end = Math.max(start, range.end);
+
+    if (start > cursor) {
+      parts.push({ text: text.slice(cursor, start), highlighted: false });
+    }
+
+    if (end > start) {
+      parts.push({ text: text.slice(start, end), highlighted: true });
+      cursor = end;
+    }
+  }
+
+  if (cursor < text.length) {
+    parts.push({ text: text.slice(cursor), highlighted: false });
+  }
+
+  return parts.length > 0 ? parts : [{ text, highlighted: false }];
+};
+
 const normalizeCategoryName = (value: string): string => {
   return value.trim().replace(/\s+/g, " ");
 };
@@ -7652,25 +7863,33 @@ export default function LocalPage({
     });
   }, [categories]);
 
-  // Chuyển sang danh mục kế tiếp / trước đó (dùng cho vuốt ngang)
+  const handleSelectCategory = useCallback((category: CategoryTab): void => {
+    // Chuyển danh mục phải bỏ từ khóa tìm kiếm để hiện toàn bộ sản phẩm của danh mục.
+    setQuery("");
+    setIsSearchSuggestionsOpen(false);
+    setActiveCategoryTab(category);
+  }, []);
+
+  // Chuyển sang danh mục kế tiếp / trước đó (dùng cho vuốt ngang).
   const goToAdjacentCategory = useCallback(
     (direction: 1 | -1) => {
-      setActiveCategoryTab((current) => {
-        if (orderedCategoryTabs.length <= 1) return current;
+      if (orderedCategoryTabs.length <= 1) return;
 
-        const currentKey = normalizeTextKey(current);
-        const currentIndex = orderedCategoryTabs.findIndex(
-          (tab) => normalizeTextKey(tab) === currentKey,
-        );
-        const safeIndex = currentIndex < 0 ? 0 : currentIndex;
-        const nextIndex =
-          (safeIndex + direction + orderedCategoryTabs.length) %
-          orderedCategoryTabs.length;
+      const currentKey = normalizeTextKey(activeCategoryTab);
+      const currentIndex = orderedCategoryTabs.findIndex(
+        (tab) => normalizeTextKey(tab) === currentKey,
+      );
+      const safeIndex = currentIndex < 0 ? 0 : currentIndex;
+      const nextIndex =
+        (safeIndex + direction + orderedCategoryTabs.length) %
+        orderedCategoryTabs.length;
+      const nextCategory = orderedCategoryTabs[nextIndex];
 
-        return orderedCategoryTabs[nextIndex];
-      });
+      if (nextCategory === undefined) return;
+
+      handleSelectCategory(nextCategory);
     },
-    [orderedCategoryTabs],
+    [activeCategoryTab, handleSelectCategory, orderedCategoryTabs],
   );
 
   // Lưu điểm chạm để phát hiện thao tác vuốt ngang
@@ -8001,36 +8220,68 @@ export default function LocalPage({
     searchInputRef.current?.focus();
   }, []);
 
-  const searchSuggestions = useMemo<LocalProduct[]>(() => {
-    const keyword = normalizeTextKey(query);
+  const searchSuggestions = useMemo<ProductSearchSuggestion[]>(() => {
+    const keyword = normalizeSearchText(query);
+    const compactKeyword = keyword.replace(/\s+/g, "");
 
     if (!keyword) return [];
 
     return viewProducts
       .map((product) => {
-        const nameKey = normalizeTextKey(product.name);
-        const categoryKey = normalizeTextKey(product.category);
-        const descriptionKey = normalizeTextKey(product.description);
-        const priceKey = normalizeTextKey(product.priceText);
+        const nameKey = normalizeSearchText(product.name);
+        const compactNameKey = nameKey.replace(/\s+/g, "");
+        const nameMatch = findFlexibleSearchMatch(product.name, query);
+        const categoryMatch = findFlexibleSearchMatch(product.category, query);
+        const priceMatch = findFlexibleSearchMatch(product.priceText, query);
+        const descriptionMatch = findFlexibleSearchMatch(product.description, query);
+        const noteMatch = findFlexibleSearchMatch(product.realEstateComment, query);
 
         let score = 0;
-
-        if (nameKey === keyword) {
-          score = 4;
-        } else if (nameKey.startsWith(keyword)) {
-          score = 3;
-        } else if (nameKey.includes(keyword)) {
+        if (nameMatch) {
+          if (nameKey === keyword || compactNameKey === compactKeyword) {
+            score = 6;
+          } else if (
+            nameKey.startsWith(keyword) ||
+            compactNameKey.startsWith(compactKeyword)
+          ) {
+            score = 5;
+          } else if (
+            nameKey.includes(keyword) ||
+            compactNameKey.includes(compactKeyword)
+          ) {
+            score = 4;
+          } else {
+            score = 3;
+          }
+        } else if (categoryMatch || priceMatch) {
           score = 2;
-        } else if (
-          categoryKey.includes(keyword) ||
-          priceKey.includes(keyword)
-        ) {
+        } else if (descriptionMatch || noteMatch) {
           score = 1;
-        } else if (descriptionKey.includes(keyword)) {
-          score = 0.5;
         }
 
-        return { product, score };
+        const matchedField = [
+          { text: product.name, match: nameMatch },
+          { text: product.category, match: categoryMatch },
+          { text: product.priceText, match: priceMatch },
+          { text: product.description, match: descriptionMatch },
+          { text: product.realEstateComment, match: noteMatch },
+        ].find((field) => field.match !== null && field.text.trim().length > 0);
+
+        if (score === 0 || !matchedField?.match) {
+          return { product, snippet: "", highlightRanges: [], score: 0 };
+        }
+
+        const snippet = buildSearchMatchSnippet(
+          matchedField.text,
+          matchedField.match,
+        );
+
+        return {
+          product,
+          snippet: snippet.text,
+          highlightRanges: snippet.highlightRanges,
+          score,
+        };
       })
       .filter(({ score }) => score > 0)
       .sort((first, second) => {
@@ -8044,12 +8295,11 @@ export default function LocalPage({
           { sensitivity: "base" },
         );
       })
-      .slice(0, 8)
-      .map(({ product }) => product);
+      .slice(0, 8);
   }, [query, viewProducts]);
 
   const filteredProducts = useMemo(() => {
-    const keyword = normalizeTextKey(query);
+    const keyword = normalizeSearchText(query);
     const activeCategoryKey = normalizeTextKey(activeCategoryTab);
     const shouldSearchAllCategories = keyword.length > 0;
 
@@ -8059,10 +8309,15 @@ export default function LocalPage({
         shouldSearchAllCategories ||
         activeCategoryTab === "all" ||
         productCategoryKey === activeCategoryKey;
-      const content = normalizeTextKey(
-        `${product.name} ${product.description} ${product.realEstateComment} ${product.priceText} ${product.category}`,
-      );
-      const matchesKeyword = !keyword || content.includes(keyword);
+      const searchableFields = [
+        product.name,
+        product.description,
+        product.realEstateComment,
+        product.priceText,
+        product.category,
+      ];
+      const matchesKeyword =
+        !keyword || searchableFields.some((field) => matchesFlexibleSearch(field, query));
 
       return matchesCategory && matchesKeyword;
     });
@@ -8186,13 +8441,13 @@ export default function LocalPage({
   }, [productMergeCategoryOrder]);
 
   const productMergeCategoryOptions = useMemo(() => {
-    const keyword = normalizeTextKey(productMergeCategorySearch);
+    const keyword = productMergeCategorySearch.trim();
 
     return mergeableProductGroups
       .filter((group) => {
         const key = normalizeTextKey(group.category);
         if (productMergeSelectedKeys.has(key)) return false;
-        return !keyword || key.includes(keyword);
+        return matchesFlexibleSearch(group.category, keyword);
       })
       .slice(0, 12);
   }, [mergeableProductGroups, productMergeCategorySearch, productMergeSelectedKeys]);
@@ -8624,14 +8879,18 @@ export default function LocalPage({
   }, [activeScheduleProducts, scheduleConfig.selectedCategories]);
 
   const filteredScheduleProducts = useMemo(() => {
-    const keyword = normalizeTextKey(scheduleQuery);
+    const keyword = scheduleQuery.trim();
 
     return activeScheduleProducts.filter((product) => {
-      const content = normalizeTextKey(
-        `${product.name} ${product.description} ${product.realEstateComment} ${product.priceText} ${product.category}`,
-      );
+      const searchableFields = [
+        product.name,
+        product.description,
+        product.realEstateComment,
+        product.priceText,
+        product.category,
+      ];
 
-      return !keyword || content.includes(keyword);
+      return searchableFields.some((field) => matchesFlexibleSearch(field, keyword));
     });
   }, [activeScheduleProducts, scheduleQuery]);
 
@@ -17642,59 +17901,82 @@ export default function LocalPage({
                     className="max-h-[150px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
                     style={{ scrollbarWidth: "thin" }}
                   >
-                    {searchSuggestions.map((product) => (
-                      <button
-                        key={product.id}
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          setQuery(product.name);
-                          setIsSearchSuggestionsOpen(false);
-                        }}
-                        className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
-                          {product.images[0] ? (
-                            <img
-                              src={createCloudinaryThumbnailUrl(
-                                product.images[0].dataUrl,
-                                96,
-                              )}
-                              alt=""
-                              width={96}
-                              height={96}
-                              loading="lazy"
-                              decoding="async"
-                              fetchPriority="low"
-                              className="h-full w-full object-contain"
-                            />
-                          ) : (
-                            <FiSearch
-                              aria-hidden="true"
-                              className="h-3.5 w-3.5 text-slate-600"
-                            />
-                          )}
-                        </span>
+                    {searchSuggestions.map((suggestion) => {
+                      const { product } = suggestion;
 
-                        <span className="min-w-0 max-w-full flex-1 overflow-hidden">
-                          <span className="block min-w-0 truncate text-[11px] font-bold text-[#fffdf5]">
-                            {product.name}
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          role="option"
+                          aria-selected="false"
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            setQuery(product.name);
+                            setIsSearchSuggestionsOpen(false);
+                          }}
+                          className="flex w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden border-b border-white/[0.04] px-3 py-2 text-left transition last:border-b-0 hover:bg-[#f0e3c0]/[0.08] focus-visible:bg-[#f0e3c0]/[0.08] focus-visible:outline-none"
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-white/[0.08] bg-black/30">
+                            {product.images[0] ? (
+                              <img
+                                src={createCloudinaryThumbnailUrl(
+                                  product.images[0].dataUrl,
+                                  96,
+                                )}
+                                alt=""
+                                width={96}
+                                height={96}
+                                loading="lazy"
+                                decoding="async"
+                                fetchPriority="low"
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <FiSearch
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5 text-slate-600"
+                              />
+                            )}
                           </span>
-                          <span className="mt-0.5 flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-[9px] font-semibold text-slate-500">
-                            {product.category ? (
-                              <span className="min-w-0 truncate">{product.category}</span>
-                            ) : null}
-                            {product.priceText ? (
-                              <span className="shrink-0 truncate text-[#d8c99f]">
-                                {product.priceText}
+
+                          <span className="min-w-0 max-w-full flex-1 overflow-hidden">
+                            <span className="block min-w-0 truncate text-[11px] font-bold text-[#fffdf5]">
+                              {product.name}
+                            </span>
+                            {suggestion.snippet ? (
+                              <span className="mt-0.5 block min-w-0 max-w-full truncate text-[10px] font-medium text-slate-400">
+                                {splitSearchSnippetByHighlights(
+                                  suggestion.snippet,
+                                  suggestion.highlightRanges,
+                                ).map((part, index) =>
+                                  part.highlighted ? (
+                                    <strong
+                                      key={`${index}-${part.text}`}
+                                      className="font-black text-[#f0d58b] underline decoration-[#f0d58b]/40 underline-offset-2"
+                                    >
+                                      {part.text}
+                                    </strong>
+                                  ) : (
+                                    <span key={`${index}-${part.text}`}>{part.text}</span>
+                                  ),
+                                )}
                               </span>
                             ) : null}
+                            <span className="mt-0.5 flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-[9px] font-semibold text-slate-500">
+                              {product.category ? (
+                                <span className="min-w-0 truncate">{product.category}</span>
+                              ) : null}
+                              {product.priceText ? (
+                                <span className="shrink-0 truncate text-[#d8c99f]">
+                                  {product.priceText}
+                                </span>
+                              ) : null}
+                            </span>
                           </span>
-                        </span>
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 </motion.div>
               ) : null}
@@ -17797,7 +18079,7 @@ export default function LocalPage({
                           : "border-[#d8c99f]/[0.18] bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(6,8,12,0.98))] text-slate-200 shadow-[0_16px_42px_rgba(0,0,0,0.48)]"
                           }`}
                         onClick={() => {
-                          setActiveCategoryTab(category);
+                          handleSelectCategory(category);
                           setIsMobileCategoryMenuOpen(false);
                         }}
                       >
@@ -18011,7 +18293,7 @@ export default function LocalPage({
                 ? "bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a]"
                 : "bg-black/20 text-slate-300 hover:bg-[#d8c99f]/10 hover:text-[#eadfbe]"
                 }`}
-              onClick={() => setActiveCategoryTab("all")}
+              onClick={() => handleSelectCategory("all")}
             >
               Tất cả
             </button>
@@ -18054,7 +18336,7 @@ export default function LocalPage({
                   }
                   onDrop={(event) => handleCategoryDrop(event, category)}
                   onDragEnd={resetCategoryDrag}
-                  onClick={() => setActiveCategoryTab(category)}
+                  onClick={() => handleSelectCategory(category)}
                 >
                   {dropPosition ? (
                     <span
