@@ -3985,14 +3985,9 @@ const buildPostText = (
     );
   }
 
-  const lines = [
-    product.name,
-    product.priceText ? `Giá: ${product.priceText}` : "",
-    product.category ? `Danh mục: ${product.category}` : "",
-    description,
-  ].filter(Boolean);
-
-  return composeCopyText(lines.join("\n"), contactText, includeSocialTags);
+  // The product description already contains the actual post body. Do not prepend
+  // admin-only metadata (product name, raw price, category) to COPY_POST.cmd.
+  return composeCopyText(description, contactText, includeSocialTags);
 };
 
 const normalizeCommentPrice = (priceText: string): string => {
@@ -4814,6 +4809,7 @@ type LocalFileSystemHandle = {
 type LocalFileSystemWritable = {
   write: (data: Blob) => Promise<void>;
   close: () => Promise<void>;
+  abort?: () => Promise<void>;
 };
 
 type LocalFileSystemFileHandle = LocalFileSystemHandle & {
@@ -5548,29 +5544,160 @@ const getAvailableProductFolderName = async (
   }
 };
 
+const encodeBytesAsBase64 = (bytes: Uint8Array): string => {
+  const binaryChunks: string[] = [];
+  const chunkSize = 0x4000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binaryChunks.push(
+      String.fromCharCode(...bytes.subarray(offset, offset + chunkSize)),
+    );
+  }
+
+  return btoa(binaryChunks.join(""));
+};
+
+const encodePowerShellCommand = (command: string): string => {
+  const bytes = new Uint8Array(command.length * 2);
+
+  for (let index = 0; index < command.length; index += 1) {
+    const codeUnit = command.charCodeAt(index);
+    bytes[index * 2] = codeUnit & 0xff;
+    bytes[index * 2 + 1] = codeUnit >> 8;
+  }
+
+  return encodeBytesAsBase64(bytes);
+};
+
+const createCopyPostCommand = (postText: string): string => {
+  const encodedPostText = encodeBytesAsBase64(new TextEncoder().encode(postText));
+  const payloadLines = encodedPostText.match(/.{1,76}/gu) ?? [""];
+  const powerShellScript = [
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "$scriptPath = $env:COPY_POST_SCRIPT",
+    "if ([string]::IsNullOrWhiteSpace($scriptPath)) { throw 'Script path is missing.' }",
+    "$lines = [System.IO.File]::ReadAllLines($scriptPath, [System.Text.Encoding]::ASCII)",
+    "$start = [Array]::IndexOf([string[]]$lines, '::POST_PAYLOAD_BEGIN')",
+    "$end = [Array]::IndexOf([string[]]$lines, '::POST_PAYLOAD_END')",
+    "if ($start -lt 0 -or $end -le $start) { throw 'Post payload is missing.' }",
+    "$payloadLines = $lines[($start + 1)..($end - 1)]",
+    "$postBytes = [System.Convert]::FromBase64String(($payloadLines -join ''))",
+    "$postText = [System.Text.Encoding]::UTF8.GetString($postBytes)",
+    "Set-Clipboard -Value $postText -ErrorAction Stop",
+    "Write-Output 'Product post copied to clipboard.'",
+    "Start-Sleep -Milliseconds 700",
+    "} catch {",
+    "Write-Error $_",
+    "exit 1",
+    "}",
+  ].join("\n");
+  const encodedCommand = encodePowerShellCommand(powerShellScript);
+
+  return [
+    "@echo off",
+    "setlocal",
+    'set "COPY_POST_SCRIPT=%~f0"',
+    `powershell.exe -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`,
+    "if errorlevel 1 (",
+    "  echo.",
+    "  echo Could not copy the product post to the clipboard.",
+    "  pause",
+    ")",
+    "endlocal",
+    "exit /b",
+    "::POST_PAYLOAD_BEGIN",
+    ...payloadLines,
+    "::POST_PAYLOAD_END",
+    "",
+  ].join("\r\n");
+};
+
+type ProductFolderImageSaveResult = {
+  products: number;
+  images: number;
+  expectedImages: number;
+  completedProductIds: string[];
+  failedImages: number;
+  failedProducts: number;
+  failedPostFiles: number;
+  failureDetails: string[];
+};
+
+const getProductFolderDownloadFeedback = (
+  result: ProductFolderImageSaveResult,
+  requestedProductCount: number,
+  directoryName: string,
+): { message: string; statusCode: number } => {
+  const failureCount =
+    result.failedImages + result.failedProducts + result.failedPostFiles;
+
+  if (failureCount === 0) {
+    return {
+      message: `Đã tạo/cập nhật ${result.products} folder và lưu đủ ${result.images}/${result.expectedImages} ảnh vào ${directoryName}. Mỗi folder có file COPY_POST.cmd để sao chép nội dung Post.`,
+      statusCode: 200,
+    };
+  }
+
+  const details = result.failureDetails.slice(0, 2).join(" | ");
+
+  return {
+    message: [
+      `Đã lưu ${result.images}/${result.expectedImages} ảnh; hoàn tất ${result.products}/${requestedProductCount} sản phẩm trong ${directoryName}.`,
+      `Lỗi ảnh: ${result.failedImages}; sản phẩm chưa hoàn tất: ${result.failedProducts}; lỗi file COPY_POST.cmd: ${result.failedPostFiles}. Có thể chạy lại để thử các mục chưa hoàn tất.`,
+      details ? `Chi tiết: ${details}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    statusCode: result.images > 0 ? 300 : 400,
+  };
+};
+
 const saveProductImagesIntoFolders = async (
   products: LocalProduct[],
   rootDirectoryHandle: LocalFileSystemDirectoryHandle,
-): Promise<{ products: number; images: number }> => {
+  postTextByProductId: ReadonlyMap<string, string>,
+): Promise<ProductFolderImageSaveResult> => {
   const reservedFolderNames = new Set<string>();
+  const completedProductIds: string[] = [];
+  const failureDetails: string[] = [];
   let savedProducts = 0;
   let savedImages = 0;
+  let expectedImages = 0;
+  let failedImages = 0;
+  let failedProducts = 0;
+  let failedPostFiles = 0;
 
   for (const product of products) {
-    const mainImages = product.images;
-    const internalImages = product.internalImages;
+    const mainImages = product.images ?? [];
+    const internalImages = product.internalImages ?? [];
+    const productImageCount = mainImages.length + internalImages.length;
 
-    if (mainImages.length === 0 && internalImages.length === 0) continue;
+    if (productImageCount === 0) continue;
 
-    const folderName = await getAvailableProductFolderName(
-      rootDirectoryHandle,
-      product.name,
-      reservedFolderNames,
-    );
-    const productDirectoryHandle = await rootDirectoryHandle.getDirectoryHandle(
-      folderName,
-      { create: true },
-    );
+    expectedImages += productImageCount;
+
+    let folderName = sanitizeLocalProductFolderName(product.name);
+    let productDirectoryHandle: LocalFileSystemDirectoryHandle;
+
+    try {
+      folderName = await getAvailableProductFolderName(
+        rootDirectoryHandle,
+        product.name,
+        reservedFolderNames,
+      );
+      productDirectoryHandle = await rootDirectoryHandle.getDirectoryHandle(
+        folderName,
+        { create: true },
+      );
+    } catch (error: unknown) {
+      failedProducts += 1;
+      const reason = error instanceof Error ? error.message : String(error);
+      failureDetails.push(`${product.name}: ${reason}`);
+      continue;
+    }
+
+    let allImagesSaved = true;
 
     const saveImageList = async (
       images: ProductImage[],
@@ -5578,48 +5705,109 @@ const saveProductImagesIntoFolders = async (
     ): Promise<void> => {
       for (let index = 0; index < images.length; index += 1) {
         const image = images[index];
+        if (!image) {
+          allImagesSaved = false;
+          failedImages += 1;
+          failureDetails.push(
+            `${folderName}: thiếu dữ liệu ảnh tại vị trí ${index + 1}`,
+          );
+          continue;
+        }
 
-        if (!image) continue;
-
-        const blob = await getProductImageBlob(image);
         const preferredName = createProductFolderImageFilename(
           product.name,
           index,
           image,
           isInternal,
         );
-        const fileName = await createAvailableLocalImageName(
-          productDirectoryHandle,
-          preferredName,
-        );
-        const fileHandle = await productDirectoryHandle.getFileHandle(fileName, {
-          create: true,
-        });
-        const writable = await fileHandle.createWritable();
 
         try {
-          await writable.write(blob);
-          await writable.close();
-        } catch (error) {
-          try {
-            await writable.close();
-          } catch {
-            // Giữ lỗi ghi file ban đầu.
-          }
-          await productDirectoryHandle.removeEntry(fileName).catch(() => undefined);
-          throw error;
-        }
+          const blob = await getProductImageBlob(image);
+          // Use a stable name and overwrite the previous copy on retry instead
+          // of creating duplicate files such as "(1)", "(2)", etc.
+          const fileHandle = await productDirectoryHandle.getFileHandle(
+            preferredName,
+            { create: true },
+          );
+          const writable = await fileHandle.createWritable();
 
-        savedImages += 1;
+          try {
+            await writable.write(blob);
+            await writable.close();
+          } catch (error: unknown) {
+            if (writable.abort) {
+              await writable.abort().catch(() => undefined);
+            }
+            throw error;
+          }
+
+          savedImages += 1;
+        } catch (error: unknown) {
+          allImagesSaved = false;
+          failedImages += 1;
+          const reason = error instanceof Error ? error.message : String(error);
+          failureDetails.push(`${folderName}/${preferredName}: ${reason}`);
+        }
       }
     };
 
     await saveImageList(mainImages, false);
     await saveImageList(internalImages, true);
-    savedProducts += 1;
+
+    let postFileSaved = false;
+
+    try {
+      const postText = postTextByProductId.get(product.id);
+      if (postText === undefined) {
+        throw new Error("Không tìm thấy nội dung Post của sản phẩm");
+      }
+
+      const copyPostCommand = createCopyPostCommand(postText);
+      const copyPostHandle = await productDirectoryHandle.getFileHandle(
+        "COPY_POST.cmd",
+        { create: true },
+      );
+      const writable = await copyPostHandle.createWritable();
+
+      try {
+        await writable.write(
+          new Blob([copyPostCommand], { type: "text/plain;charset=utf-8" }),
+        );
+        await writable.close();
+        postFileSaved = true;
+      } catch (error: unknown) {
+        if (writable.abort) {
+          await writable.abort().catch(() => undefined);
+        }
+        throw error;
+      }
+    } catch (error: unknown) {
+      failedPostFiles += 1;
+      const reason = error instanceof Error ? error.message : String(error);
+      failureDetails.push(`${folderName}/COPY_POST.cmd: ${reason}`);
+    }
+
+    if (allImagesSaved && postFileSaved) {
+      savedProducts += 1;
+      completedProductIds.push(product.id);
+    } else if (!allImagesSaved) {
+      // Do not mark partially saved products as complete; a subsequent run can retry them.
+      failedProducts += 1;
+    } else if (!postFileSaved) {
+      failedProducts += 1;
+    }
   }
 
-  return { products: savedProducts, images: savedImages };
+  return {
+    products: savedProducts,
+    images: savedImages,
+    expectedImages,
+    completedProductIds,
+    failedImages,
+    failedProducts,
+    failedPostFiles,
+    failureDetails,
+  };
 };
 
 const saveImagesToDirectory = async (
@@ -13875,6 +14063,19 @@ export default function LocalPage({
       return;
     }
 
+    const postTextByProductId = new Map<string, string>(
+      products.map(
+        (product): [string, string] => [
+          product.id,
+          buildPostText(
+            product,
+            settings.commonDescription,
+            activeContactText,
+            includeSocialTags,
+          ),
+        ],
+      ),
+    );
     const productIds = products.map((product) => product.id);
     const storedDownloadedProductIds = loadDownloadedProductIds();
     const wasDownloaded = productIds.some(
@@ -13898,12 +14099,17 @@ export default function LocalPage({
         const result = await saveProductImagesIntoFolders(
           products,
           directoryHandle,
+          postTextByProductId,
         );
-        markProductImagesDownloaded(productIds);
-        Toastify(
-          `Đã tạo ${result.products} folder và lưu ${result.images} ảnh vào ${directoryHandle.name}`,
-          200,
+        if (result.completedProductIds.length > 0) {
+          markProductImagesDownloaded(result.completedProductIds);
+        }
+        const feedback = getProductFolderDownloadFeedback(
+          result,
+          products.length,
+          directoryHandle.name,
         );
+        Toastify(feedback.message, feedback.statusCode);
       } catch (error: unknown) {
         if (isAbortError(error)) return;
 
@@ -13962,12 +14168,17 @@ export default function LocalPage({
           const result = await saveProductImagesIntoFolders(
             remainingProducts,
             directoryHandle,
+            postTextByProductId,
           );
-          markProductImagesDownloaded(remainingProducts.map((product) => product.id));
-          Toastify(
-            `Đã tạo ${result.products} folder và lưu ${result.images} ảnh`,
-            200,
+          if (result.completedProductIds.length > 0) {
+            markProductImagesDownloaded(result.completedProductIds);
+          }
+          const feedback = getProductFolderDownloadFeedback(
+            result,
+            remainingProducts.length,
+            directoryHandle.name,
           );
+          Toastify(feedback.message, feedback.statusCode);
         } catch (error: unknown) {
           if (isAbortError(error)) return;
 
