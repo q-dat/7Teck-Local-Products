@@ -4151,6 +4151,10 @@ const createCloudinaryThumbnailUrl = (
 };
 
 const SYSTEM_IMAGE_INDEX_WIDTH = 4;
+// Chromium throttles bursts of programmatic downloads (often after ten files).
+// Keep the download-click cadence below the browser's burst threshold, including
+// when every image Blob is already cached and resolves immediately.
+const MULTIPLE_DOWNLOAD_INTERVAL_MS = 350;
 
 const createSystemImageFilename = (
   index: number,
@@ -12093,17 +12097,39 @@ export default function LocalPage({
   const downloadOriginalImagesInOrder = async (
     images: ProductImage[],
     startIndex = 0,
-  ): Promise<void> => {
+  ): Promise<{ downloadedCount: number; failedImageNames: string[] }> => {
     // Kích hoạt theo index giảm dần. File index 1 được tạo sau cùng,
     // giúp Date Modified giảm dần trên Windows vẫn hiển thị 1, 2, 3...
     // Filename zero-padding giữ thứ tự ổn định khi sort theo Name.
+    // Khoảng nghỉ quan trọng cả khi Blob đã nằm trong cache: nếu click liên
+    // tiếp quá nhanh, Chromium có thể chỉ nhận khoảng mười lượt tải đầu.
+    let downloadedCount = 0;
+    let hasAttemptedDownload = false;
+    const failedImageNames: string[] = [];
+    const interactionWindow = getActiveInteractionWindow();
+
     for (let index = images.length - 1; index >= 0; index -= 1) {
       const image = images[index];
 
       if (!image) continue;
 
-      await downloadOriginalImage(image, startIndex + index);
+      if (hasAttemptedDownload) {
+        await new Promise<void>((resolve) => {
+          interactionWindow.setTimeout(resolve, MULTIPLE_DOWNLOAD_INTERVAL_MS);
+        });
+      }
+      hasAttemptedDownload = true;
+
+      try {
+        await downloadOriginalImage(image, startIndex + index);
+        downloadedCount += 1;
+      } catch {
+        // Một ảnh lỗi không được phép dừng vòng lặp và làm mất các ảnh sau nó.
+        failedImageNames.push(image.name.trim() || `Ảnh ${index + 1}`);
+      }
     }
+
+    return { downloadedCount, failedImageNames };
   };
 
   const requestDownloadImageDecision = (
@@ -12157,9 +12183,28 @@ export default function LocalPage({
 
       try {
         await copyDownloadTextIfNeeded(request);
-        await downloadOriginalImagesInOrder(images, request.startIndex);
-        markProductImagesDownloaded(productIdsToMark);
-        Toastify(`Đã gửi ${images.length} ảnh nguyên bản vào trình tải xuống`, 200);
+        const result = await downloadOriginalImagesInOrder(
+          images,
+          request.startIndex,
+        );
+
+        if (result.failedImageNames.length === 0) {
+          markProductImagesDownloaded(productIdsToMark);
+          Toastify(
+            `Đã gửi ${result.downloadedCount} ảnh nguyên bản vào trình tải xuống`,
+            200,
+          );
+        } else {
+          const failedNames = result.failedImageNames.slice(0, 3).join(", ");
+          const remainingFailedCount = result.failedImageNames.length - 3;
+          const failedSuffix =
+            remainingFailedCount > 0 ? ` và ${remainingFailedCount} ảnh khác` : "";
+          Toastify(
+            `Đã gửi ${result.downloadedCount}/${images.length} ảnh. Lỗi ${result.failedImageNames.length} ảnh: ${failedNames}${failedSuffix}. Thử tải lại để hoàn tất.`,
+            400,
+          );
+        }
+
         setPendingDownload(null);
         setSkipInternalDownloadImages(false);
       } catch (error) {
@@ -12281,12 +12326,27 @@ export default function LocalPage({
 
         try {
           await copyDownloadTextIfNeeded(request);
-          await downloadOriginalImagesInOrder(images, request.startIndex);
-          markProductImagesDownloaded([product.id]);
-          Toastify(
-            `Đã gửi ${images.length} ảnh nguyên bản vào trình tải xuống`,
-            200,
+          const result = await downloadOriginalImagesInOrder(
+            images,
+            request.startIndex,
           );
+
+          if (result.failedImageNames.length === 0) {
+            markProductImagesDownloaded([product.id]);
+            Toastify(
+              `Đã gửi ${result.downloadedCount} ảnh nguyên bản vào trình tải xuống`,
+              200,
+            );
+          } else {
+            const failedNames = result.failedImageNames.slice(0, 3).join(", ");
+            const remainingFailedCount = result.failedImageNames.length - 3;
+            const failedSuffix =
+              remainingFailedCount > 0 ? ` và ${remainingFailedCount} ảnh khác` : "";
+            Toastify(
+              `Đã gửi ${result.downloadedCount}/${images.length} ảnh. Lỗi ${result.failedImageNames.length} ảnh: ${failedNames}${failedSuffix}. Thử tải lại để hoàn tất.`,
+              400,
+            );
+          }
         } catch (error) {
           if (isAbortError(error)) return;
 
@@ -13098,8 +13158,23 @@ export default function LocalPage({
       );
   };
 
-  const queueMetaComposerImageDownloads = (images: ProductImage[]): void => {
-    void downloadOriginalImagesInOrder(images).catch(() => undefined);
+  const queueMetaComposerImageDownloads = (
+    images: ProductImage[],
+    productId: string,
+  ): void => {
+    void downloadOriginalImagesInOrder(images)
+      .then((result) => {
+        if (result.failedImageNames.length === 0) {
+          markProductImagesDownloaded([productId]);
+          return;
+        }
+
+        Toastify(
+          `Đã gửi ${result.downloadedCount}/${images.length} ảnh. Có ${result.failedImageNames.length} ảnh chưa tải được; sản phẩm chưa được đánh dấu hoàn tất.`,
+          400,
+        );
+      })
+      .catch(() => undefined);
   };
 
   const prepareMetaImageDownload = (
@@ -13109,8 +13184,8 @@ export default function LocalPage({
     if (!shouldDownload) return "không tải lại ảnh";
     if (request.images.length === 0) return "không có ảnh chính để tải";
 
-    queueMetaComposerImageDownloads(request.images);
-    markProductImagesDownloaded([request.productId]);
+    // Chỉ đánh dấu đã tải sau khi toàn bộ ảnh đã được gửi đến trình tải xuống.
+    queueMetaComposerImageDownloads(request.images, request.productId);
 
     return `đang tải ${request.images.length} ảnh chính`;
   };
