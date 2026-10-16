@@ -14682,7 +14682,7 @@ export default function LocalPage({
     return lines.map((line, index) => {
       const trimmedLine = line.trim();
       const copyKey = `plus-line-${productId}-${index}`;
-      const isPlusLine = trimmedLine.startsWith("+");
+      const isPlusLine = trimmedLine.startsWith("+") || trimmedLine.startsWith("•");
 
       if (!trimmedLine) {
         return <br key={`${productId}-empty-${index}`} />;
