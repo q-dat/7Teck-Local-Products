@@ -6506,10 +6506,28 @@ export default function LocalPage({
     key: string;
     limit: number;
   }>({ key: "", limit: INITIAL_PRODUCT_RENDER_LIMIT });
-  const [activeCategoryTab, setActiveCategoryTab] =
-    useState<CategoryTab>("all");
+  const [activeCategorySelection, setActiveCategorySelection] = useState<{
+    scope: LocalPageScope;
+    category: CategoryTab;
+  }>(() => ({
+    scope: scopedContentType,
+    category: "all",
+  }));
   const [isActiveCategoryReady, setIsActiveCategoryReady] =
     useState<boolean>(false);
+  const activeCategoryTab =
+    activeCategorySelection.scope === scopedContentType
+      ? activeCategorySelection.category
+      : loadActiveCategoryTab(scopedContentType);
+  const setActiveCategoryTab = useCallback(
+    (category: CategoryTab): void => {
+      setActiveCategorySelection({
+        scope: scopedContentType,
+        category,
+      });
+    },
+    [scopedContentType],
+  );
   const [draggingCategoryKey, setDraggingCategoryKey] =
     useState<string>("");
   const [categoryDropTarget, setCategoryDropTarget] = useState<{
@@ -7052,15 +7070,23 @@ export default function LocalPage({
   }, []);
 
   useEffect(() => {
-    setActiveCategoryTab(loadActiveCategoryTab(scopedContentType));
+    setActiveCategorySelection({
+      scope: scopedContentType,
+      category: loadActiveCategoryTab(scopedContentType),
+    });
     setIsActiveCategoryReady(true);
   }, [scopedContentType]);
 
   useEffect(() => {
+    // Không ghi state của scope cũ vào storage của scope mới trong lần render chuyển scope.
     if (!isActiveCategoryReady) return;
+    if (activeCategorySelection.scope !== scopedContentType) return;
 
-    saveActiveCategoryTab(scopedContentType, activeCategoryTab);
-  }, [activeCategoryTab, isActiveCategoryReady, scopedContentType]);
+    saveActiveCategoryTab(
+      scopedContentType,
+      activeCategorySelection.category,
+    );
+  }, [activeCategorySelection, isActiveCategoryReady, scopedContentType]);
 
   const copyText = useCallback(
     async (value: string): Promise<void> => {
@@ -8223,6 +8249,18 @@ export default function LocalPage({
 
   const handleProductsTouchStart = useCallback(
     (event: ReactTouchEvent<HTMLDivElement>) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          'button, a, input, textarea, select, [role="button"], [data-no-category-swipe="true"]',
+        )
+      ) {
+        // Tương tác với thẻ/nút sản phẩm không được kích hoạt vuốt đổi danh mục.
+        swipeStartRef.current = null;
+        return;
+      }
+
       const touch = event.touches[0];
       if (!touch) return;
       swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
@@ -8242,16 +8280,20 @@ export default function LocalPage({
       const deltaX = touch.clientX - start.x;
       const deltaY = touch.clientY - start.y;
 
-      // Chỉ tính là vuốt ngang khi đủ dài và không phải cuộn dọc
+      // Chỉ tính là vuốt ngang khi đủ dài và không phải cuộn dọc.
       const MIN_SWIPE = 60;
       if (Math.abs(deltaX) < MIN_SWIPE) return;
       if (Math.abs(deltaX) < Math.abs(deltaY) * 1.5) return;
 
-      // Vuốt trái -> danh mục kế tiếp; vuốt phải -> danh mục trước đó
+      // Vuốt trái -> danh mục kế tiếp; vuốt phải -> danh mục trước đó.
       goToAdjacentCategory(deltaX < 0 ? 1 : -1);
     },
     [goToAdjacentCategory],
   );
+
+  const handleProductsTouchCancel = useCallback((): void => {
+    swipeStartRef.current = null;
+  }, []);
 
   const handleCancelSearchInput = useCallback((): void => {
     setIsSearchSuggestionsOpen(false);
@@ -8383,6 +8425,12 @@ export default function LocalPage({
     activeCategorySceneColor
       ? { "--active-category-color": activeCategorySceneColor }
       : undefined;
+  const mobileCategoryContextLabel = query.trim()
+    ? query.trim()
+    : activeCategoryTab === "all"
+      ? "Tất cả danh mục"
+      : activeCategoryTab;
+  const isMobileSearchContext = query.trim().length > 0;
 
   const productRenderKey = useMemo(() => {
     return [
@@ -17049,6 +17097,26 @@ export default function LocalPage({
           bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
         }
 
+        .local-products-workspace .mobile-category-menu-anchor,
+        .local-products-workspace .mobile-category-context {
+          bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+        }
+
+        .local-products-workspace .mobile-category-context {
+          border-color: rgba(255, 255, 255, 0.24);
+          background:
+            linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.075) 48%, rgba(10, 15, 25, 0.68));
+          -webkit-backdrop-filter: blur(24px) saturate(1.55);
+          backdrop-filter: blur(24px) saturate(1.55);
+          -webkit-tap-highlight-color: transparent;
+          touch-action: pan-y;
+        }
+
+        .local-products-workspace .mobile-category-context[data-searching="true"] {
+          border-color: rgba(147, 197, 253, 0.36);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 8px 28px rgba(0, 0, 0, 0.28), 0 0 18px rgba(96, 165, 250, 0.08);
+        }
+
         .local-products-workspace .floating-scroll-top {
           position: fixed !important;
           left: calc(0.75rem + 44px + 0.5rem) !important;
@@ -18044,7 +18112,7 @@ export default function LocalPage({
             ) : null}
           </AnimatePresence>
 
-          <div className="fixed bottom-3 right-2 z-[1000] md:hidden">
+          <div className="mobile-category-menu-anchor fixed bottom-3 right-2 z-[1000] md:hidden">
             <AnimatePresence initial={false}>
               {isMobileCategoryMenuOpen ? (
                 <motion.div
@@ -18150,7 +18218,7 @@ export default function LocalPage({
               aria-controls="mobile-category-menu"
               aria-expanded={isMobileCategoryMenuOpen}
               whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex min-h-11 min-w-24 items-center justify-center border px-4 text-xs font-black tracking-[0.08em] backdrop-blur-xl transition ${isMobileCategoryMenuOpen
+              className={`flex h-11 min-w-24 shrink-0 items-center justify-center border px-4 text-xs font-black tracking-[0.08em] backdrop-blur-xl transition ${isMobileCategoryMenuOpen
                 ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                 : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                 }`}
@@ -18160,6 +18228,29 @@ export default function LocalPage({
             >
               {isMobileCategoryMenuOpen ? "Đóng" : "Danh mục"}
             </motion.button>
+          </div>
+
+          <div
+            className="mobile-category-context fixed bottom-3 left-1/2 z-[1001] flex h-8 w-[calc(100vw-208px)] min-w-[96px] max-w-[132px] -translate-x-1/2 select-none items-center gap-1.5 overflow-hidden rounded-full border border-white/25 px-3 text-[10px] font-semibold tracking-wide text-white/95 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_8px_28px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:hidden"
+            data-searching={isMobileSearchContext ? "true" : "false"}
+            title={mobileCategoryContextLabel}
+            aria-label={
+              isMobileSearchContext
+                ? `Từ khóa tìm kiếm: ${mobileCategoryContextLabel}`
+                : `Danh mục hiện tại: ${mobileCategoryContextLabel}`
+            }
+            onTouchStart={handleProductsTouchStart}
+            onTouchEnd={handleProductsTouchEnd}
+            onTouchCancel={handleProductsTouchCancel}
+          >
+            {isMobileSearchContext ? (
+              <FiSearch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
+            ) : (
+              <FiDatabase aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-center">
+              {mobileCategoryContextLabel}
+            </span>
           </div>
 
           <div
@@ -18403,6 +18494,7 @@ export default function LocalPage({
             className="category-product-stage  min-h-screen"
             onTouchStart={handleProductsTouchStart}
             onTouchEnd={handleProductsTouchEnd}
+            onTouchCancel={handleProductsTouchCancel}
           >
             <div className="category-ember-field" aria-hidden="true">
               <span className="category-ember-layer" data-ember-layer="1" />
@@ -18435,6 +18527,7 @@ export default function LocalPage({
                   return (
                     <article
                       key={`${activeCategoryTab}-${product.id}`}
+                      data-no-category-swipe="true"
                       data-active={active}
                       data-done={productDone}
                       data-content-type={product.contentType}
