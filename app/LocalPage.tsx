@@ -15614,6 +15614,29 @@ export default function LocalPage({
     shortcutCaptureAction,
   ]);
 
+  useEffect(() => {
+    const handleCapsLockKeyUp = (event: KeyboardEvent): void => {
+      if (event.key !== "CapsLock" && event.code !== "CapsLock") return;
+
+      // Caps Lock controls only the data-edit permission; it must not open or close the Data modal.
+      setIsWriteAccessUnlocked(event.getModifierState("CapsLock"));
+    };
+
+    const eventWindows = [window, pictureInPictureWindow].filter(
+      (targetWindow, index, windowList): targetWindow is Window =>
+        targetWindow !== null && windowList.indexOf(targetWindow) === index,
+    );
+
+    eventWindows.forEach((targetWindow) => {
+      targetWindow.addEventListener("keyup", handleCapsLockKeyUp);
+    });
+
+    return () => {
+      eventWindows.forEach((targetWindow) => {
+        targetWindow.removeEventListener("keyup", handleCapsLockKeyUp);
+      });
+    };
+  }, [pictureInPictureWindow]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -19119,9 +19142,9 @@ export default function LocalPage({
             <div
               data-modal-scroll-single-root={
                 activeModal === "imageAlbum" ||
-                activeModal === "productList" ||
-                activeModal === "product" ||
-                activeModal === "imageOverlayEditor"
+                  activeModal === "productList" ||
+                  activeModal === "product" ||
+                  activeModal === "imageOverlayEditor"
                   ? undefined
                   : "true"
               }
@@ -22963,6 +22986,9 @@ export default function LocalPage({
                         </p>
                         <p className={`mt-0.5 text-[9px] font-bold ${isWriteAccessUnlocked ? "text-emerald-200" : "text-rose-200"}`}>
                           {isWriteAccessUnlocked ? "Đã mở khóa · Có thể thêm / sửa / xóa" : "Đang khóa · Chỉ được xem và đọc dữ liệu"}
+                        </p>
+                        <p className="mt-0.5 text-[8px] leading-4 text-slate-500">
+                          Bật Caps Lock để mở khóa quyền chỉnh sửa dữ liệu; tắt Caps Lock để khóa quyền chỉnh sửa dữ liệu.
                         </p>
                       </div>
                     </div>
