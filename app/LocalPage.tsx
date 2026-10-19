@@ -1309,7 +1309,7 @@ const secondaryActionButtonClassName =
   "flex items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 p-2 whitespace-nowrap text-xs font-bold text-white transition hover:bg-slate-700";
 
 const compactLuxuryDialogClassName =
-  "luxury-dialog max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto overscroll-contain border p-3";
+  "luxury-dialog w-full max-w-md border p-3";
 
 const fullCardItemNameClassName =
   "block min-w-0 w-full max-w-full whitespace-normal break-words !overflow-visible [overflow-wrap:anywhere] [word-break:break-word]";
@@ -17267,38 +17267,6 @@ export default function LocalPage({
             transition-duration: 0.01ms !important;
           }
         }
-
-
-        [data-modal-scroll-single-root="true"] [class*="overflow-y-auto"],
-        [data-modal-scroll-single-root="true"] [class*="overflow-y-scroll"],
-        [data-modal-scroll-single-root="true"] [class*="overflow-auto"] {
-          box-sizing: border-box;
-          flex: none !important;
-          height: auto !important;
-          max-height: none !important;
-          overflow: visible !important;
-          overscroll-behavior: auto !important;
-          scrollbar-gutter: auto !important;
-        }
-
-        [data-modal-viewport-fit="true"] {
-          box-sizing: border-box;
-          max-height: calc(100dvh - 1.5rem) !important;
-          overflow-x: hidden !important;
-          overflow-y: auto !important;
-          overscroll-behavior: contain;
-        }
-
-        @media (min-width: 1280px) {
-          [data-modal-viewport-fit="true"] {
-            max-height: calc(100dvh - 2.5rem) !important;
-          }
-        }
-
-        .luxury-modal {
-          min-height: 0;
-          min-width: 0;
-        }
       `}</style>
       <AnimatePresence initial={false}>
         {isHeaderActionsMenuOpen ? (
@@ -19140,15 +19108,7 @@ export default function LocalPage({
             </div>
 
             <div
-              data-modal-scroll-single-root={
-                activeModal === "imageAlbum" ||
-                  activeModal === "productList" ||
-                  activeModal === "product" ||
-                  activeModal === "imageOverlayEditor"
-                  ? undefined
-                  : "true"
-              }
-              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" || activeModal === "imageOverlayEditor" ? "overflow-hidden" : "overflow-y-auto overscroll-contain"}`}
+              className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" || activeModal === "imageOverlayEditor" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
                 <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -19220,7 +19180,7 @@ export default function LocalPage({
                     </div>
                   </article>
 
-                  <aside data-modal-scroll-single-root="true" className="box-border flex max-h-[36dvh] w-full min-w-0 max-w-full shrink-0 flex-col gap-1.5 overflow-x-clip overflow-y-auto rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:h-full xl:max-h-none xl:min-h-0">
+                  <aside className="box-border flex max-h-[36dvh] w-full min-w-0 max-w-full shrink-0 flex-col gap-1.5 overflow-x-clip overflow-y-auto rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:h-full xl:max-h-none xl:min-h-0">
                     <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -19290,7 +19250,7 @@ export default function LocalPage({
                             <div key={layer.id} className={`flex w-full min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border ${selectedImageOverlayLayerId === layer.id ? "border-cyan-300/35 bg-cyan-300/[0.07]" : "border-white/10 bg-black/20"}`}>
                               <button
                                 type="button"
-                                className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] px-2 py-1.5 text-left text-[9px] font-bold text-slate-200"
+                                className="min-w-0 flex-1 whitespace-normal break-words px-2 py-1.5 text-left text-[9px] font-bold text-slate-200"
                                 title={layer.name}
                                 onClick={() => setSelectedImageOverlayLayerId(layer.id)}
                               >{index + 1}. {layer.name}</button>
@@ -20130,7 +20090,7 @@ export default function LocalPage({
                     </div>
                   </div>
 
-                  <div data-modal-scroll-single-root="true" className="product-list-scroll min-h-0 min-w-0 max-w-full flex-1 overflow-auto rounded-md border border-white/10 bg-slate-950">
+                  <div className="product-list-scroll min-h-0 min-w-0 max-w-full flex-1 overflow-auto rounded-md border border-white/10 bg-slate-950">
                     {groupedProductsByCategory.length > 0 ? (
                       <div className="min-w-[860px]">
                         <div className="sticky top-0 z-10 grid grid-cols-[170px_minmax(360px,1fr)_120px_90px_140px] border-b border-white/10 bg-slate-900 text-[10px] font-black uppercase tracking-wide text-slate-400">
@@ -20427,7 +20387,7 @@ export default function LocalPage({
                   className="product-editor flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
                   onSubmit={(event) => void handleSubmit(event)}
                 >
-                  <div data-modal-scroll-single-root="true" className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
+                  <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
                     <div className="grid min-h-full min-w-0 grid-cols-1 items-start gap-3 pb-24 xl:grid-cols-[minmax(320px,0.92fr)_minmax(360px,1.08fr)] xl:pb-2">
                       <section className="order-2 flex min-h-0 min-w-0 flex-col gap-3 xl:order-1">
                         <div className="grid min-w-0 gap-1.5 rounded-md border border-white/10 bg-slate-950/70 p-2">
@@ -22987,9 +22947,6 @@ export default function LocalPage({
                         <p className={`mt-0.5 text-[9px] font-bold ${isWriteAccessUnlocked ? "text-emerald-200" : "text-rose-200"}`}>
                           {isWriteAccessUnlocked ? "Đã mở khóa · Có thể thêm / sửa / xóa" : "Đang khóa · Chỉ được xem và đọc dữ liệu"}
                         </p>
-                        <p className="mt-0.5 text-[8px] leading-4 text-slate-500">
-                          Bật Caps Lock để mở khóa quyền chỉnh sửa dữ liệu; tắt Caps Lock để khóa quyền chỉnh sửa dữ liệu.
-                        </p>
                       </div>
                     </div>
                     <button
@@ -23598,7 +23555,6 @@ export default function LocalPage({
               initial={{ opacity: 0, scale: 0.96, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.97, y: 8 }}
-              data-modal-viewport-fit="true"
               className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyan-300/20 bg-[#070d16]/95 p-[1px] shadow-[0_20px_80px_rgba(0,0,0,0.55)]"
             >
               <style>{`
@@ -23661,7 +23617,6 @@ export default function LocalPage({
       {pendingConfirm ? (
         <div className="luxury-modal-overlay fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center p-3">
           <div
-            data-modal-viewport-fit="true"
             className={`w-full border border-white/10 bg-slate-950/95 shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl ${pendingConfirm.kind === "sync" ? "max-w-sm rounded-2xl p-4" : compactLuxuryDialogClassName}`}
           >
             {pendingConfirm.kind === "sync" ? (
@@ -23887,8 +23842,6 @@ export default function LocalPage({
           onClick={() => setIsFacebookSearchDialogOpen(false)}
         >
           <form
-            data-modal-viewport-fit="true"
-            data-modal-scroll-single-root="true"
             className="luxury-dialog w-full max-w-xl border p-4 xl:p-5"
             onClick={(event) => event.stopPropagation()}
             onSubmit={handleSubmitFacebookSearch}
@@ -23981,8 +23934,6 @@ export default function LocalPage({
         <div className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5">
           <div
             data-share-dialog="true"
-            data-modal-scroll-single-root="true"
-            data-modal-viewport-fit="true"
             className="luxury-dialog max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-6xl overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-2.5rem)] xl:overflow-y-auto xl:p-4"
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d8c99f]/20 pb-3">
@@ -24127,7 +24078,7 @@ export default function LocalPage({
                   </div>
 
                   {shareContactOptions.length > 0 ? (
-                    <div className="mt-2 h-[72px] snap-y snap-mandatory space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                    <div className="mt-2 h-[100px] xl:h-[130px] snap-y snap-mandatory space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
                       {shareContactOptions.map((option, index) => {
                         const isActiveContact =
                           option.id === (shareContactId || selectedContactId);
