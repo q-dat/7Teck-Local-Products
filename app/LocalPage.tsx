@@ -1287,6 +1287,25 @@ const iconClassName =
 const productActionButtonBaseClassName =
   "group relative flex min-h-7 items-center justify-center gap-1 overflow-hidden whitespace-nowrap border px-1.5 py-1 text-[9px] font-black tracking-[0.025em] [clip-path:polygon(6px_0,calc(100%_-_6px)_0,100%_6px,100%_calc(100%_-_6px),calc(100%_-_6px)_100%,6px_100%,0_calc(100%_-_6px),0_6px)] transition-[color,background-color,border-color,transform,box-shadow,filter] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d8c99f]/[0.45] active:scale-[0.97] active:brightness-95";
 
+const ProductActionShortcutBadge = ({
+  active,
+  shortcut,
+}: {
+  active: boolean;
+  shortcut: string;
+}) => {
+  if (!active) return null;
+
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute right-1 top-0.5 z-[4] hidden h-3.5 min-w-3.5 items-center justify-center border border-[#f1e5c2] bg-[#f2e8cd] px-0.5 font-mono text-[8px] font-black leading-none text-[#17130a] shadow-[0_1px_4px_rgba(0,0,0,0.6)] xl:flex"
+    >
+      {shortcut}
+    </span>
+  );
+};
+
 const headerActionButtonBaseClassName =
   "group relative flex min-h-5 cursor-pointer items-center justify-start gap-1 overflow-hidden whitespace-nowrap border p-1.5 text-[10px] font-semibold [clip-path:polygon(7px_0,calc(100%_-_7px)_0,100%_7px,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,7px_100%,0_calc(100%_-_7px),0_7px)] transition-[color,background-color,border-color,transform,box-shadow,filter] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d8c99f]/[0.45] active:scale-[0.97] active:brightness-95 xl:min-w-0 xl:w-full xl:justify-center";
 
@@ -15541,6 +15560,87 @@ export default function LocalPage({
   }, [activeModal]);
 
   useEffect(() => {
+    if (!isSettingsReady) return;
+
+    const handleProductActionShortcutKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        isTypingTarget(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        activeModal ||
+        isFacebookSearchDialogOpen ||
+        isHeaderActionsMenuOpen ||
+        isMobileCategoryMenuOpen ||
+        pendingConfirm ||
+        pendingDownload ||
+        pendingShare ||
+        pendingBackup ||
+        isConfirmExecuting ||
+        isShareExecuting ||
+        isBackupSaving ||
+        shortcutCaptureAction
+      ) {
+        return;
+      }
+
+      if (!/^[1-6]$/u.test(event.key)) return;
+
+      const targetWindow = event.currentTarget as Window;
+      const activeProductCard = targetWindow.document.querySelector<HTMLElement>(
+        'article[data-product-card="true"][data-active="true"]',
+      );
+      const actionButton = activeProductCard?.querySelector<HTMLButtonElement>(
+        `[data-product-action-shortcut="${event.key}"]`,
+      );
+
+      if (!actionButton || actionButton.disabled) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      actionButton.click();
+    };
+
+    const eventWindows = [window, pictureInPictureWindow].filter(
+      (targetWindow, index, windowList): targetWindow is Window =>
+        targetWindow !== null && windowList.indexOf(targetWindow) === index,
+    );
+
+    eventWindows.forEach((targetWindow) => {
+      targetWindow.addEventListener(
+        "keydown",
+        handleProductActionShortcutKeyDown,
+      );
+    });
+
+    return () => {
+      eventWindows.forEach((targetWindow) => {
+        targetWindow.removeEventListener(
+          "keydown",
+          handleProductActionShortcutKeyDown,
+        );
+      });
+    };
+  }, [
+    activeModal,
+    isBackupSaving,
+    isConfirmExecuting,
+    isFacebookSearchDialogOpen,
+    isHeaderActionsMenuOpen,
+    isMobileCategoryMenuOpen,
+    isSettingsReady,
+    isShareExecuting,
+    pendingBackup,
+    pendingConfirm,
+    pendingDownload,
+    pendingShare,
+    pictureInPictureWindow,
+    shortcutCaptureAction,
+  ]);
+
+  useEffect(() => {
     if (!isSettingsReady || !isHeaderShortcutsEnabled || shortcutCaptureAction) return;
 
     const handleHeaderShortcutKeyDown = (event: KeyboardEvent): void => {
@@ -18551,6 +18651,7 @@ export default function LocalPage({
                     <article
                       key={`${activeCategoryTab}-${product.id}`}
                       data-no-category-swipe="true"
+                      data-product-card="true"
                       data-active={active}
                       data-done={productDone}
                       data-content-type={product.contentType}
@@ -18793,7 +18894,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="cyan"
-                            title="Copy ảnh chính"
+                            data-product-action-shortcut="1"
+                            title={active ? "Copy ảnh chính · Phím 1" : "Copy ảnh chính"}
+                            aria-keyshortcuts={active ? "1" : undefined}
                             aria-label="Copy ảnh chính"
                             className={`${productActionButtonBaseClassName} border-[#d8c99f]/[0.32] bg-[#d8c99f]/[0.055] text-[#eadfbe] hover:border-[#f1e5c2]/[0.55] hover:bg-[#d8c99f]/10`}
                             onClick={(event) => {
@@ -18801,6 +18904,10 @@ export default function LocalPage({
                               void handleCopyProductRepresentativeImage(product);
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="1"
+                            />
                             {renderCopyIcon(`cover-${product.id}`)}
                             <span className=" truncate whitespace-nowrap">Ảnh Chính</span>
                           </button>
@@ -18808,7 +18915,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="sapphire"
-                            title="Chia sẻ sản phẩm"
+                            data-product-action-shortcut="2"
+                            title={active ? "Chia sẻ sản phẩm · Phím 2" : "Chia sẻ sản phẩm"}
+                            aria-keyshortcuts={active ? "2" : undefined}
                             aria-label="Chia sẻ sản phẩm"
                             className={`${productActionButtonBaseClassName} border-[#d8c99f]/[0.32] bg-[#d8c99f]/[0.055] text-[#eadfbe] hover:border-[#f1e5c2]/[0.55] hover:bg-[#d8c99f]/10`}
                             onClick={(event) => {
@@ -18816,6 +18925,10 @@ export default function LocalPage({
                               void handleShareProduct(product);
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="2"
+                            />
                             {copiedKey === `share-product-${product.id}` ? (
                               <FiCheck
                                 aria-hidden="true"
@@ -18833,7 +18946,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="indigo"
-                            title="Copy nguyên bản mô tả"
+                            data-product-action-shortcut="6"
+                            title={active ? "Copy nguyên bản mô tả · Phím 6" : "Copy nguyên bản mô tả"}
+                            aria-keyshortcuts={active ? "6" : undefined}
                             aria-label="Copy nguyên bản mô tả"
                             className={`${productActionButtonBaseClassName} border-white/[0.12] bg-white/[0.025] text-slate-200 hover:border-[#d8c99f]/[0.35] hover:bg-[#d8c99f]/[0.055] hover:text-[#eadfbe]`}
                             onClick={(event) => {
@@ -18849,6 +18964,10 @@ export default function LocalPage({
                               );
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="6"
+                            />
                             {renderCopyIcon(`post-${product.id}`)}
                             <span className=" truncate whitespace-nowrap">Post</span>
                           </button>
@@ -18856,7 +18975,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="amber"
-                            title="Copy comment sản phẩm"
+                            data-product-action-shortcut="3"
+                            title={active ? "Copy comment sản phẩm · Phím 3" : "Copy comment sản phẩm"}
+                            aria-keyshortcuts={active ? "3" : undefined}
                             aria-label="Copy comment sản phẩm"
                             className={`${productActionButtonBaseClassName} border-[#d8c99f]/[0.42] bg-[#d8c99f]/[0.07] text-[#f1e5c2] hover:border-[#f1e5c2]/[0.65] hover:bg-[#d8c99f]/[0.12]`}
                             onClick={(event) => {
@@ -18875,6 +18996,10 @@ export default function LocalPage({
                               );
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="3"
+                            />
                             {renderCopyIcon(`cmt-${product.id}`)}
                             <span className=" truncate whitespace-nowrap">Cmt</span>
                           </button>
@@ -18882,7 +19007,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="teal"
-                            title="Tải ảnh sản phẩm"
+                            data-product-action-shortcut="4"
+                            title={active ? "Tải ảnh sản phẩm · Phím 4" : "Tải ảnh sản phẩm"}
+                            aria-keyshortcuts={active ? "4" : undefined}
                             aria-label="Tải ảnh sản phẩm"
                             className={`${productActionButtonBaseClassName} border-[#b9c4d6]/25 bg-[#b9c4d6]/[0.045] text-[#d9e1ed] hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.065] hover:text-[#eadfbe]`}
                             onClick={(event) => {
@@ -18890,6 +19017,10 @@ export default function LocalPage({
                               handleDownloadProductImages(product);
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="4"
+                            />
                             <FiDownload
                               aria-hidden="true"
                               className={iconClassName}
@@ -18900,7 +19031,9 @@ export default function LocalPage({
                           <button
                             type="button"
                             data-luxury-accent="violet"
-                            title="Copy tên sản phẩm"
+                            data-product-action-shortcut="5"
+                            title={active ? "Copy tên sản phẩm · Phím 5" : "Copy tên sản phẩm"}
+                            aria-keyshortcuts={active ? "5" : undefined}
                             aria-label="Copy tên sản phẩm"
                             className={`${productActionButtonBaseClassName} border-white/[0.12] bg-white/[0.025] text-slate-200 hover:border-[#d8c99f]/[0.35] hover:bg-[#d8c99f]/[0.055] hover:text-[#eadfbe]`}
                             onClick={(event) => {
@@ -18912,6 +19045,10 @@ export default function LocalPage({
                               );
                             }}
                           >
+                            <ProductActionShortcutBadge
+                              active={active}
+                              shortcut="5"
+                            />
                             {renderCopyIcon(`name-${product.id}`)}
                             <span className=" truncate whitespace-nowrap">Tên</span>
                           </button>
