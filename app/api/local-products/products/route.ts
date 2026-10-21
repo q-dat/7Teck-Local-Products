@@ -11,9 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     await connectMongo();
-    const products = await ProductModel.find({}, { _id: 0 })
-      .sort({ updatedAt: -1 })
-      .lean();
+    const products = await ProductModel.find({}).sort({ updatedAt: -1 }).lean();
     return jsonNoStore({ ok: true, products });
   } catch (error) {
     return apiError(error);
