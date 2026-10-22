@@ -269,6 +269,7 @@ type FacebookDuplicatePostOption = {
 };
 
 type AutoCopyShareMode = "post" | "comment";
+type ProductRenderSource = "api" | "localBrowser";
 type CategoryDropPosition = "before" | "after";
 
 type AutoCopyContentSource = {
@@ -308,6 +309,7 @@ type DevicePreferences = {
   selectedContactId: string;
   isHeaderVisible: boolean;
   isRemoteSyncReminderEnabled: boolean;
+  productRenderSource: ProductRenderSource;
 };
 
 type FacebookLinkOpenKey =
@@ -347,6 +349,7 @@ type HeaderShortcutActionId =
   | "contact"
   | "reloadPage"
   | "refreshCloud"
+  | "productRenderSource"
   | "toggleRemoteSyncReminder";
 
 type HeaderShortcutConfig = Record<HeaderShortcutActionId, string>;
@@ -504,6 +507,12 @@ const HEADER_SHORTCUT_ACTIONS: readonly HeaderShortcutDefinition[] = [
     defaultShortcut: "Shift+D",
   },
   {
+    id: "productRenderSource",
+    label: "Nguồn render",
+    description: "Mở chọn nguồn nạp sản phẩm API hoặc Local Browser",
+    defaultShortcut: "Shift+H",
+  },
+  {
     id: "toggleRemoteSyncReminder",
     label: "Nhắc",
     description: "Bật hoặc tắt nhắc đồng bộ tự động",
@@ -551,6 +560,7 @@ const LEGACY_HEADER_SHORTCUT_DEFAULTS: HeaderShortcutConfig = {
   contact: "Ctrl+Alt+A",
   reloadPage: "Ctrl+Alt+S",
   refreshCloud: "Ctrl+Alt+D",
+  productRenderSource: "Ctrl+Alt+H",
   toggleRemoteSyncReminder: "Ctrl+Alt+F",
 };
 
@@ -877,6 +887,7 @@ type ModalName =
   | "imageDownload"
   | "localImageManager"
   | "facebookLinkSettings"
+  | "productRenderSource"
   | "contentNavigation"
   | "writeAccessDenied"
   | "shortcuts"
@@ -1046,6 +1057,7 @@ const defaultDevicePreferences: DevicePreferences = {
   selectedContactId: "",
   isHeaderVisible: false,
   isRemoteSyncReminderEnabled: true,
+  productRenderSource: "localBrowser",
 };
 
 const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
@@ -1065,6 +1077,8 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
     isHeaderVisible: record.isHeaderVisible === true,
     isRemoteSyncReminderEnabled:
       record.isRemoteSyncReminderEnabled !== false,
+    productRenderSource:
+      record.productRenderSource === "api" ? "api" : "localBrowser",
   };
 };
 
@@ -3950,6 +3964,45 @@ const normalizeProductsArray = (value: unknown): LocalProduct[] => {
     .filter((item): item is LocalProduct => item !== null);
 };
 
+const createBootstrapPayloadFromSyncChanges = (
+  basePayload: BootstrapPayload,
+  changes: SyncChangesPayload,
+): BootstrapPayload => {
+  if (changes.mode === "snapshot") {
+    return {
+      products: sortProductsByUpdatedAt(
+        normalizeProductsArray(changes.products),
+      ).map(toPersistedProduct),
+      settings:
+        normalizeGlobalSettings(changes.state?.settings) ?? defaultSettings,
+    };
+  }
+
+  const baseProducts = normalizeProductsArray(basePayload.products);
+  const changedProducts = normalizeProductsArray(changes.products);
+  const changedProductIds = new Set(
+    changedProducts.map((product) => product.id),
+  );
+  const deletedProductIds = new Set(changes.deletedProductIds);
+  const mergedProducts = sortProductsByUpdatedAt([
+    ...changedProducts,
+    ...baseProducts.filter(
+      (product) =>
+        !changedProductIds.has(product.id) &&
+        !deletedProductIds.has(product.id),
+    ),
+  ]).map(toPersistedProduct);
+  const nextSettings =
+    changes.state?.settings !== undefined
+      ? normalizeGlobalSettings(changes.state.settings) ?? defaultSettings
+      : normalizeGlobalSettings(basePayload.settings) ?? defaultSettings;
+
+  return {
+    products: mergedProducts,
+    settings: nextSettings,
+  };
+};
+
 const normalizeGlobalSettings = (
   value: unknown,
 ): GlobalSettings | undefined => {
@@ -6588,6 +6641,8 @@ export default function LocalPage({
   const [selectedContactId, setSelectedContactId] = useState<string>("");
   const [isRemoteSyncReminderEnabled, setIsRemoteSyncReminderEnabled] =
     useState<boolean>(true);
+  const [productRenderSource, setProductRenderSource] =
+    useState<ProductRenderSource>("localBrowser");
   const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
   const prefersReducedMotion = useReducedMotion();
@@ -6973,6 +7028,7 @@ export default function LocalPage({
       setSelectedContactId(preferences.selectedContactId);
       setIsHeaderVisible(preferences.isHeaderVisible);
       setIsRemoteSyncReminderEnabled(preferences.isRemoteSyncReminderEnabled);
+      setProductRenderSource(preferences.productRenderSource);
     };
 
     applyPreferences(loadDevicePreferences());
@@ -7009,6 +7065,7 @@ export default function LocalPage({
       selectedContactId,
       isHeaderVisible,
       isRemoteSyncReminderEnabled,
+      productRenderSource,
     });
   }, [
     includeSocialTags,
@@ -7018,6 +7075,7 @@ export default function LocalPage({
     isHeaderVisible,
     isRemoteSyncReminderEnabled,
     selectedContactId,
+    productRenderSource,
   ]);
 
   useEffect(() => {
@@ -9089,60 +9147,6 @@ export default function LocalPage({
     setPostedRecords(nextPostedRecords);
   }, []);
 
-  const applySyncChangesPayload = useCallback(
-    (payload: SyncChangesPayload): void => {
-      if (payload.mode === "snapshot") {
-        applyBootstrapPayload({
-          products: payload.products,
-          settings: payload.state?.settings,
-        });
-        return;
-      }
-
-      const upsertedProducts = normalizeProductsArray(payload.products);
-      const deletedProductIds = new Set<string>(payload.deletedProductIds);
-      const upsertedProductIds = new Set(
-        upsertedProducts.map((product) => product.id),
-      );
-      const nextProducts = sortProductsByUpdatedAt([
-        ...upsertedProducts,
-        ...productsRef.current.filter(
-          (product) =>
-            !upsertedProductIds.has(product.id) &&
-            !deletedProductIds.has(product.id),
-        ),
-      ]);
-
-      productsRef.current = nextProducts;
-      setProducts(nextProducts);
-
-      const nextState = payload.state;
-      if (!nextState) return;
-
-      if (nextState.settings !== undefined) {
-        const nextSettings =
-          normalizeGlobalSettings(nextState.settings) ?? defaultSettings;
-        persistedAppStateSignaturesRef.current.settings =
-          JSON.stringify(nextSettings);
-        setSettings(nextSettings);
-      }
-
-      // Lịch là dữ liệu chỉ lưu trên thiết bị. Không nhận schedule/posted
-      // records từ MongoDB hoặc /sync/changes để tránh ghi đè lịch Local.
-
-    },
-    [applyBootstrapPayload],
-  );
-
-  const createCurrentBootstrapPayload = useCallback((): BootstrapPayload => {
-    return {
-      // Object URL chỉ sống trong phiên hiện tại. Ảnh chờ upload nằm ở IndexedDB
-      // riêng nên snapshot khởi động chỉ lưu metadata Cloudinary, không nhét Blob
-      // hay blob: URL vào JSON/localStorage.
-      products: products.map(toPersistedProduct),
-      settings,
-    };
-  }, [products, settings]);
 
   const handleRefreshCloudData = async (
     options: {
@@ -9170,11 +9174,32 @@ export default function LocalPage({
         return true;
       }
 
-      setPageLoadingText("Đang đồng bộ phần dữ liệu thay đổi...");
+      setPageLoadingText("Đang tải dữ liệu Cloud về cache Local...");
       await waitForUiPaint();
       const changes = await getSyncChanges(currentVersion);
+      const localCacheRecord = await readBootstrapCache().catch(() => null);
 
-      applySyncChangesPayload(changes);
+      if (
+        !localCacheRecord &&
+        currentVersion > 0 &&
+        changes.mode !== "snapshot"
+      ) {
+        throw new Error(
+          "Không đọc được cache Local hiện tại. Đã dừng đồng bộ để tránh ghi đè thiếu dữ liệu; vui lòng thử lại.",
+        );
+      }
+
+      const localBasePayload: BootstrapPayload = localCacheRecord?.payload ?? {
+        products: [],
+        settings: defaultSettings,
+      };
+      const synchronizedPayload = createBootstrapPayloadFromSyncChanges(
+        localBasePayload,
+        changes,
+      );
+
+      await writeBootstrapCache(synchronizedPayload, changes.version);
+      applyBootstrapPayload(synchronizedPayload);
       setLocalSyncVersion(changes.version);
       saveSessionSyncVersionCheck(changes.version);
       setAvailableRemoteSyncVersion((current) =>
@@ -9259,67 +9284,109 @@ export default function LocalPage({
   }, [isRemoteSyncReminderEnabled]);
 
   const handleReloadPage = async (): Promise<void> => {
-    setPageLoadingText("Đang lưu cache và làm mới trang...");
+    setPageLoadingText("Đang hoàn tất thao tác và làm mới trang...");
     await waitForUiPaint();
 
     try {
       await pendingImageQueueWriteRef.current;
-      await writeBootstrapCache(
-        createCurrentBootstrapPayload(),
-        syncVersionRef.current,
-      );
+      await flushQueuedAppStatePatch();
     } catch (error) {
       setPageLoadingText("");
       Toastify(
         error instanceof Error
           ? error.message
-          : "Không thể lưu cache trước khi làm mới trang",
+          : "Không thể hoàn tất các thao tác đang chờ trước khi làm mới trang",
         400,
       );
       return;
     }
 
-    await flushQueuedAppStatePatch().catch(() => undefined);
-
-    // Làm mới phải buộc phiên mới kiểm tra /sync/version đúng một lần.
-    // Chỉ xóa key check sync, không đụng trạng thái ảnh đã tải của "Xóa phiên".
+    // Chỉ xóa phiên kiểm tra phiên bản; không ghi lại snapshot Local khi reload.
     clearSessionSyncVersionCheck();
     window.location.reload();
   };
 
   useEffect(() => {
-    let cancelled = false;
-    setPageLoadingText("Đang đọc dữ liệu cache trên thiết bị...");
+    if (!isDevicePreferencesReady) return;
 
-    void readBootstrapCache()
-      .then((cacheRecord) => {
+    let cancelled = false;
+    const sourceAtStart = productRenderSource;
+
+    // Không trộn sản phẩm từ nguồn cũ vào nguồn đang được chọn.
+    productsRef.current = [];
+    setProducts([]);
+    setPageLoadingText(
+      sourceAtStart === "api"
+        ? "Đang tải danh sách sản phẩm từ API..."
+        : "Đang đọc sản phẩm từ Local Browser...",
+    );
+
+    const loadProductSource = async (): Promise<void> => {
+      try {
+        if (sourceAtStart === "api") {
+          const changes = await getSyncChanges(0);
+          if (cancelled) return;
+
+          const apiPayload = createBootstrapPayloadFromSyncChanges(
+            { products: [], settings: defaultSettings },
+            changes,
+          );
+          applyBootstrapPayload(apiPayload);
+
+          // Đây là phiên bản API đang hiển thị, không phải phiên bản cache Local.
+          saveSessionSyncVersionCheck(changes.version);
+          registerRemoteSyncVersion(changes.version);
+        } else {
+          const cacheRecord = await readBootstrapCache();
+          if (cancelled) return;
+
+          if (cacheRecord) {
+            applyBootstrapPayload(cacheRecord.payload);
+            setLocalSyncVersion(cacheRecord.syncVersion);
+          } else {
+            const initialScheduleConfig = loadScheduleConfig();
+            persistedAppStateSignaturesRef.current = {
+              settings: JSON.stringify(defaultSettings),
+              scheduleConfig: JSON.stringify(initialScheduleConfig),
+              scheduleAssignments: JSON.stringify({}),
+            };
+            Toastify(
+              "Thiết bị chưa có cache Local Browser, nhấn Đồng bộ để tải dữ liệu về máy",
+              300,
+            );
+          }
+        }
+      } catch (error) {
         if (cancelled) return;
 
-        if (cacheRecord) {
-          applyBootstrapPayload(cacheRecord.payload);
-          setLocalSyncVersion(cacheRecord.syncVersion);
-          return;
-        }
-
-        const initialScheduleConfig = loadScheduleConfig();
-        persistedAppStateSignaturesRef.current = {
-          settings: JSON.stringify(defaultSettings),
-          scheduleConfig: JSON.stringify(initialScheduleConfig),
-          scheduleAssignments: JSON.stringify({}),
-        };
-        Toastify("Thiết bị chưa có cache, nhấn Đồng bộ để lấy dữ liệu", 300);
-      })
-      .finally(() => {
+        Toastify(
+          sourceAtStart === "api"
+            ? `Không thể tải dữ liệu từ API. ${error instanceof Error ? error.message : "Yêu cầu API thất bại."}`
+            : error instanceof Error
+              ? error.message
+              : "Không thể đọc dữ liệu Local Browser",
+          400,
+        );
+      } finally {
         if (!cancelled) {
           setIsSettingsReady(true);
           setPageLoadingText("");
         }
-      });
+      }
+    };
+
+    void loadProductSource();
 
     return () => {
       cancelled = true;
     };
-  }, [applyBootstrapPayload, setLocalSyncVersion]);
+  }, [
+    applyBootstrapPayload,
+    isDevicePreferencesReady,
+    productRenderSource,
+    registerRemoteSyncVersion,
+    setLocalSyncVersion,
+  ]);
 
   useEffect(() => {
     if (!isSettingsReady || typeof window === "undefined") return;
@@ -9328,15 +9395,8 @@ export default function LocalPage({
       const version = getSyncVersionFromMessage(
         (event as CustomEvent<unknown>).detail,
       );
-      const currentVersion = syncVersionRef.current;
-
-      // Chỉ nhận ngay phiên bản kế tiếp do chính tab này lưu. Nếu có khoảng
-      // trống, một thiết bị khác đã cập nhật trước đó và cần lấy delta đầy đủ.
-      if (version === currentVersion + 1) {
-        setLocalSyncVersion(version);
-        return;
-      }
-
+      // Thay đổi vừa ghi lên API không đồng nghĩa cache Local đã được cập nhật.
+      // Chỉ handleRefreshCloudData mới được phép ghi snapshot và nâng phiên bản cache.
       registerRemoteSyncVersion(version);
     };
 
@@ -9348,7 +9408,7 @@ export default function LocalPage({
         handleLocalSyncVersion,
       );
     };
-  }, [isSettingsReady, registerRemoteSyncVersion, setLocalSyncVersion]);
+  }, [isSettingsReady, registerRemoteSyncVersion]);
 
   useEffect(() => {
     if (!isSettingsReady || typeof window === "undefined") return;
@@ -9438,23 +9498,6 @@ export default function LocalPage({
     pendingDownload,
     pendingShare,
   ]);
-
-  useEffect(() => {
-    if (!isSettingsReady) return;
-
-    const timeoutId = window.setTimeout(() => {
-      void writeBootstrapCache(
-        createCurrentBootstrapPayload(),
-        cacheSyncVersion,
-      ).catch((error) => {
-        console.error("Không thể cập nhật cache thiết bị", error);
-      });
-    }, 900);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [cacheSyncVersion, createCurrentBootstrapPayload, isSettingsReady]);
 
   useEffect(() => {
     if (!isSettingsReady || !isDevicePreferencesReady) return;
@@ -17964,6 +18007,22 @@ export default function LocalPage({
                 {isRemoteSyncReminderEnabled ? "Nhắc: Bật" : "Nhắc: Tắt"}
               </button>
 
+              <button
+                data-header-shortcut-action="productRenderSource"
+                data-header-shortcut-key={headerShortcuts["productRenderSource"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["productRenderSource"])}
+                type="button"
+                data-luxury-accent="sapphire"
+                title="Chọn nguồn render sản phẩm (API hoặc Local Browser)"
+                aria-label="Chọn nguồn render sản phẩm"
+                aria-haspopup="dialog"
+                className={`${headerActionButtonBaseClassName} ${productRenderSource === "api" ? headerActiveButtonClassName : headerNeutralButtonClassName}`}
+                onClick={() => openModal("productRenderSource")}
+              >
+                <FiDatabase aria-hidden="true" className={iconClassName} />
+                {productRenderSource === "api" ? "Nguồn: API" : "Nguồn: Local"}
+              </button>
+
             </div>
           </div>
         </header>
@@ -19160,6 +19219,9 @@ export default function LocalPage({
                   {activeModal === "facebookLinkSettings" ? (
                     <FiSettings aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "productRenderSource" ? (
+                    <FiDatabase aria-hidden="true" className={iconClassName} />
+                  ) : null}
                   {activeModal === "importExport" ? (
                     <FiArchive aria-hidden="true" className={iconClassName} />
                   ) : null}
@@ -19218,6 +19280,9 @@ export default function LocalPage({
                       : null}
                     {activeModal === "facebookLinkSettings"
                       ? "Cài đặt mở link Meta / Facebook"
+                      : null}
+                    {activeModal === "productRenderSource"
+                      ? "Nguồn render sản phẩm"
                       : null}
                     {activeModal === "importExport"
                       ? "Quản lý dữ liệu"
@@ -19845,6 +19910,78 @@ export default function LocalPage({
                       })}
                     </div>
                   </article>
+                </section>
+              ) : null}
+
+              {activeModal === "productRenderSource" ? (
+                <section className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+                  <article className="border border-[#d8c99f]/20 bg-[#d8c99f]/[0.06] p-3">
+                    <h3 className="text-xs font-black text-white">
+                      Chọn nguồn hiển thị sản phẩm
+                    </h3>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-400">
+                      API tải snapshot hoặc thay đổi dữ liệu từ máy chủ. Local Browser đọc snapshot đã lưu trong IndexedDB/localStorage của trình duyệt trên thiết bị này.
+                    </p>
+                    <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2">
+                      <button
+                        type="button"
+                        aria-pressed={productRenderSource === "api"}
+                        className={`flex min-h-20 items-start gap-3 border p-3 text-left transition ${productRenderSource === "api"
+                          ? "border-cyan-200/55 bg-cyan-300/[0.09] text-cyan-50"
+                          : "border-white/10 bg-slate-950/60 text-slate-300 hover:border-cyan-200/30 hover:bg-cyan-300/[0.04]"
+                          }`}
+                        onClick={() => setProductRenderSource("api")}
+                      >
+                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border ${productRenderSource === "api"
+                          ? "border-cyan-200/40 bg-cyan-300/10 text-cyan-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-400"
+                          }`}>
+                          <FiRefreshCcw aria-hidden="true" className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-black">API</span>
+                          <span className="mt-1 block text-[9px] leading-4 text-slate-400">
+                            Nạp dữ liệu trực tiếp qua API đồng bộ.
+                          </span>
+                          {productRenderSource === "api" ? (
+                            <span className="mt-2 inline-flex border border-cyan-200/25 bg-cyan-300/10 px-2 py-1 text-[8px] font-black text-cyan-100">
+                              ĐANG CHỌN
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={productRenderSource === "localBrowser"}
+                        className={`flex min-h-20 items-start gap-3 border p-3 text-left transition ${productRenderSource === "localBrowser"
+                          ? "border-emerald-200/55 bg-emerald-300/[0.08] text-emerald-50"
+                          : "border-white/10 bg-slate-950/60 text-slate-300 hover:border-emerald-200/30 hover:bg-emerald-300/[0.04]"
+                          }`}
+                        onClick={() => setProductRenderSource("localBrowser")}
+                      >
+                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border ${productRenderSource === "localBrowser"
+                          ? "border-emerald-200/40 bg-emerald-300/10 text-emerald-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-400"
+                          }`}>
+                          <FiDatabase aria-hidden="true" className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-black">Local Browser</span>
+                          <span className="mt-1 block text-[9px] leading-4 text-slate-400">
+                            Đọc cache trình duyệt, không gọi API để nạp danh sách khi chuyển nguồn.
+                          </span>
+                          {productRenderSource === "localBrowser" ? (
+                            <span className="mt-2 inline-flex border border-emerald-200/25 bg-emerald-300/10 px-2 py-1 text-[8px] font-black text-emerald-100">
+                              ĐANG CHỌN
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </div>
+                  </article>
+                  <p className="border border-white/10 bg-slate-950/50 p-2.5 text-[9px] leading-4 text-slate-500">
+                    Cấu hình này chỉ thay đổi nguồn nạp dữ liệu hiển thị. Các thao tác thêm, sửa, xóa và cơ chế đồng bộ Cloud vẫn giữ nguyên.
+                  </p>
                 </section>
               ) : null}
 
