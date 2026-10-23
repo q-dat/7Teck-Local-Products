@@ -18,7 +18,6 @@ interface ProductUpdateInput {
   sourceProductId?: string | null;
   description?: string;
   price?: number;
-  priceText?: string;
   category?: string;
   parentCategory?: string | null;
   parentCategorySlug?: string | null;
@@ -202,10 +201,6 @@ export async function PATCH(request: Request, { params }: ParamsPromise) {
         return apiError(new Error("Giá sản phẩm không hợp lệ"), 400);
       }
       product.price = body.price;
-    }
-    if (body.priceText !== undefined) {
-      if (typeof body.priceText !== "string") return apiError(new Error("Giá hiển thị không hợp lệ"), 400);
-      product.priceText = body.priceText;
     }
     if (body.category !== undefined) {
       if (typeof body.category !== "string") return apiError(new Error("Danh mục không hợp lệ"), 400);

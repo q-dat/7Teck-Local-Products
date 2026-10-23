@@ -12,7 +12,6 @@ interface ProductSyncInput {
   sourceProductId?: string | null;
   description?: string;
   price?: number;
-  priceText?: string;
   category?: string;
   parentCategory?: string | null;
   parentCategorySlug?: string | null;
@@ -33,7 +32,6 @@ interface NormalizedProductInput {
   sourceProductId: string | null;
   description: string;
   price: number;
-  priceText: string;
   category: string;
   parentCategory: string | null;
   parentCategorySlug: string | null;
@@ -51,7 +49,6 @@ type ProductBulkUpdates = Partial<
     ProductSyncInput,
     | "description"
     | "price"
-    | "priceText"
     | "category"
     | "parentCategory"
     | "parentCategorySlug"
@@ -193,7 +190,6 @@ function normalizeProductInput(item: ProductSyncInput): NormalizedProductInput {
       item.price >= 0
         ? item.price
         : 0,
-    priceText: typeof item.priceText === "string" ? item.priceText : "",
     category: typeof item.category === "string" ? item.category : "",
     parentCategory:
       typeof item.parentCategory === "string" && item.parentCategory.trim()
@@ -233,7 +229,6 @@ function validateBulkUpdates(value: unknown): ProductBulkUpdates | null {
   const allowed = new Set([
     "description",
     "price",
-    "priceText",
     "category",
     "parentCategory",
     "parentCategorySlug",
@@ -258,10 +253,6 @@ function validateBulkUpdates(value: unknown): ProductBulkUpdates | null {
     )
       return null;
     updates.price = value.price;
-  }
-  if ("priceText" in value) {
-    if (typeof value.priceText !== "string") return null;
-    updates.priceText = value.priceText;
   }
   if ("category" in value) {
     if (typeof value.category !== "string") return null;
