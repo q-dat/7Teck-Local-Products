@@ -8,11 +8,81 @@ import ProductModel from "@/models/Product";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+interface SourceDoneStatus {
+  _id: string;
+  id?: string;
+  isDone: boolean;
+  doneAt: string | null;
+  updatedAt?: string;
+}
+
+function toIsoString(value: unknown): string | undefined {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string" && value.trim()) return value;
+  return undefined;
+}
+
+export async function GET(request: Request) {
   try {
     await connectMongo();
-    const products = await ProductModel.find({}).sort({ updatedAt: -1 }).lean();
-    return jsonNoStore({ ok: true, products });
+
+    const { searchParams } = new URL(request.url);
+    const view = searchParams.get("view");
+    const contentType = searchParams.get("contentType")?.trim();
+    const filter = contentType ? { contentType } : {};
+
+    if (view === "done-status") {
+      // Read only fields used for live Done synchronization; do not transfer images.
+      const rawProducts = await ProductModel.collection
+        .find(filter, {
+          projection: {
+            _id: 1,
+            id: 1,
+            isDone: 1,
+            doneAt: 1,
+            updatedAt: 1,
+          },
+        })
+        .sort({ updatedAt: -1 })
+        .toArray();
+
+      const products: SourceDoneStatus[] = rawProducts.map((item) => {
+        const record = item as unknown as Record<string, unknown>;
+        const rawId = record._id;
+        const rawDoneAt = record.doneAt;
+
+        return {
+          _id:
+            rawId && typeof rawId === "object" && "toString" in rawId
+              ? String(rawId)
+              : typeof rawId === "string"
+                ? rawId
+                : "",
+          id: typeof record.id === "string" ? record.id : undefined,
+          isDone: record.isDone === true,
+          doneAt: toIsoString(rawDoneAt) ?? null,
+          updatedAt: toIsoString(record.updatedAt),
+        };
+      });
+
+      return jsonNoStore({
+        ok: true,
+        view: "done-status",
+        count: products.length,
+        products,
+      });
+    }
+
+    const products = await ProductModel.find(filter)
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const formatted = products.map((product) => ({
+      ...product,
+      _id: product._id ? product._id.toString() : product._id,
+    }));
+
+    return jsonNoStore({ ok: true, products: formatted });
   } catch (error) {
     return apiError(error);
   }
@@ -23,17 +93,20 @@ export async function PUT(request: Request) {
     const body = (await request.json()) as {
       products?: unknown;
     };
+
     if (!Array.isArray(body.products)) {
       return apiError(new Error("Dữ liệu import thiếu products"), 400);
     }
 
     const products = body.products.map(validateProductInput);
     const ids = products.map((product) => product.id);
+
     if (new Set(ids).size !== ids.length) {
       return apiError(new Error("Dữ liệu import có ID sản phẩm bị trùng"), 400);
     }
 
     await connectMongo();
+
     const { value: previousProducts, syncVersion } = await runWithSyncChange(
       { entity: "catalog", entityId: "main", operation: "reset" },
       async (session) => {
