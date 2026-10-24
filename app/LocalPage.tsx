@@ -20578,7 +20578,7 @@ export default function LocalPage({
                               placeholder={
                                 isPropertyContentType(scopedContentType)
                                   ? "Giá bán / giá thuê"
-                                  : "12tr3"
+                                  : "13tr8"
                               }
                             />
                           </label>

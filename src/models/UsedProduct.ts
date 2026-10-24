@@ -6,6 +6,7 @@ export interface IUsedProductDoc extends Document {
   sourceProductId: string | null;
   description: string;
   price: number;
+  priceText: string;
   category: string;
   parentCategory: string | null;
   parentCategorySlug: string | null;
@@ -25,12 +26,15 @@ const usedProductSchema = new Schema<IUsedProductDoc>(
   {
     name: { type: String, required: true, trim: true },
     slug: { type: String, required: true, trim: true, unique: true },
+    // Uniqueness is defined by the partial index below so that multiple nulls are allowed.
     sourceProductId: { type: String, default: null, trim: true },
     description: { type: String, default: "" },
     price: { type: Number, default: 0, min: 0 },
+    priceText: { type: String, default: "" },
     category: { type: String, default: "" },
     parentCategory: { type: String, default: null },
     parentCategorySlug: { type: String, default: null },
+    // Mixed preserves compatibility with legacy image objects while API writes normalize URLs.
     images: { type: [Schema.Types.Mixed], default: [] },
     status: { type: String, default: "active" },
     pin: { type: String, default: "" },
@@ -56,6 +60,8 @@ usedProductSchema.index(
   },
 );
 
+// Recompile the model when this module is reloaded so changes to the version key
+// and partial unique index are not hidden behind a stale development model cache.
 if (models.UsedProduct) {
   delete (models as Record<string, unknown>).UsedProduct;
 }

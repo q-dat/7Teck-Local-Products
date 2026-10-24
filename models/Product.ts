@@ -29,6 +29,7 @@ const productSchema = new Schema(
     pin: { type: String, default: "" },
     status: { type: String, default: "" },
     price: { type: Number, default: 0 },
+    priceText: { type: String, default: "" },
     category: { type: String, default: "" },
     contentType: {
       type: String,

@@ -46,6 +46,7 @@ interface LocalProduct {
   name: string;
   description?: string;
   price?: number;
+  priceText?: string;
   category?: string;
   images?: unknown[];
   createdAt?: string;
@@ -81,6 +82,7 @@ interface UsedProduct {
   sourceProductId?: string | null;
   description?: string;
   price?: number;
+  priceText?: string;
   category?: string;
   parentCategory?: string | null;
   parentCategorySlug?: string | null;
@@ -136,7 +138,8 @@ interface ProductFormState {
   name: string;
   sourceProductId: string;
   description: string;
-  price: number;
+  price: string;
+  priceText: string;
   categoryId: string;
   status: string;
   isDone: boolean;
@@ -150,7 +153,7 @@ interface CategoryFormState {
   parentSlug: string | null;
   currentParentSlug: string | null;
   description: string;
-  order: number;
+  order: string;
 }
 
 interface BulkEditState {
@@ -159,8 +162,9 @@ interface BulkEditState {
   applyStatus: boolean;
   status: string;
   applyPrice: boolean;
-  price: number;
+  price: string;
   applyPriceText: boolean;
+  priceText: string;
   applyDescription: boolean;
   description: string;
   applyDone: boolean;
@@ -206,6 +210,29 @@ function getImageUrl(images?: unknown[]): string | undefined {
     return typeof candidate === "string" ? candidate : undefined;
   }
   return undefined;
+}
+
+function formatPrice(price?: number, priceText?: string): string {
+  if (typeof price === "number" && Number.isFinite(price) && price > 0) {
+    return `${price.toLocaleString("vi-VN")} ₫`;
+  }
+  return priceText?.trim() || "Chưa có giá";
+}
+
+/**
+ * Parse numeric inputs using either comma or dot as the decimal separator.
+ * Examples: "1747", "1,74769291", "1.74769291", ",5".
+ * Thousands separators are intentionally not accepted to avoid ambiguity.
+ */
+function parseDecimalInput(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+
+  if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function formatDate(value?: string): string {
@@ -394,8 +421,9 @@ export default function UsedProductsSyncAdminClient() {
     applyStatus: false,
     status: "active",
     applyPrice: false,
-    price: 0,
+    price: "",
     applyPriceText: false,
+    priceText: "",
     applyDescription: false,
     description: "",
     applyDone: false,
@@ -754,6 +782,7 @@ export default function UsedProductsSyncAdminClient() {
         name: product.name,
         description: product.description || "",
         price: typeof product.price === "number" ? product.price : 0,
+        priceText: product.priceText || "",
         category: product.category || "",
         images: product.images || [],
         status: "active",
@@ -792,7 +821,8 @@ export default function UsedProductsSyncAdminClient() {
       name: "",
       sourceProductId: "",
       description: "",
-      price: 0,
+      price: "0",
+      priceText: "",
       categoryId: "",
       status: "active",
       isDone: false,
@@ -808,7 +838,8 @@ export default function UsedProductsSyncAdminClient() {
       name: product.name,
       sourceProductId: product.sourceProductId || "",
       description: product.description || "",
-      price: typeof product.price === "number" ? product.price : 0,
+      price: typeof product.price === "number" ? String(product.price) : "0",
+      priceText: product.priceText || "",
       categoryId: matchedCategory?._id || "",
       status: product.status || "active",
       isDone: product.isDone === true,
@@ -822,13 +853,12 @@ export default function UsedProductsSyncAdminClient() {
       return;
     }
 
-    const rawPrice = new FormData(event.currentTarget).get("price");
-    const parsedPrice = typeof rawPrice === "string" && rawPrice.trim() !== ""
-      ? Number(rawPrice)
-      : 0;
+    const parsedPrice = productForm.price.trim() === ""
+      ? 0
+      : parseDecimalInput(productForm.price);
 
-    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
-      notify("error", "Giá phải là số không âm, có thể là số nguyên hoặc số thập phân.");
+    if (parsedPrice === null) {
+      notify("error", "Giá phải là số không âm. Có thể dùng dấu phẩy hoặc dấu chấm cho phần thập phân, ví dụ 1,74769291.");
       return;
     }
 
@@ -840,6 +870,7 @@ export default function UsedProductsSyncAdminClient() {
       sourceProductId: productForm.sourceProductId.trim() || null,
       description: productForm.description,
       price: parsedPrice,
+      priceText: productForm.priceText,
       category: category?.name || "",
       parentCategory: parent?.name || null,
       parentCategorySlug: category?.parentSlug || null,
@@ -908,8 +939,9 @@ export default function UsedProductsSyncAdminClient() {
       applyStatus: false,
       status: "active",
       applyPrice: false,
-      price: 0,
+      price: "",
       applyPriceText: false,
+      priceText: "",
       applyDescription: false,
       description: "",
       applyDone: false,
@@ -937,16 +969,14 @@ export default function UsedProductsSyncAdminClient() {
     }
     if (bulkEdit.applyStatus) patch.status = bulkEdit.status;
     if (bulkEdit.applyPrice) {
-      const rawPrice = new FormData(event.currentTarget).get("price");
-      const price = typeof rawPrice === "string" && rawPrice.trim() !== ""
-        ? Number(rawPrice)
-        : Number.NaN;
-      if (!Number.isFinite(price) || price < 0) {
-        notify("error", "Giá cập nhật phải là số không âm, có thể là số nguyên hoặc số thập phân.");
+      const price = parseDecimalInput(bulkEdit.price);
+      if (bulkEdit.price.trim() === "" || price === null) {
+        notify("error", "Giá cập nhật phải là số không âm. Có thể dùng dấu phẩy hoặc dấu chấm cho phần thập phân, ví dụ 1,74769291.");
         return;
       }
       patch.price = price;
     }
+    if (bulkEdit.applyPriceText) patch.priceText = bulkEdit.priceText;
     if (bulkEdit.applyDescription) patch.description = bulkEdit.description;
     if (bulkEdit.applyDone) patch.isDone = bulkEdit.isDone;
 
@@ -1049,7 +1079,7 @@ export default function UsedProductsSyncAdminClient() {
       parentSlug,
       currentParentSlug: parentSlug,
       description: "",
-      order: 0,
+      order: "0",
     });
   };
 
@@ -1062,7 +1092,7 @@ export default function UsedProductsSyncAdminClient() {
       parentSlug: category.parentSlug,
       currentParentSlug: category.parentSlug,
       description: category.description || "",
-      order: typeof category.order === "number" ? category.order : 0,
+      order: typeof category.order === "number" ? String(category.order) : "0",
     });
   };
 
@@ -1073,13 +1103,12 @@ export default function UsedProductsSyncAdminClient() {
       return;
     }
 
-    const rawOrder = new FormData(event.currentTarget).get("order");
-    const parsedOrder = typeof rawOrder === "string" && rawOrder.trim() !== ""
-      ? Number(rawOrder)
-      : 0;
+    const parsedOrder = categoryForm.order.trim() === ""
+      ? 0
+      : parseDecimalInput(categoryForm.order);
 
-    if (!Number.isFinite(parsedOrder) || parsedOrder < 0) {
-      notify("error", "Thứ tự phải là số không âm, có thể là số nguyên hoặc số thập phân.");
+    if (parsedOrder === null) {
+      notify("error", "Thứ tự phải là số không âm. Có thể dùng dấu phẩy hoặc dấu chấm cho phần thập phân.");
       return;
     }
 
@@ -1285,6 +1314,7 @@ export default function UsedProductsSyncAdminClient() {
                           </div>
                         </td>
                         <td className="px-3 py-2.5"><code className="text-[11px] text-sky-300">{product._id || product.id || "—"}</code></td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-xs text-emerald-300">{formatPrice(product.price, product.priceText)}</td>
                         <td className="px-3 py-2.5 text-xs text-slate-400">{product.category || "Chưa phân loại"}</td>
                         <td className="px-3 py-2.5">
                           <span className={`inline-flex rounded px-2 py-1 text-[10px] font-medium ${isDone ? "bg-emerald-950/70 text-emerald-300" : "bg-slate-800 text-slate-400"}`}>
@@ -1420,6 +1450,7 @@ export default function UsedProductsSyncAdminClient() {
                         <td className="max-w-36 px-3 py-2.5">
                           {product.sourceProductId ? <code className="block truncate text-[10px] text-slate-400" title={product.sourceProductId}>{product.sourceProductId}</code> : <span className="text-xs text-slate-600">Thủ công</span>}
                         </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-xs text-emerald-300">{formatPrice(product.price, product.priceText)}</td>
                         <td className="px-3 py-2.5 text-xs text-slate-300">{product.category || "Chưa phân loại"}</td>
                         <td className="px-3 py-2.5"><span className={`rounded px-2 py-1 text-[10px] font-medium ${product.status === "active" || !product.status ? "bg-emerald-950/70 text-emerald-300" : product.status === "draft" ? "bg-amber-950/70 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{product.status || "active"}</span></td>
                         <td className="px-3 py-2.5">
@@ -1537,10 +1568,16 @@ export default function UsedProductsSyncAdminClient() {
               <span className="text-xs font-medium text-slate-300">ID sản phẩm nguồn</span>
               <input className={inputClass} value={productForm.sourceProductId} onChange={(event) => setProductForm((current) => current ? { ...current, sourceProductId: event.target.value } : current)} placeholder="Để trống nếu tạo thủ công" />
             </label>
-            <label className="block space-y-1">
-              <span className="text-xs font-medium text-slate-300">Giá (VNĐ)</span>
-              <input className={inputClass} name="price" type="number" step="any" min="0" defaultValue={productForm.price} onChange={(event) => { const value = event.currentTarget.valueAsNumber; setProductForm((current) => current ? { ...current, price: Number.isFinite(value) ? value : 0 } : current); }} placeholder="Ví dụ: 1747 hoặc 1747.69291" aria-label="Giá sản phẩm, hỗ trợ số nguyên và số thập phân" />
-            </label>
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-300">Giá (VNĐ)</span>
+                <input className={inputClass} type="text" inputMode="decimal" autoComplete="off" value={productForm.price} onChange={(event) => setProductForm((current) => current ? { ...current, price: event.target.value.replace(/[^0-9.,]/g, "") } : current)} placeholder="Ví dụ: 1747 hoặc 1,74769291" aria-label="Giá sản phẩm, hỗ trợ số nguyên và số thập phân" />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs font-medium text-slate-300">Giá hiển thị</span>
+                <input className={inputClass} value={productForm.priceText} onChange={(event) => setProductForm((current) => current ? { ...current, priceText: event.target.value } : current)} placeholder="Ví dụ: Liên hệ" />
+              </label>
+            </div>
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-slate-300">Danh mục</span>
@@ -1601,7 +1638,11 @@ export default function UsedProductsSyncAdminClient() {
               </label>
               <label className="flex items-start gap-2 rounded-md border border-slate-800 p-2.5">
                 <input type="checkbox" className={`${checkboxClass} mt-0.5`} checked={bulkEdit.applyPrice} onChange={(event) => setBulkEdit((current) => ({ ...current, applyPrice: event.target.checked }))} />
-                <span className="min-w-0 flex-1"><span className="block text-sm font-medium text-slate-200">Cập nhật giá (VNĐ)</span><input className={`${inputClass} mt-1`} name="price" type="number" step="any" min="0" disabled={!bulkEdit.applyPrice} defaultValue="" onChange={(event) => { const value = event.currentTarget.valueAsNumber; setBulkEdit((current) => ({ ...current, price: Number.isFinite(value) ? value : 0 })); }} placeholder="Ví dụ: 1747 hoặc 1747.69291" aria-label="Giá cập nhật hàng loạt, hỗ trợ số nguyên và số thập phân" /></span>
+                <span className="min-w-0 flex-1"><span className="block text-sm font-medium text-slate-200">Cập nhật giá (VNĐ)</span><input className={`${inputClass} mt-1`} type="text" inputMode="decimal" autoComplete="off" disabled={!bulkEdit.applyPrice} value={bulkEdit.price} onChange={(event) => setBulkEdit((current) => ({ ...current, price: event.target.value.replace(/[^0-9.,]/g, "") }))} placeholder="Ví dụ: 1747 hoặc 1,74769291" aria-label="Giá cập nhật hàng loạt, hỗ trợ số nguyên và số thập phân" /></span>
+              </label>
+              <label className="flex items-start gap-2 rounded-md border border-slate-800 p-2.5">
+                <input type="checkbox" className={`${checkboxClass} mt-0.5`} checked={bulkEdit.applyPriceText} onChange={(event) => setBulkEdit((current) => ({ ...current, applyPriceText: event.target.checked }))} />
+                <span className="min-w-0 flex-1"><span className="block text-sm font-medium text-slate-200">Cập nhật giá hiển thị</span><input className={`${inputClass} mt-1`} disabled={!bulkEdit.applyPriceText} value={bulkEdit.priceText} onChange={(event) => setBulkEdit((current) => ({ ...current, priceText: event.target.value }))} placeholder="Ví dụ: Liên hệ" /></span>
               </label>
               <label className="flex items-start gap-2 rounded-md border border-slate-800 p-2.5">
                 <input type="checkbox" className={`${checkboxClass} mt-0.5`} checked={bulkEdit.applyDescription} onChange={(event) => setBulkEdit((current) => ({ ...current, applyDescription: event.target.checked }))} />
@@ -1637,7 +1678,7 @@ export default function UsedProductsSyncAdminClient() {
             <label className="block space-y-1"><span className="text-xs font-medium text-slate-300">Slug</span><input className={inputClass} value={categoryForm.slug} onChange={(event) => setCategoryForm((current) => current ? { ...current, slug: event.target.value } : current)} placeholder="Để trống để API tạo từ tên" /></label>
             <label className="block space-y-1"><span className="text-xs font-medium text-slate-300">Danh mục cha</span><select className={selectClass} value={categoryForm.parentSlug || ""} onChange={(event) => setCategoryForm((current) => current ? { ...current, parentSlug: event.target.value || null } : current)}><option value="">Danh mục gốc</option>{categoryTree.filter((category) => category._id !== categoryForm._id).map((category) => <option key={category._id} value={category.slug}>{category.name}</option>)}</select></label>
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              <label className="block space-y-1"><span className="text-xs font-medium text-slate-300">Thứ tự</span><input className={inputClass} name="order" type="number" step="any" min="0" defaultValue={categoryForm.order} onChange={(event) => { const value = event.currentTarget.valueAsNumber; setCategoryForm((current) => current ? { ...current, order: Number.isFinite(value) ? value : 0 } : current); }} placeholder="Ví dụ: 1 hoặc 1.5" aria-label="Thứ tự danh mục, hỗ trợ số nguyên và số thập phân" /></label>
+              <label className="block space-y-1"><span className="text-xs font-medium text-slate-300">Thứ tự</span><input className={inputClass} type="text" inputMode="decimal" autoComplete="off" value={categoryForm.order} onChange={(event) => setCategoryForm((current) => current ? { ...current, order: event.target.value.replace(/[^0-9.,]/g, "") } : current)} placeholder="Ví dụ: 1 hoặc 1,5" aria-label="Thứ tự danh mục, hỗ trợ số nguyên và số thập phân" /></label>
               <label className="block space-y-1"><span className="text-xs font-medium text-slate-300">Mô tả</span><input className={inputClass} value={categoryForm.description} onChange={(event) => setCategoryForm((current) => current ? { ...current, description: event.target.value } : current)} placeholder="Mô tả ngắn" /></label>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
