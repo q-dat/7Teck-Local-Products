@@ -8,6 +8,8 @@ export interface IUsedProductDoc extends Document {
   price: number;
   priceText: string;
   category: string;
+  /** Slug of the direct category assigned to the product, e.g. dell-latitude. */
+  categorySlug: string | null;
   parentCategory: string | null;
   parentCategorySlug: string | null;
   images: unknown[];
@@ -32,8 +34,14 @@ const usedProductSchema = new Schema<IUsedProductDoc>(
     price: { type: Number, default: 0, min: 0 },
     priceText: { type: String, default: "" },
     category: { type: String, default: "" },
-    parentCategory: { type: String, default: null },
-    parentCategorySlug: { type: String, default: null },
+    categorySlug: { type: String, default: null, trim: true, index: true },
+    parentCategory: { type: String, default: null, trim: true },
+    parentCategorySlug: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
     // Mixed preserves compatibility with legacy image objects while API writes normalize URLs.
     images: { type: [Schema.Types.Mixed], default: [] },
     status: { type: String, default: "active" },
@@ -60,8 +68,14 @@ usedProductSchema.index(
   },
 );
 
-// Recompile the model when this module is reloaded so changes to the version key
-// and partial unique index are not hidden behind a stale development model cache.
+// Supports combined filtering for a child slug within a specific parent category.
+usedProductSchema.index(
+  { parentCategorySlug: 1, categorySlug: 1 },
+  { name: "parent_category_child_category_slug" },
+);
+
+// Recompile the model when this module is reloaded so schema changes are applied
+// during development rather than reusing a stale Mongoose model.
 if (models.UsedProduct) {
   delete (models as Record<string, unknown>).UsedProduct;
 }

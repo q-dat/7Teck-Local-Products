@@ -84,6 +84,7 @@ interface UsedProduct {
   price?: number;
   priceText?: string;
   category?: string;
+  categorySlug?: string | null;
   parentCategory?: string | null;
   parentCategorySlug?: string | null;
   images?: unknown[];
@@ -777,18 +778,40 @@ export default function UsedProductsSyncAdminClient() {
     setIsSaving(true);
     setNotice(null);
     try {
-      const payload = targets.map((product) => ({
-        sourceProductId: product._id,
-        name: product.name,
-        description: product.description || "",
-        price: typeof product.price === "number" ? product.price : 0,
-        priceText: product.priceText || "",
-        category: product.category || "",
-        images: product.images || [],
-        status: "active",
-        isDone: product.isDone === true,
-        doneAt: product.isDone === true ? product.doneAt ?? null : null,
-      }));
+      const payload = targets.map((product) => {
+        const categoryName = product.category?.trim() || "";
+        const categoryMatches = categoryName
+          ? flatCategories.filter(
+            (category) => category.name.trim().toLocaleLowerCase("vi-VN") ===
+              categoryName.toLocaleLowerCase("vi-VN"),
+          )
+          : [];
+        // Avoid selecting an arbitrary parent when category names are duplicated.
+        const matchedCategory = categoryMatches.length === 1 ? categoryMatches[0] : undefined;
+        const parent = matchedCategory?.parentSlug
+          ? parentCategoryBySlug.get(matchedCategory.parentSlug)
+          : undefined;
+
+        return {
+          sourceProductId: product._id,
+          name: product.name,
+          description: product.description || "",
+          price: typeof product.price === "number" ? product.price : 0,
+          priceText: product.priceText || "",
+          category: categoryName,
+          ...(matchedCategory
+            ? {
+              categorySlug: matchedCategory.slug,
+              parentCategory: parent?.name || null,
+              parentCategorySlug: matchedCategory.parentSlug || null,
+            }
+            : {}),
+          images: product.images || [],
+          status: "active",
+          isDone: product.isDone === true,
+          doneAt: product.isDone === true ? product.doneAt ?? null : null,
+        };
+      });
 
       const response = await fetch("/api/used-products", {
         method: "POST",
@@ -809,12 +832,23 @@ export default function UsedProductsSyncAdminClient() {
     }
   };
 
-  const selectedCategoryForProduct = (product: UsedProduct): CategoryTreeItem | undefined =>
-    flatCategories.find((category) => {
+  const selectedCategoryForProduct = (product: UsedProduct): CategoryTreeItem | undefined => {
+    if (product.categorySlug) {
+      const matchedBySlug = flatCategories.find((category) =>
+        category.slug === product.categorySlug &&
+        (product.parentCategorySlug
+          ? category.parentSlug === product.parentCategorySlug
+          : category.parentSlug === null),
+      );
+      if (matchedBySlug) return matchedBySlug;
+    }
+
+    return flatCategories.find((category) => {
       if (category.name !== product.category) return false;
       if (product.parentCategorySlug) return category.parentSlug === product.parentCategorySlug;
       return category.parentSlug === null;
     });
+  };
 
   const openCreateProduct = () => {
     setProductForm({
@@ -872,6 +906,7 @@ export default function UsedProductsSyncAdminClient() {
       price: parsedPrice,
       priceText: productForm.priceText,
       category: category?.name || "",
+      categorySlug: category?.slug || null,
       parentCategory: parent?.name || null,
       parentCategorySlug: category?.parentSlug || null,
       status: productForm.status,
@@ -964,6 +999,7 @@ export default function UsedProductsSyncAdminClient() {
     const patch: Record<string, unknown> = {};
     if (bulkEdit.applyCategory) {
       patch.category = category?.name || "";
+      patch.categorySlug = category?.slug || null;
       patch.parentCategory = parent?.name || null;
       patch.parentCategorySlug = category?.parentSlug || null;
     }
