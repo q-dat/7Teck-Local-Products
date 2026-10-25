@@ -5100,6 +5100,18 @@ type LocalImageMoveResult = {
   failed: number;
 };
 
+type LocalImageArchiveOptions = {
+  openManager: boolean;
+  showProgress: boolean;
+  showResultToast: boolean;
+};
+
+type LocalImageArchiveResult = {
+  moved: number;
+  failed: number;
+  skipped: boolean;
+};
+
 const LOCAL_IMAGE_DIRECTORY_DATABASE_NAME = "local-products-file-system";
 const LOCAL_IMAGE_DIRECTORY_DATABASE_VERSION = 1;
 const LOCAL_IMAGE_DIRECTORY_STORE_NAME = "handles";
@@ -6608,6 +6620,7 @@ export default function LocalPage({
     useState<"active" | "trash">("active");
   const [isLocalImageManagerBusy, setIsLocalImageManagerBusy] =
     useState<boolean>(false);
+  const localImageArchiveLockRef = useRef<boolean>(false);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [scheduleQuery, setScheduleQuery] = useState<string>("");
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(
@@ -12438,33 +12451,49 @@ export default function LocalPage({
     });
   };
 
-  const handleHeaderLocalImageShortcut = async (): Promise<void> => {
-    if (isLocalImageManagerBusy) return;
+  const archiveLocalImagesToTrash = async (
+    options: LocalImageArchiveOptions,
+  ): Promise<LocalImageArchiveResult> => {
+    if (isLocalImageManagerBusy || localImageArchiveLockRef.current) {
+      return { moved: 0, failed: 0, skipped: true };
+    }
 
-    setIsHeaderActionsMenuOpen(false);
-    setLocalImageView("trash");
+    localImageArchiveLockRef.current = true;
+
+    if (options.openManager) {
+      setIsHeaderActionsMenuOpen(false);
+      setLocalImageView("trash");
+    }
+
     setIsLocalImageManagerBusy(true);
-    setPageLoadingText("Đang cập nhật danh sách ảnh trên máy...");
-    await waitForUiPaint();
 
     try {
+      if (options.showProgress) {
+        setPageLoadingText("Đang cập nhật danh sách ảnh trên máy...");
+        await waitForUiPaint();
+      }
+
       const handle = await getWritableLocalImageDirectory();
 
-      if (!handle) return;
+      if (!handle) {
+        return { moved: 0, failed: 0, skipped: true };
+      }
 
-      // Luôn đọc trực tiếp thư mục thật trước khi xử lý để không dùng state cũ.
+      // Đọc trực tiếp thư mục thật để không xử lý dựa trên state cũ.
       const freshSnapshot = await applyLocalImageDirectorySnapshot(
         handle,
         "active",
       );
       const names = freshSnapshot.active.map((file) => file.name);
 
-      setPageLoadingText(
-        names.length > 0
-          ? `Đang chuyển ${names.length} ảnh vào _trash...`
-          : "Đang kiểm tra _trash...",
-      );
-      await waitForUiPaint();
+      if (options.showProgress) {
+        setPageLoadingText(
+          names.length > 0
+            ? `Đang chuyển ${names.length} ảnh vào _trash...`
+            : "Đang kiểm tra _trash...",
+        );
+        await waitForUiPaint();
+      }
 
       let moved = 0;
       let failed = 0;
@@ -12476,29 +12505,59 @@ export default function LocalPage({
       }
 
       await applyLocalImageDirectorySnapshot(handle, "trash");
-      openModal("localImageManager");
 
-      if (failed > 0) {
-        Toastify(
-          `Đã cập nhật danh sách, chuyển ${moved} ảnh vào _trash; ${failed} ảnh lỗi`,
-          300,
-        );
-      } else if (moved > 0) {
-        Toastify(`Đã cập nhật danh sách và chuyển ${moved} ảnh vào _trash`, 200);
-      } else {
-        Toastify("Đã cập nhật danh sách; không có ảnh đang dùng để chuyển vào _trash", 200);
+      if (options.openManager) {
+        openModal("localImageManager");
       }
+
+      if (options.showResultToast) {
+        if (failed > 0) {
+          Toastify(
+            `Đã cập nhật danh sách, chuyển ${moved} ảnh vào _trash; ${failed} ảnh lỗi`,
+            300,
+          );
+        } else if (moved > 0) {
+          Toastify(`Đã cập nhật danh sách và chuyển ${moved} ảnh vào _trash`, 200);
+        } else {
+          Toastify(
+            "Đã cập nhật danh sách; không có ảnh đang dùng để chuyển vào _trash",
+            200,
+          );
+        }
+      }
+
+      return { moved, failed, skipped: false };
     } catch (error) {
-      if (!isAbortError(error)) {
+      if (isAbortError(error)) {
+        return { moved: 0, failed: 0, skipped: true };
+      }
+
+      if (options.showResultToast) {
         Toastify(
-          error instanceof Error ? error.message : "Không thể cập nhật thư mục ảnh",
+          error instanceof Error
+            ? error.message
+            : "Không thể cập nhật thư mục ảnh",
           400,
         );
       }
+
+      return { moved: 0, failed: 1, skipped: false };
     } finally {
+      localImageArchiveLockRef.current = false;
       setIsLocalImageManagerBusy(false);
-      setPageLoadingText("");
+
+      if (options.showProgress) {
+        setPageLoadingText("");
+      }
     }
+  };
+
+  const handleHeaderLocalImageShortcut = async (): Promise<void> => {
+    await archiveLocalImagesToTrash({
+      openManager: true,
+      showProgress: true,
+      showResultToast: true,
+    });
   };
 
   const handleRestoreLocalTrashImages = (): void => {
@@ -12820,12 +12879,19 @@ export default function LocalPage({
     });
   };
 
-  const handleDownloadProductImages = (product: LocalProduct): void => {
+  const handleDownloadProductImages = async (
+    product: LocalProduct,
+  ): Promise<void> => {
     const totalProductImages =
       product.images.length + product.internalImages.length;
 
     if (totalProductImages === 0) {
       Toastify("Sản phẩm chưa có ảnh để tải", 300);
+      return;
+    }
+
+    if (isLocalImageManagerBusy || localImageArchiveLockRef.current) {
+      Toastify("Đang xử lý ảnh trên máy. Vui lòng thử lại sau.", 300);
       return;
     }
 
@@ -12855,6 +12921,26 @@ export default function LocalPage({
         commentTextIsVerbatim: isPropertyContentType(product.contentType),
       },
     };
+
+    // Chuyển ảnh hiện có trong thư mục đã liên kết vào _trash trước khi mở xác nhận tải.
+    // Luồng nền này không mở modal Quản lý ảnh trên máy.
+    const archiveResult = await archiveLocalImagesToTrash({
+      openManager: false,
+      showProgress: false,
+      showResultToast: false,
+    });
+
+    if (archiveResult.failed > 0) {
+      Toastify(
+        "Không thể chuyển một số ảnh trên máy vào _trash; vẫn tiếp tục tải ảnh.",
+        300,
+      );
+    } else if (archiveResult.skipped) {
+      Toastify(
+        "Chưa chuyển ảnh trên máy vào _trash; vẫn tiếp tục tải ảnh.",
+        300,
+      );
+    }
 
     const storedDownloadedProductIds = loadDownloadedProductIds();
     const wasDownloaded =
