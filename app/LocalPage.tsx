@@ -7972,7 +7972,7 @@ export default function LocalPage({
     setActiveCategoryTab(category);
   }, []);
 
-  // Chuyển sang danh mục kế tiếp / trước đó (dùng cho vuốt ngang).
+  // Chuyển danh mục bằng nút điều hướng tường minh; không dùng gesture vuốt ngang.
   const goToAdjacentCategory = useCallback(
     (direction: 1 | -1) => {
       if (orderedCategoryTabs.length <= 1) return;
@@ -7993,9 +7993,6 @@ export default function LocalPage({
     },
     [activeCategoryTab, handleSelectCategory, orderedCategoryTabs],
   );
-
-  // Lưu điểm chạm để phát hiện thao tác vuốt ngang
-  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Thanh tab danh mục — giữ lại tối đa năm tab phía trước tab đang chọn
   const categoryTabsRef = useRef<HTMLDivElement | null>(null);
@@ -8278,54 +8275,6 @@ export default function LocalPage({
     commitCategoryOrder(draggingCategoryKey);
     resetCategoryDrag();
   };
-
-  const handleProductsTouchStart = useCallback(
-    (event: ReactTouchEvent<HTMLDivElement>) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(
-          'button, a, input, textarea, select, [role="button"], [data-no-category-swipe="true"]',
-        )
-      ) {
-        // Tương tác với thẻ/nút sản phẩm không được kích hoạt vuốt đổi danh mục.
-        swipeStartRef.current = null;
-        return;
-      }
-
-      const touch = event.touches[0];
-      if (!touch) return;
-      swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
-    },
-    [],
-  );
-
-  const handleProductsTouchEnd = useCallback(
-    (event: ReactTouchEvent<HTMLDivElement>) => {
-      const start = swipeStartRef.current;
-      swipeStartRef.current = null;
-      if (!start) return;
-
-      const touch = event.changedTouches[0];
-      if (!touch) return;
-
-      const deltaX = touch.clientX - start.x;
-      const deltaY = touch.clientY - start.y;
-
-      // Chỉ tính là vuốt ngang khi đủ dài và không phải cuộn dọc.
-      const MIN_SWIPE = 60;
-      if (Math.abs(deltaX) < MIN_SWIPE) return;
-      if (Math.abs(deltaX) < Math.abs(deltaY) * 1.5) return;
-
-      // Vuốt trái -> danh mục kế tiếp; vuốt phải -> danh mục trước đó.
-      goToAdjacentCategory(deltaX < 0 ? 1 : -1);
-    },
-    [goToAdjacentCategory],
-  );
-
-  const handleProductsTouchCancel = useCallback((): void => {
-    swipeStartRef.current = null;
-  }, []);
 
   const handleCancelSearchInput = useCallback((): void => {
     setIsSearchSuggestionsOpen(false);
@@ -15955,8 +15904,53 @@ export default function LocalPage({
             radial-gradient(circle at 12% -8%, rgba(216, 201, 159, 0.085), transparent 31%),
             radial-gradient(circle at 92% 24%, rgba(87, 96, 117, 0.055), transparent 29%),
             linear-gradient(145deg, #07090d 0%, #0a0d13 52%, #07090d 100%) !important;
-          background-attachment: fixed;
+          background-attachment: scroll;
           background-size: 42px 42px, 42px 42px, auto, auto, auto;
+        }
+
+        /* Fixed controls live in a body-level portal, outside the scrolling product tree. */
+        .local-products-workspace.local-products-fixed-ui-root {
+          position: fixed !important;
+          inset: 0 !important;
+          width: 100% !important;
+          height: 100vh !important;
+          height: 100dvh !important;
+          min-width: 0 !important;
+          min-height: 0 !important;
+          max-width: none !important;
+          overflow: visible !important;
+          overscroll-behavior: none !important;
+          touch-action: manipulation;
+          pointer-events: none;
+          background: transparent !important;
+          background-attachment: initial !important;
+          background-size: auto !important;
+          z-index: 1000 !important;
+        }
+
+        .local-products-workspace.local-products-fixed-ui-root[data-header-actions-open="true"] {
+          z-index: 1203 !important;
+        }
+
+        .local-products-fixed-ui-root[data-header-actions-open="true"] .mobile-category-navigation,
+        .local-products-fixed-ui-root[data-header-actions-open="true"] .mobile-category-menu-anchor,
+        .local-products-fixed-ui-root[data-header-actions-open="true"] .floating-scroll-top {
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+
+        .local-products-fixed-ui-root > * {
+          pointer-events: auto;
+        }
+
+        .local-products-fixed-ui-root .mobile-category-navigation {
+          position: fixed !important;
+          top: auto !important;
+          bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px)) !important;
+          left: 50% !important;
+          transform: translateX(-50%) !important;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
 
         .local-products-workspace ::selection {
@@ -17306,19 +17300,23 @@ export default function LocalPage({
           bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
         }
 
-        .local-products-workspace .mobile-category-menu-anchor,
-        .local-products-workspace .mobile-category-context {
+        .local-products-workspace .mobile-category-menu-anchor {
           bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
         }
 
-        .local-products-workspace .mobile-category-context {
+        .local-products-workspace .mobile-category-navigation {
           border-color: rgba(255, 255, 255, 0.24);
           background:
             linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.075) 48%, rgba(10, 15, 25, 0.68));
           -webkit-backdrop-filter: blur(24px) saturate(1.55);
           backdrop-filter: blur(24px) saturate(1.55);
           -webkit-tap-highlight-color: transparent;
-          touch-action: pan-y;
+          touch-action: manipulation;
+        }
+
+        .local-products-workspace .mobile-category-navigation button {
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
 
         .local-products-workspace .mobile-category-context[data-searching="true"] {
@@ -18304,273 +18302,309 @@ export default function LocalPage({
             </AnimatePresence>
           </div>
 
-          <AnimatePresence initial={false}>
-            {isMobileCategoryMenuOpen ? (
-              <motion.div
-                aria-hidden="true"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{
-                  duration: prefersReducedMotion ? 0.1 : 0.22,
-                  ease: [0.16, 1, 0.3, 1],
-                }}
-                className="fixed inset-0 z-[999] touch-none bg-black/60 backdrop-blur-[2px] md:hidden"
-                onClick={() => setIsMobileCategoryMenuOpen(false)}
-              />
-            ) : null}
-          </AnimatePresence>
+          {typeof document !== "undefined"
+            ? createPortal(
+              <div
+                className="local-products-workspace local-products-fixed-ui-root"
+                data-header-actions-open={isHeaderActionsMenuOpen ? "true" : "false"}
+              >
+                <>
+                  <AnimatePresence initial={false}>
+                    {isMobileCategoryMenuOpen ? (
+                      <motion.div
+                        aria-hidden="true"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{
+                          duration: prefersReducedMotion ? 0.1 : 0.22,
+                          ease: [0.16, 1, 0.3, 1],
+                        }}
+                        className="fixed inset-0 z-[999] touch-none bg-black/60 backdrop-blur-[2px] md:hidden"
+                        onClick={() => setIsMobileCategoryMenuOpen(false)}
+                      />
+                    ) : null}
+                  </AnimatePresence>
 
-          <div className="mobile-category-menu-anchor fixed bottom-3 right-2 z-[1000] md:hidden">
-            <AnimatePresence initial={false}>
-              {isMobileCategoryMenuOpen ? (
-                <motion.div
-                  id="mobile-category-menu"
-                  initial={
-                    prefersReducedMotion
-                      ? { opacity: 0 }
-                      : { opacity: 0, x: 24, scale: 0.98 }
-                  }
-                  animate={{ opacity: 1, x: 0, scale: 1 }}
-                  exit={
-                    prefersReducedMotion
-                      ? { opacity: 0 }
-                      : { opacity: 0, x: 20, scale: 0.98 }
-                  }
-                  transition={{
-                    duration: prefersReducedMotion ? 0.12 : 0.3,
-                    ease: [0.16, 1, 0.3, 1],
-                  }}
-                  className="absolute bottom-[calc(100%+0.65rem)] right-0 flex max-h-[68dvh] w-[min(84vw,320px)] touch-pan-y flex-col items-end gap-2 overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-2 pl-8 pr-1 [mask-image:linear-gradient(to_bottom,transparent,black_5%,black_95%,transparent)]"
-                >
-                  {orderedCategoryTabs.map((category, index) => {
-                    const isActive =
-                      normalizeTextKey(activeCategoryTab) ===
-                      normalizeTextKey(category);
+                  <div className="mobile-category-menu-anchor fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] right-2 z-[1000] md:hidden">
+                    <AnimatePresence initial={false}>
+                      {isMobileCategoryMenuOpen ? (
+                        <motion.div
+                          id="mobile-category-menu"
+                          initial={
+                            prefersReducedMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, x: 24, scale: 0.98 }
+                          }
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={
+                            prefersReducedMotion
+                              ? { opacity: 0 }
+                              : { opacity: 0, x: 20, scale: 0.98 }
+                          }
+                          transition={{
+                            duration: prefersReducedMotion ? 0.12 : 0.3,
+                            ease: [0.16, 1, 0.3, 1],
+                          }}
+                          className="absolute bottom-[calc(100%+0.65rem)] right-0 flex max-h-[68dvh] w-[min(84vw,320px)] touch-pan-y flex-col items-end gap-2 overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-2 pl-8 pr-1 [mask-image:linear-gradient(to_bottom,transparent,black_5%,black_95%,transparent)]"
+                        >
+                          {orderedCategoryTabs.map((category, index) => {
+                            const isActive =
+                              normalizeTextKey(activeCategoryTab) ===
+                              normalizeTextKey(category);
 
-                    return (
+                            return (
+                              <motion.button
+                                key={category}
+                                type="button"
+                                data-category-bubble="true"
+                                data-category-colored={
+                                  category === "all" ? undefined : "true"
+                                }
+                                data-active={isActive}
+                                style={
+                                  category === "all"
+                                    ? undefined
+                                    : createCategoryColorStyle(
+                                      category,
+                                      settings.categoryColors,
+                                    )
+                                }
+                                initial={
+                                  prefersReducedMotion
+                                    ? { opacity: 0 }
+                                    : {
+                                      opacity: 0,
+                                      x: 48,
+                                      y: index % 2 === 0 ? 11 : -5,
+                                      scale: 0.92,
+                                    }
+                                }
+                                animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+                                exit={
+                                  prefersReducedMotion
+                                    ? { opacity: 0 }
+                                    : { opacity: 0, x: 28, scale: 0.94 }
+                                }
+                                transition={
+                                  prefersReducedMotion
+                                    ? { duration: 0.1 }
+                                    : {
+                                      delay: index * 0.045,
+                                      type: "spring",
+                                      stiffness: 270,
+                                      damping: 24,
+                                      mass: 0.78,
+                                    }
+                                }
+                                whileTap={
+                                  prefersReducedMotion ? undefined : { scale: 0.96, x: -3 }
+                                }
+                                className={`relative flex w-fit max-w-[calc(50vw-8px)] items-center justify-end rounded-[18px] border px-4 py-2.5 text-right text-xs font-black uppercase tracking-[0.055em] backdrop-blur-xl ${isActive
+                                  ? "border-[#f1e5c2]/75 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_16px_42px_rgba(190,164,99,0.24)]"
+                                  : "border-[#d8c99f]/[0.18] bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(6,8,12,0.98))] text-slate-200 shadow-[0_16px_42px_rgba(0,0,0,0.48)]"
+                                  }`}
+                                onClick={() => {
+                                  handleSelectCategory(category);
+                                  setIsMobileCategoryMenuOpen(false);
+                                }}
+                              >
+                                <span className="block max-w-[calc(50vw-40px)] overflow-hidden text-ellipsis whitespace-nowrap">
+                                  {category === "all" ? "Tất cả" : category}
+                                </span>
+                                <span
+                                  aria-hidden="true"
+                                  data-category-tail="true"
+                                  className={`absolute -bottom-1 right-4 h-2.5 w-2.5 rotate-45 border-b border-r ${isActive
+                                    ? "border-[#f1e5c2]/70 bg-[#cdbb88]"
+                                    : "border-[#d8c99f]/[0.18] bg-[#090c11]"
+                                    }`}
+                                />
+                              </motion.button>
+                            );
+                          })}
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+
+                    <motion.button
+                      type="button"
+                      aria-controls="mobile-category-menu"
+                      aria-expanded={isMobileCategoryMenuOpen}
+                      whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                      className={`flex h-11 min-w-24 shrink-0 items-center justify-center border px-4 text-xs font-black tracking-[0.08em] backdrop-blur-xl transition ${isMobileCategoryMenuOpen
+                        ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
+                        : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
+                        }`}
+                      onClick={() =>
+                        setIsMobileCategoryMenuOpen((current) => !current)
+                      }
+                    >
+                      {isMobileCategoryMenuOpen ? "Đóng" : "Danh mục"}
+                    </motion.button>
+                  </div>
+
+                  <div className="mobile-category-navigation fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[1001] flex h-10 w-[40vw]  xs:w-[45vw] -translate-x-1/2 items-center gap-1 rounded-full border px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_8px_28px_rgba(0,0,0,0.32)] md:hidden">
+                    <button
+                      type="button"
+                      aria-label="Danh mục trước"
+                      title="Danh mục trước"
+                      disabled={orderedCategoryTabs.length <= 1}
+                      className="flex h-8 w-7 shrink-0 items-center justify-center rounded-full text-[#eadfbe]/90 transition hover:bg-white/10 active:scale-90 disabled:opacity-30"
+                      onClick={() => goToAdjacentCategory(-1)}
+                    >
+                      <FiChevronLeft aria-hidden="true" className="h-4 w-4" />
+                    </button>
+
+                    <div
+                      className="mobile-category-context flex h-8 min-w-0 flex-1 select-none items-center gap-1 overflow-hidden px-1 text-[10px] font-semibold tracking-wide text-white/95"
+                      data-searching={isMobileSearchContext ? "true" : "false"}
+                      title={mobileCategoryContextLabel}
+                      aria-label={
+                        isMobileSearchContext
+                          ? `Từ khóa tìm kiếm: ${mobileCategoryContextLabel}`
+                          : `Danh mục hiện tại: ${mobileCategoryContextLabel}`
+                      }
+                    >
+                      {isMobileSearchContext ? (
+                        <FiSearch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
+                      ) : (
+                        <FiDatabase aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-center">
+                        {mobileCategoryContextLabel}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      aria-label="Danh mục tiếp theo"
+                      title="Danh mục tiếp theo"
+                      disabled={orderedCategoryTabs.length <= 1}
+                      className="flex h-8 w-7 shrink-0 items-center justify-center rounded-full text-[#eadfbe]/90 transition hover:bg-white/10 active:scale-90 disabled:opacity-30"
+                      onClick={() => goToAdjacentCategory(1)}
+                    >
+                      <FiChevronRight aria-hidden="true" className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div
+                    className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:grid xl:grid-cols-2 xl:grid-rows-2 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+                  >
+                    <div className="flex items-center gap-2 xl:contents">
                       <motion.button
-                        key={category}
                         type="button"
-                        data-category-bubble="true"
-                        data-category-colored={
-                          category === "all" ? undefined : "true"
+                        aria-label="Chuyển ảnh trên máy vào _trash"
+                        title="Ảnh máy: chuyển toàn bộ ảnh vào _trash"
+                        whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                        className={`hidden h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-1 xl:row-start-2 xl:flex ${isLocalImageManagerBusy
+                          ? "border-slate-600/60 bg-slate-800/90 text-slate-500"
+                          : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45 hover:text-[#f3e7c6]"
+                          }`}
+                        onClick={() => void handleHeaderLocalImageShortcut()}
+                      >
+                        {isLocalImageManagerBusy ? <FiRotateCw aria-hidden="true" className="h-6 w-6 animate-spin xl:h-5 xl:w-5" /> : <FiArchive aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />}
+                      </motion.button>
+
+                      <motion.button
+                        type="button"
+                        aria-controls="header-action-menu"
+                        aria-expanded={isHeaderActionsMenuOpen}
+                        aria-label={
+                          isHeaderActionsMenuOpen
+                            ? "Đóng menu chức năng header"
+                            : "Mở menu chức năng header"
                         }
-                        data-active={isActive}
-                        style={
-                          category === "all"
-                            ? undefined
-                            : createCategoryColorStyle(
-                              category,
-                              settings.categoryColors,
-                            )
+                        title={
+                          isHeaderActionsMenuOpen
+                            ? "Đóng menu chức năng"
+                            : "Mở menu chức năng"
                         }
-                        initial={
-                          prefersReducedMotion
-                            ? { opacity: 0 }
-                            : {
-                              opacity: 0,
-                              x: 48,
-                              y: index % 2 === 0 ? 11 : -5,
-                              scale: 0.92,
-                            }
-                        }
-                        animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
-                        exit={
-                          prefersReducedMotion
-                            ? { opacity: 0 }
-                            : { opacity: 0, x: 28, scale: 0.94 }
-                        }
-                        transition={
-                          prefersReducedMotion
-                            ? { duration: 0.1 }
-                            : {
-                              delay: index * 0.045,
-                              type: "spring",
-                              stiffness: 270,
-                              damping: 24,
-                              mass: 0.78,
-                            }
-                        }
-                        whileTap={
-                          prefersReducedMotion ? undefined : { scale: 0.96, x: -3 }
-                        }
-                        className={`relative flex w-fit max-w-[calc(50vw-8px)] items-center justify-end rounded-[18px] border px-4 py-2.5 text-right text-xs font-black uppercase tracking-[0.055em] backdrop-blur-xl ${isActive
-                          ? "border-[#f1e5c2]/75 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_16px_42px_rgba(190,164,99,0.24)]"
-                          : "border-[#d8c99f]/[0.18] bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(6,8,12,0.98))] text-slate-200 shadow-[0_16px_42px_rgba(0,0,0,0.48)]"
+                        whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
+                          ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
+                          : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                           }`}
                         onClick={() => {
-                          handleSelectCategory(category);
                           setIsMobileCategoryMenuOpen(false);
+                          setIsHeaderActionsMenuOpen((current) => !current);
                         }}
                       >
-                        <span className="block max-w-[calc(50vw-40px)] overflow-hidden text-ellipsis whitespace-nowrap">
-                          {category === "all" ? "Tất cả" : category}
-                        </span>
-                        <span
-                          aria-hidden="true"
-                          data-category-tail="true"
-                          className={`absolute -bottom-1 right-4 h-2.5 w-2.5 rotate-45 border-b border-r ${isActive
-                            ? "border-[#f1e5c2]/70 bg-[#cdbb88]"
-                            : "border-[#d8c99f]/[0.18] bg-[#090c11]"
-                            }`}
-                        />
+                        {isHeaderActionsMenuOpen ? (
+                          <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                        ) : (
+                          <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                        )}
                       </motion.button>
-                    );
-                  })}
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
+                    </div>
 
-            <motion.button
-              type="button"
-              aria-controls="mobile-category-menu"
-              aria-expanded={isMobileCategoryMenuOpen}
-              whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 min-w-24 shrink-0 items-center justify-center border px-4 text-xs font-black tracking-[0.08em] backdrop-blur-xl transition ${isMobileCategoryMenuOpen
-                ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
-                : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
-                }`}
-              onClick={() =>
-                setIsMobileCategoryMenuOpen((current) => !current)
-              }
-            >
-              {isMobileCategoryMenuOpen ? "Đóng" : "Danh mục"}
-            </motion.button>
-          </div>
+                    <motion.button
+                      type="button"
+                      aria-pressed={activeModal === "contact"}
+                      aria-label={
+                        activeModal === "contact"
+                          ? "Đóng liên hệ"
+                          : "Mở nhanh liên hệ"
+                      }
+                      title={
+                        activeModal === "contact"
+                          ? "Đóng liên hệ"
+                          : activeContactLabel
+                            ? `Liên hệ: ${activeContactLabel}`
+                            : "Mở nhanh liên hệ"
+                      }
+                      whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-1 ${activeModal === "contact"
+                        ? "border-cyan-200/75 bg-[linear-gradient(135deg,#d8f6ff,#72bed6)] text-[#09202a] shadow-[0_14px_38px_rgba(69,177,211,0.28)]"
+                        : activeContactOption
+                          ? "border-emerald-200/40 bg-[linear-gradient(145deg,rgba(12,38,31,0.97),rgba(5,16,13,0.98))] text-emerald-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)]"
+                          : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45"
+                        }`}
+                      onClick={() => {
+                        setIsMobileCategoryMenuOpen(false);
+                        setIsHeaderActionsMenuOpen(false);
+                        if (activeModal === "contact") {
+                          closeModal();
+                          return;
+                        }
+                        openModal("contact");
+                      }}
+                    >
+                      {activeModal === "contact" ? (
+                        <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                      ) : (
+                        <FiPhone aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                      )}
+                    </motion.button>
+                  </div>
 
-          <div
-            className="mobile-category-context fixed bottom-3 left-1/2 z-[1001] flex h-8 w-[calc(100vw-208px)] min-w-[96px] max-w-[132px] -translate-x-1/2 select-none items-center gap-1.5 overflow-hidden rounded-full border border-white/25 px-3 text-[10px] font-semibold tracking-wide text-white/95 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_8px_28px_rgba(0,0,0,0.28)] backdrop-blur-2xl md:hidden"
-            data-searching={isMobileSearchContext ? "true" : "false"}
-            title={mobileCategoryContextLabel}
-            aria-label={
-              isMobileSearchContext
-                ? `Từ khóa tìm kiếm: ${mobileCategoryContextLabel}`
-                : `Danh mục hiện tại: ${mobileCategoryContextLabel}`
-            }
-            onTouchStart={handleProductsTouchStart}
-            onTouchEnd={handleProductsTouchEnd}
-            onTouchCancel={handleProductsTouchCancel}
-          >
-            {isMobileSearchContext ? (
-              <FiSearch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
-            ) : (
-              <FiDatabase aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-90" />
-            )}
-            <span className="min-w-0 flex-1 truncate text-center">
-              {mobileCategoryContextLabel}
-            </span>
-          </div>
+                  <AnimatePresence initial={false}>
+                    {isScrollTopVisible ? (
+                      <motion.button
+                        type="button"
+                        initial={{ opacity: 0, x: -8, scale: 0.9 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: -6, scale: 0.9 }}
+                        transition={{
+                          duration: prefersReducedMotion ? 0.1 : 0.2,
+                        }}
+                        aria-label="Cuộn lên đầu trang"
+                        title="Lên đầu trang"
+                        className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
+                        onClick={handleScrollToTop}
+                      >
+                        <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                      </motion.button>
+                    ) : null}
+                  </AnimatePresence>
 
-          <div
-            className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:grid xl:grid-cols-2 xl:grid-rows-2 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
-          >
-            <div className="flex items-center gap-2 xl:contents">
-              <motion.button
-                type="button"
-                aria-label="Chuyển ảnh trên máy vào _trash"
-                title="Ảnh máy: chuyển toàn bộ ảnh vào _trash"
-                whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-                className={`hidden h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-1 xl:row-start-2 xl:flex ${isLocalImageManagerBusy
-                  ? "border-slate-600/60 bg-slate-800/90 text-slate-500"
-                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45 hover:text-[#f3e7c6]"
-                  }`}
-                onClick={() => void handleHeaderLocalImageShortcut()}
-              >
-                {isLocalImageManagerBusy ? <FiRotateCw aria-hidden="true" className="h-6 w-6 animate-spin xl:h-5 xl:w-5" /> : <FiArchive aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />}
-              </motion.button>
-
-              <motion.button
-                type="button"
-                aria-controls="header-action-menu"
-                aria-expanded={isHeaderActionsMenuOpen}
-                aria-label={
-                  isHeaderActionsMenuOpen
-                    ? "Đóng menu chức năng header"
-                    : "Mở menu chức năng header"
-                }
-                title={
-                  isHeaderActionsMenuOpen
-                    ? "Đóng menu chức năng"
-                    : "Mở menu chức năng"
-                }
-                whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-                className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
-                  ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
-                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
-                  }`}
-                onClick={() => {
-                  setIsMobileCategoryMenuOpen(false);
-                  setIsHeaderActionsMenuOpen((current) => !current);
-                }}
-              >
-                {isHeaderActionsMenuOpen ? (
-                  <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-                ) : (
-                  <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-                )}
-              </motion.button>
-            </div>
-
-            <motion.button
-              type="button"
-              aria-pressed={activeModal === "contact"}
-              aria-label={
-                activeModal === "contact"
-                  ? "Đóng liên hệ"
-                  : "Mở nhanh liên hệ"
-              }
-              title={
-                activeModal === "contact"
-                  ? "Đóng liên hệ"
-                  : activeContactLabel
-                    ? `Liên hệ: ${activeContactLabel}`
-                    : "Mở nhanh liên hệ"
-              }
-              whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-              className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-1 ${activeModal === "contact"
-                ? "border-cyan-200/75 bg-[linear-gradient(135deg,#d8f6ff,#72bed6)] text-[#09202a] shadow-[0_14px_38px_rgba(69,177,211,0.28)]"
-                : activeContactOption
-                  ? "border-emerald-200/40 bg-[linear-gradient(145deg,rgba(12,38,31,0.97),rgba(5,16,13,0.98))] text-emerald-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)]"
-                  : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45"
-                }`}
-              onClick={() => {
-                setIsMobileCategoryMenuOpen(false);
-                setIsHeaderActionsMenuOpen(false);
-                if (activeModal === "contact") {
-                  closeModal();
-                  return;
-                }
-                openModal("contact");
-              }}
-            >
-              {activeModal === "contact" ? (
-                <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-              ) : (
-                <FiPhone aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-              )}
-            </motion.button>
-          </div>
-
-          <AnimatePresence initial={false}>
-            {isScrollTopVisible ? (
-              <motion.button
-                type="button"
-                initial={{ opacity: 0, x: -8, scale: 0.9 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: -6, scale: 0.9 }}
-                transition={{
-                  duration: prefersReducedMotion ? 0.1 : 0.2,
-                }}
-                aria-label="Cuộn lên đầu trang"
-                title="Lên đầu trang"
-                className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
-                onClick={handleScrollToTop}
-              >
-                <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
-              </motion.button>
-            ) : null}
-          </AnimatePresence>
+                </>
+              </div>,
+              pictureInPictureWindow && !pictureInPictureWindow.closed
+                ? pictureInPictureWindow.document.body
+                : document.body,
+            )
+            : null}
 
           <AnimatePresence initial={false}>
             {draggingCategory ? (
@@ -18701,9 +18735,6 @@ export default function LocalPage({
             data-category-scene={activeCategorySceneColor ? "true" : undefined}
             style={activeCategorySceneStyle}
             className="category-product-stage  min-h-screen"
-            onTouchStart={handleProductsTouchStart}
-            onTouchEnd={handleProductsTouchEnd}
-            onTouchCancel={handleProductsTouchCancel}
           >
             <div className="category-ember-field" aria-hidden="true">
               <span className="category-ember-layer" data-ember-layer="1" />
@@ -18736,7 +18767,6 @@ export default function LocalPage({
                   return (
                     <article
                       key={`${activeCategoryTab}-${product.id}`}
-                      data-no-category-swipe="true"
                       data-product-card="true"
                       data-active={active}
                       data-done={productDone}
