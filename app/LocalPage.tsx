@@ -33,6 +33,8 @@ import {
   FiDatabase,
   FiDownload,
   FiEdit3,
+  FiEye,
+  FiEyeOff,
   FiFileText,
   FiImage,
   FiMenu,
@@ -308,6 +310,7 @@ type DevicePreferences = {
   selectedContactId: string;
   isHeaderVisible: boolean;
   isRemoteSyncReminderEnabled: boolean;
+  showDoneProducts: boolean;
 };
 
 type FacebookLinkOpenKey =
@@ -1046,6 +1049,7 @@ const defaultDevicePreferences: DevicePreferences = {
   selectedContactId: "",
   isHeaderVisible: false,
   isRemoteSyncReminderEnabled: true,
+  showDoneProducts: true,
 };
 
 const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
@@ -1065,6 +1069,7 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
     isHeaderVisible: record.isHeaderVisible === true,
     isRemoteSyncReminderEnabled:
       record.isRemoteSyncReminderEnabled !== false,
+    showDoneProducts: record.showDoneProducts !== false,
   };
 };
 
@@ -6600,6 +6605,7 @@ export default function LocalPage({
   const [selectedContactId, setSelectedContactId] = useState<string>("");
   const [isRemoteSyncReminderEnabled, setIsRemoteSyncReminderEnabled] =
     useState<boolean>(true);
+  const [showDoneProducts, setShowDoneProducts] = useState<boolean>(true);
   const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
   const prefersReducedMotion = useReducedMotion();
@@ -6986,6 +6992,7 @@ export default function LocalPage({
       setSelectedContactId(preferences.selectedContactId);
       setIsHeaderVisible(preferences.isHeaderVisible);
       setIsRemoteSyncReminderEnabled(preferences.isRemoteSyncReminderEnabled);
+      setShowDoneProducts(preferences.showDoneProducts);
     };
 
     applyPreferences(loadDevicePreferences());
@@ -7022,6 +7029,7 @@ export default function LocalPage({
       selectedContactId,
       isHeaderVisible,
       isRemoteSyncReminderEnabled,
+      showDoneProducts,
     });
   }, [
     includeSocialTags,
@@ -7031,6 +7039,7 @@ export default function LocalPage({
     isHeaderVisible,
     isRemoteSyncReminderEnabled,
     selectedContactId,
+    showDoneProducts,
   ]);
 
   useEffect(() => {
@@ -8396,6 +8405,12 @@ export default function LocalPage({
     );
   }, [activeCategoryTab, categories, pendingDoneProductIds, query, viewProducts]);
 
+  const categoryProducts = useMemo(() => {
+    if (showDoneProducts) return filteredProducts;
+
+    return filteredProducts.filter((product) => !product.isDone);
+  }, [filteredProducts, showDoneProducts]);
+
   const activeCategorySceneColor = useMemo(() => {
     if (activeCategoryTab === "all") return "";
 
@@ -8420,15 +8435,16 @@ export default function LocalPage({
       viewProducts.length,
       viewProducts[0]?.updatedAt ?? "",
       categories.join("\u0000"),
+      showDoneProducts ? "show-done" : "hide-done",
     ].join("\u0001");
-  }, [activeCategoryTab, categories, query, viewProducts]);
+  }, [activeCategoryTab, categories, query, showDoneProducts, viewProducts]);
   const visibleProductLimit =
     productRenderState.key === productRenderKey
       ? productRenderState.limit
       : INITIAL_PRODUCT_RENDER_LIMIT;
   const visibleProducts = useMemo(() => {
-    return filteredProducts.slice(0, visibleProductLimit);
-  }, [filteredProducts, visibleProductLimit]);
+    return categoryProducts.slice(0, visibleProductLimit);
+  }, [categoryProducts, visibleProductLimit]);
 
   useEffect(() => {
     if (productRenderState.key !== productRenderKey) {
@@ -8439,7 +8455,7 @@ export default function LocalPage({
       return;
     }
 
-    if (productRenderState.limit >= filteredProducts.length) return;
+    if (productRenderState.limit >= categoryProducts.length) return;
 
     const timeoutId = window.setTimeout(() => {
       setProductRenderState((current) => {
@@ -8449,7 +8465,7 @@ export default function LocalPage({
           ...current,
           limit: Math.min(
             current.limit + PRODUCT_RENDER_BATCH_SIZE,
-            filteredProducts.length,
+            categoryProducts.length,
           ),
         };
       });
@@ -8458,7 +8474,7 @@ export default function LocalPage({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [filteredProducts.length, productRenderKey, productRenderState]);
+  }, [categoryProducts.length, productRenderKey, productRenderState]);
 
   const groupedProductsByCategory = useMemo(() => {
     return orderGroupsByCategories(
@@ -9219,6 +9235,18 @@ export default function LocalPage({
       200,
     );
   }, [isRemoteSyncReminderEnabled]);
+
+  const handleToggleDoneProductsVisibility = useCallback((): void => {
+    const nextVisible = !showDoneProducts;
+    setShowDoneProducts(nextVisible);
+
+    Toastify(
+      nextVisible
+        ? "Đã hiện lại sản phẩm DONE trong danh mục"
+        : "Đã ẩn sản phẩm DONE khỏi danh mục",
+      200,
+    );
+  }, [showDoneProducts]);
 
   const handleReloadPage = async (): Promise<void> => {
     setPageLoadingText("Đang lưu cache và làm mới trang...");
@@ -17441,6 +17469,26 @@ export default function LocalPage({
           }
         }
 
+        .local-products-workspace .category-product-stage .luxury-product-card[data-active="true"] {
+          z-index: 8;
+          border-color: rgba(255, 241, 194, 0.98) !important;
+          background:
+            linear-gradient(135deg, rgba(255, 244, 207, 0.3), rgba(232, 205, 135, 0.14) 42%, transparent 74%),
+            linear-gradient(155deg, rgba(88, 75, 43, 0.998), rgba(20, 34, 44, 0.999)) !important;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.22),
+            inset 4px 0 0 rgba(255, 230, 158, 0.72),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.28),
+            0 0 0 1px rgba(255, 231, 166, 0.3),
+            0 0 34px rgba(230, 207, 139, 0.24),
+            0 28px 60px rgba(0, 0, 0, 0.43) !important;
+        }
+
+        .local-products-workspace .category-product-stage .luxury-product-card[data-active="true"]::before {
+          background: linear-gradient(90deg, transparent, rgba(255, 248, 224, 0.98), rgba(230, 207, 139, 0.92), transparent) !important;
+          opacity: 1;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           .local-products-workspace *,
           .local-products-workspace *::before,
@@ -18046,6 +18094,34 @@ export default function LocalPage({
               >
                 <FiBell aria-hidden="true" className={iconClassName} />
                 {isRemoteSyncReminderEnabled ? "Nhắc: Bật" : "Nhắc: Tắt"}
+              </button>
+
+              <button
+                type="button"
+                data-luxury-accent="gold"
+                title={
+                  showDoneProducts
+                    ? "Ẩn các sản phẩm DONE khỏi danh mục"
+                    : "Hiện lại các sản phẩm DONE trong danh mục"
+                }
+                aria-label={
+                  showDoneProducts
+                    ? "Ẩn sản phẩm DONE khỏi danh mục"
+                    : "Hiện sản phẩm DONE trong danh mục"
+                }
+                aria-pressed={showDoneProducts}
+                className={`${headerActionButtonBaseClassName} ${showDoneProducts
+                  ? headerActiveButtonClassName
+                  : headerNeutralButtonClassName
+                  }`}
+                onClick={handleToggleDoneProductsVisibility}
+              >
+                {showDoneProducts ? (
+                  <FiEye aria-hidden="true" className={iconClassName} />
+                ) : (
+                  <FiEyeOff aria-hidden="true" className={iconClassName} />
+                )}
+                {showDoneProducts ? "Done: Hiện" : "Done: Ẩn"}
               </button>
 
             </div>
@@ -18742,7 +18818,7 @@ export default function LocalPage({
               <span className="category-ember-layer" data-ember-layer="3" />
             </div>
 
-            {filteredProducts.length === 0 ? (
+            {categoryProducts.length === 0 ? (
               <div className="luxury-dialog border p-5 text-center text-xs font-semibold tracking-wide text-slate-400">
                 Chưa có sản phẩm phù hợp.
               </div>
@@ -18783,7 +18859,7 @@ export default function LocalPage({
                         contentVisibility: "auto",
                         containIntrinsicSize: "520px",
                       }}
-                      className={`luxury-product-card product-wave-card group min-w-0 overflow-hidden border transition duration-300 hover:-translate-y-1 ${productDone ? "opacity-65" : ""
+                      className={`luxury-product-card product-wave-card group min-w-0 overflow-hidden border transition duration-300 hover:-translate-y-1 ${productDone && !active ? "opacity-65" : ""
                         } ${active
                           ? "border-[#e8d9ae]/70 bg-[#15140f]"
                           : "border-[#d8c99f]/[0.15] bg-[#0b0e14]"
@@ -19218,10 +19294,10 @@ export default function LocalPage({
                     </article>
                   );
                 })}
-                {visibleProducts.length < filteredProducts.length ? (
+                {visibleProducts.length < categoryProducts.length ? (
                   <div className="col-span-full flex items-center justify-center gap-2 border border-[#d8c99f]/10 bg-[#d8c99f]/[0.025] px-3 py-2 text-[10px] font-bold text-slate-400">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#e6cf8b]" />
-                    Đang dựng {visibleProducts.length}/{filteredProducts.length} sản phẩm
+                    Đang dựng {visibleProducts.length}/{categoryProducts.length} sản phẩm
                   </div>
                 ) : null}
               </div>
