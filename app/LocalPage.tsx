@@ -303,6 +303,8 @@ type GlobalSettings = {
   updatedAt: string;
 };
 
+type DevicePlatform = "android" | "ios";
+
 type DevicePreferences = {
   includeSocialTags: boolean;
   autoCopyShareMode: AutoCopyShareMode;
@@ -311,6 +313,7 @@ type DevicePreferences = {
   isHeaderVisible: boolean;
   isRemoteSyncReminderEnabled: boolean;
   showDoneProducts: boolean;
+  devicePlatform: DevicePlatform;
 };
 
 type FacebookLinkOpenKey =
@@ -883,6 +886,7 @@ type ModalName =
   | "contentNavigation"
   | "writeAccessDenied"
   | "shortcuts"
+  | "deviceSettings"
   | "";
 
 type CategoryTab = "all" | string;
@@ -1050,6 +1054,7 @@ const defaultDevicePreferences: DevicePreferences = {
   isHeaderVisible: false,
   isRemoteSyncReminderEnabled: true,
   showDoneProducts: true,
+  devicePlatform: "android",
 };
 
 const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
@@ -1070,6 +1075,7 @@ const normalizeDevicePreferences = (value: unknown): DevicePreferences => {
     isRemoteSyncReminderEnabled:
       record.isRemoteSyncReminderEnabled !== false,
     showDoneProducts: record.showDoneProducts !== false,
+    devicePlatform: record.devicePlatform === "ios" ? "ios" : "android",
   };
 };
 
@@ -6606,6 +6612,8 @@ export default function LocalPage({
   const [isRemoteSyncReminderEnabled, setIsRemoteSyncReminderEnabled] =
     useState<boolean>(true);
   const [showDoneProducts, setShowDoneProducts] = useState<boolean>(true);
+  const [devicePlatform, setDevicePlatform] =
+    useState<DevicePlatform>("android");
   const [isDevicePreferencesReady, setIsDevicePreferencesReady] =
     useState<boolean>(false);
   const prefersReducedMotion = useReducedMotion();
@@ -6993,6 +7001,7 @@ export default function LocalPage({
       setIsHeaderVisible(preferences.isHeaderVisible);
       setIsRemoteSyncReminderEnabled(preferences.isRemoteSyncReminderEnabled);
       setShowDoneProducts(preferences.showDoneProducts);
+      setDevicePlatform(preferences.devicePlatform);
     };
 
     applyPreferences(loadDevicePreferences());
@@ -7030,6 +7039,7 @@ export default function LocalPage({
       isHeaderVisible,
       isRemoteSyncReminderEnabled,
       showDoneProducts,
+      devicePlatform,
     });
   }, [
     includeSocialTags,
@@ -7040,6 +7050,7 @@ export default function LocalPage({
     isRemoteSyncReminderEnabled,
     selectedContactId,
     showDoneProducts,
+    devicePlatform,
   ]);
 
   useEffect(() => {
@@ -12867,6 +12878,36 @@ export default function LocalPage({
       return;
     }
 
+    if (devicePlatform === "ios") {
+      const descriptionText =
+        product.description.trim() || settings.commonDescription.trim();
+      const shareRequest: ShareRequest = {
+        productId: product.id,
+        title: product.name,
+        images: product.images,
+        internalImages: product.internalImages,
+        postText: descriptionText,
+        commentText: buildCommentContentText(
+          product.name,
+          descriptionText,
+          product.priceText,
+          "",
+          product.contentType,
+          product.realEstateComment,
+        ),
+        commentTextIsVerbatim: isPropertyContentType(product.contentType),
+        shareKey: `share-product-${product.id}`,
+        successMessage: "Đã mở chia sẻ chỉ hình ảnh",
+      };
+
+      scheduleProductImageBlobCache([
+        ...product.images,
+        ...product.internalImages,
+      ]);
+      await executeShareRequest("imagesOnly", true, shareRequest, true);
+      return;
+    }
+
     if (isLocalImageManagerBusy || localImageArchiveLockRef.current) {
       Toastify("Đang xử lý ảnh trên máy. Vui lòng thử lại sau.", 300);
       return;
@@ -14018,8 +14059,11 @@ export default function LocalPage({
     );
   };
 
-  const getShareRequestImages = (request: ShareRequest): ProductImage[] => {
-    return includeInternalShareImages
+  const getShareRequestImages = (
+    request: ShareRequest,
+    includeInternalImages = includeInternalShareImages,
+  ): ProductImage[] => {
+    return includeInternalImages
       ? [...request.images, ...(request.internalImages ?? [])]
       : request.images;
   };
@@ -14131,11 +14175,16 @@ export default function LocalPage({
   const executeShareRequest = async (
     mode: ShareContentMode,
     shareImagesOnly = mode === "imagesOnly",
+    requestOverride?: ShareRequest,
+    includeInternalImagesOverride?: boolean,
   ): Promise<void> => {
-    if (!pendingShare || isShareExecuting) return;
+    const request = requestOverride ?? pendingShare;
+    if (!request || isShareExecuting) return;
 
-    const request = pendingShare;
-    const shareImages = getShareRequestImages(request);
+    const shareImages = getShareRequestImages(
+      request,
+      includeInternalImagesOverride ?? includeInternalShareImages,
+    );
     const textValue =
       mode === "imagesOnly" ? "" : getShareRequestText(request, mode);
     const contentLabel = mode === "post" ? "Post" : "Cmt";
@@ -18124,6 +18173,23 @@ export default function LocalPage({
                 {showDoneProducts ? "Done: Hiện" : "Done: Ẩn"}
               </button>
 
+              <button
+                type="button"
+                data-luxury-accent="cyan"
+                title="Chọn nền tảng thiết bị để điều chỉnh luồng Tải ảnh"
+                aria-label={`Thiết bị hiện tại: ${
+                  devicePlatform === "android" ? "Android" : "iOS"
+                }`}
+                aria-haspopup="dialog"
+                className={`${headerActionButtonBaseClassName} ${headerActiveButtonClassName}`}
+                onClick={() => openModal("deviceSettings")}
+              >
+                <FiMonitor aria-hidden="true" className={iconClassName} />
+                <span className="min-w-0 truncate">
+                  Thiết Bị: {devicePlatform === "android" ? "Android" : "iOS"}
+                </span>
+              </button>
+
             </div>
           </div>
         </header>
@@ -19376,6 +19442,9 @@ export default function LocalPage({
                   {activeModal === "shortcuts" ? (
                     <FiKey aria-hidden="true" className={iconClassName} />
                   ) : null}
+                  {activeModal === "deviceSettings" ? (
+                    <FiMonitor aria-hidden="true" className={iconClassName} />
+                  ) : null}
                 </div>
 
                 <div className="min-w-0">
@@ -19423,6 +19492,7 @@ export default function LocalPage({
                       : null}
                     {activeModal === "contentNavigation" ? "Điều hướng" : null}
                     {activeModal === "shortcuts" ? "Phím tắt" : null}
+                    {activeModal === "deviceSettings" ? "Thiết bị" : null}
                   </h2>
                 </div>
               </div>
@@ -19439,6 +19509,56 @@ export default function LocalPage({
             <div
               className={`min-h-0 min-w-0 flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_50%_0,rgba(216,201,159,0.035),transparent_36%)] p-2 ${activeModal === "imageAlbum" || activeModal === "productList" || activeModal === "product" || activeModal === "imageOverlayEditor" ? "overflow-hidden" : "overflow-y-auto"}`}
             >
+              {activeModal === "deviceSettings" ? (
+                <section className="mx-auto grid w-full max-w-xl gap-3">
+                  <div className="border border-[#d8c99f]/20 bg-[linear-gradient(145deg,rgba(216,201,159,0.07),rgba(255,255,255,0.015))] p-3">
+                    <h3 className="text-sm font-black text-white">
+                      Nền tảng đang sử dụng
+                    </h3>
+                    <p className="mt-1 text-[10px] leading-5 text-slate-400">
+                      Android giữ nguyên luồng Tải ảnh hiện tại. iOS chuyển nút
+                      Tải ảnh của từng sản phẩm sang luồng chia sẻ chỉ hình ảnh
+                      bằng Share Sheet.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      aria-pressed={devicePlatform === "android"}
+                      className={`flex min-h-14 items-center justify-center gap-2 border px-3 py-3 text-xs font-black transition active:scale-[0.98] ${devicePlatform === "android"
+                        ? "border-[#f0e3c0]/80 bg-[linear-gradient(135deg,#f2e8cd,#c9b47c)] text-[#17130a] shadow-[0_6px_18px_rgba(190,164,99,0.16)]"
+                        : "border-white/10 bg-slate-900/80 text-slate-300 hover:border-[#d8c99f]/40 hover:bg-slate-800"
+                        }`}
+                      onClick={() => {
+                        setDevicePlatform("android");
+                        Toastify("Đã chọn thiết bị Android", 200);
+                        closeModal();
+                      }}
+                    >
+                      <FiMonitor aria-hidden="true" className="h-4 w-4" />
+                      Android
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={devicePlatform === "ios"}
+                      className={`flex min-h-14 items-center justify-center gap-2 border px-3 py-3 text-xs font-black transition active:scale-[0.98] ${devicePlatform === "ios"
+                        ? "border-[#f0e3c0]/80 bg-[linear-gradient(135deg,#f2e8cd,#c9b47c)] text-[#17130a] shadow-[0_6px_18px_rgba(190,164,99,0.16)]"
+                        : "border-white/10 bg-slate-900/80 text-slate-300 hover:border-[#d8c99f]/40 hover:bg-slate-800"
+                        }`}
+                      onClick={() => {
+                        setDevicePlatform("ios");
+                        Toastify("Đã chọn thiết bị iOS", 200);
+                        closeModal();
+                      }}
+                    >
+                      <FiMonitor aria-hidden="true" className="h-4 w-4" />
+                      iOS
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
                 <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px]">
                   <article className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full">
