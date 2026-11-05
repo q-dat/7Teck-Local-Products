@@ -56,6 +56,12 @@ import {
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import {
+  isApiGuardClientLocked,
+  registerApiGuardRequest,
+  setApiGuardClientLocked,
+  subscribeApiGuardEvents,
+} from "@/lib/api-guard/client";
 
 type ProductImage = {
   id: string;
@@ -601,7 +607,7 @@ const loadHeaderShortcuts = (): HeaderShortcutConfig => {
 };
 
 const saveHeaderShortcuts = (shortcuts: HeaderShortcutConfig): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(
@@ -631,7 +637,7 @@ const loadHeaderShortcutsEnabled = (): boolean => {
 };
 
 const saveHeaderShortcutsEnabled = (enabled: boolean): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(
@@ -993,7 +999,7 @@ const loadPersistedShareModalState = (): PersistedShareModalState | null => {
 };
 
 const savePersistedShareModalState = (state: PersistedShareModalState): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.sessionStorage.setItem(
@@ -1093,7 +1099,7 @@ const loadDevicePreferences = (): DevicePreferences => {
 };
 
 const saveDevicePreferences = (preferences: DevicePreferences): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(
@@ -1128,7 +1134,7 @@ const saveActiveCategoryTab = (
   scope: LocalPageScope,
   category: CategoryTab,
 ): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(getActiveCategoryStorageKey(scope), category);
@@ -1192,7 +1198,7 @@ const loadFacebookLinkOpenSettings = (): FacebookLinkOpenSettings => {
 const saveFacebookLinkOpenSettings = (
   settings: FacebookLinkOpenSettings,
 ): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(
@@ -1227,7 +1233,7 @@ const loadDownloadedProductIds = (): Set<string> => {
 };
 
 const saveDownloadedProductIds = (productIds: Set<string>): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.sessionStorage.setItem(
@@ -1508,7 +1514,7 @@ const loadHourlyNotificationConfig = (): HourlyNotificationConfig => {
 const saveHourlyNotificationConfig = (
   config: HourlyNotificationConfig,
 ): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   window.localStorage.setItem(
     HOURLY_NOTIFICATION_CONFIG_KEY,
@@ -2195,21 +2201,49 @@ const createPostedKey = (
 type ApiErrorPayload = { message?: string };
 
 const apiRequest = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
-    throw new Error(payload?.message || `Yêu cầu thất bại (${response.status})`);
+  if (isApiGuardClientLocked()) {
+    throw new DOMException("Request cancelled", "AbortError");
   }
 
-  return response.json() as Promise<T>;
+  const controller = new AbortController();
+  const unregisterGuardRequest = registerApiGuardRequest(controller);
+  const externalSignal = init?.signal;
+  const abortFromExternalSignal = (): void => {
+    controller.abort(externalSignal?.reason);
+  };
+
+  if (externalSignal?.aborted) {
+    abortFromExternalSignal();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromExternalSignal, {
+      once: true,
+    });
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
+      if (response.status === 423 || response.status === 503) {
+        throw new DOMException("Request cancelled", "AbortError");
+      }
+      throw new Error(payload?.message || `Yêu cầu thất bại (${response.status})`);
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+    unregisterGuardRequest();
+  }
 };
 
 type BootstrapPayload = {
@@ -2263,7 +2297,7 @@ const readSessionSyncVersionCheck = (): number | null => {
 };
 
 const saveSessionSyncVersionCheck = (value: unknown): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   const version = normalizeSyncVersion(value);
 
@@ -2483,7 +2517,7 @@ const readBootstrapHotCache = (): BootstrapCacheRecord | null => {
 };
 
 const writeBootstrapHotCache = (record: BootstrapCacheRecord): boolean => {
-  if (typeof window === "undefined") return false;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return false;
 
   try {
     const serializedRecord = JSON.stringify(record);
@@ -2524,6 +2558,8 @@ const writeBootstrapCache = async (
   payload: BootstrapPayload,
   syncVersion: number,
 ): Promise<void> => {
+  if (isApiGuardClientLocked()) return;
+
   const record: BootstrapCacheRecord = {
     version: 2,
     cachedAt: new Date().toISOString(),
@@ -2623,7 +2659,11 @@ const getImageBlobFromMemoryCache = (key: string): Blob | null => {
 };
 
 const cacheImageBlobInMemory = (key: string, blob: Blob): void => {
-  if (blob.size === 0 || blob.size > IMAGE_BLOB_MEMORY_CACHE_MAX_BYTES) return;
+  if (
+    isApiGuardClientLocked() ||
+    blob.size === 0 ||
+    blob.size > IMAGE_BLOB_MEMORY_CACHE_MAX_BYTES
+  ) return;
 
   const previous = imageBlobMemoryCache.get(key);
   if (previous) {
@@ -3055,6 +3095,7 @@ let pendingStatePatch: Record<string, unknown> = {};
 let statePatchTimer: ReturnType<typeof setTimeout> | null = null;
 
 const queueAppStatePatch = (patch: Record<string, unknown>): void => {
+  if (isApiGuardClientLocked()) return;
   pendingStatePatch = { ...pendingStatePatch, ...patch };
   if (statePatchTimer) clearTimeout(statePatchTimer);
 
@@ -3069,6 +3110,12 @@ const queueAppStatePatch = (patch: Record<string, unknown>): void => {
 };
 
 const flushQueuedAppStatePatch = async (): Promise<void> => {
+  if (isApiGuardClientLocked()) {
+    if (statePatchTimer) clearTimeout(statePatchTimer);
+    statePatchTimer = null;
+    pendingStatePatch = {};
+    return;
+  }
   if (statePatchTimer) clearTimeout(statePatchTimer);
   statePatchTimer = null;
 
@@ -3441,7 +3488,7 @@ const readLocalJson = (key: string): unknown => {
 };
 
 const writeLocalJson = (key: string, value: unknown): void => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || isApiGuardClientLocked()) return;
 
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
@@ -5354,13 +5401,27 @@ const createImageOverlayTemplatePreviews = async (
 const clearAllBrowserLocalData = async (): Promise<void> => {
   if (typeof window === "undefined") return;
 
-  await Promise.all([
+  // Xóa synchronous trước để UI không còn giữ các snapshot Local trong storage.
+  try {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  } catch {
+    // Tiếp tục dọn IndexedDB ngay cả khi Storage API bị trình duyệt hạn chế.
+  }
+
+  const deletionResults = await Promise.allSettled([
     deleteIndexedDbDatabase(BOOTSTRAP_CACHE_DATABASE_NAME),
     deleteIndexedDbDatabase(LOCAL_IMAGE_DIRECTORY_DATABASE_NAME),
     deleteIndexedDbDatabase(IMAGE_OVERLAY_TEMPLATE_DATABASE_NAME),
   ]);
 
-  window.localStorage.clear();
+  deletionResults.forEach((result) => {
+    if (result.status === "rejected") {
+      console.warn("Không thể xóa một kho IndexedDB Local:", result.reason);
+    }
+  });
+
+  await clearImageCaches().catch(() => undefined);
 };
 
 const canUseDirectoryPicker = (): boolean => {
@@ -6431,6 +6492,11 @@ export default function LocalPage({
   const remoteSyncCheckInFlightRef = useRef<boolean>(false);
   const remoteSyncPromptedVersionRef = useRef<number>(0);
   const remoteSyncDismissedVersionRef = useRef<number>(0);
+  const apiGuardActiveRef = useRef<boolean>(false);
+  const apiGuardRevisionRef = useRef<number>(-1);
+  const apiGuardCleanupPromiseRef = useRef<Promise<void> | null>(null);
+  const [apiGuardSnapshotReady, setApiGuardSnapshotReady] =
+    useState<boolean>(false);
   const draftPendingImagesRef = useRef<Map<string, DraftPendingImage>>(
     new Map<string, DraftPendingImage>(),
   );
@@ -7300,6 +7366,8 @@ export default function LocalPage({
       );
 
       if (previousNotificationKey === notificationKey) return;
+
+      if (isApiGuardClientLocked()) return;
 
       window.localStorage.setItem(
         HOURLY_NOTIFICATION_LAST_SLOT_KEY,
@@ -9055,6 +9123,9 @@ export default function LocalPage({
   }, []);
 
   const applyBootstrapPayload = useCallback((payload: BootstrapPayload): void => {
+    // Bootstrap data is only applied after a trusted, unlocked server snapshot.
+    if (apiGuardActiveRef.current) return;
+
     const nextProducts = sortProductsByUpdatedAt(
       normalizeProductsArray(payload.products),
     );
@@ -9080,6 +9151,7 @@ export default function LocalPage({
 
   const applySyncChangesPayload = useCallback(
     (payload: SyncChangesPayload): void => {
+      if (isApiGuardClientLocked()) return;
       if (payload.mode === "snapshot") {
         applyBootstrapPayload({
           products: payload.products,
@@ -9139,6 +9211,7 @@ export default function LocalPage({
       notifyOnError?: boolean;
     } = {},
   ): Promise<boolean> => {
+    if (isApiGuardClientLocked()) return false;
     setPageLoadingText("Đang kiểm tra phiên bản dữ liệu...");
     await waitForUiPaint();
 
@@ -9162,6 +9235,7 @@ export default function LocalPage({
       setPageLoadingText("Đang đồng bộ phần dữ liệu thay đổi...");
       await waitForUiPaint();
       const changes = await getSyncChanges(currentVersion);
+      if (isApiGuardClientLocked()) return false;
 
       applySyncChangesPayload(changes);
       setLocalSyncVersion(changes.version);
@@ -9186,6 +9260,9 @@ export default function LocalPage({
       );
       return true;
     } catch (error) {
+      if (isAbortError(error) || isApiGuardClientLocked()) {
+        return false;
+      }
       if (options.notifyOnError !== false) {
         Toastify(
           error instanceof Error
@@ -9202,6 +9279,7 @@ export default function LocalPage({
 
   const checkForRemoteSyncUpdate = useCallback(async (): Promise<void> => {
     if (
+      isApiGuardClientLocked() ||
       !isSettingsReady ||
       typeof window === "undefined" ||
       remoteSyncCheckInFlightRef.current
@@ -9289,12 +9367,25 @@ export default function LocalPage({
   };
 
   useEffect(() => {
+    if (!apiGuardSnapshotReady) return;
+
     let cancelled = false;
+
+    // Keep the regular Local workspace available, but never hydrate browser
+    // cache while the server has the API Guard enabled or cannot be verified.
+    if (apiGuardActiveRef.current || isApiGuardClientLocked()) {
+      setIsSettingsReady(true);
+      setPageLoadingText("");
+      return;
+    }
+
     setPageLoadingText("Đang đọc dữ liệu cache trên thiết bị...");
 
     void readBootstrapCache()
       .then((cacheRecord) => {
-        if (cancelled) return;
+        if (cancelled || apiGuardActiveRef.current || isApiGuardClientLocked()) {
+          return;
+        }
 
         if (cacheRecord) {
           applyBootstrapPayload(cacheRecord.payload);
@@ -9320,7 +9411,7 @@ export default function LocalPage({
     return () => {
       cancelled = true;
     };
-  }, [applyBootstrapPayload, setLocalSyncVersion]);
+  }, [apiGuardSnapshotReady, applyBootstrapPayload, setLocalSyncVersion]);
 
   useEffect(() => {
     if (!isSettingsReady || typeof window === "undefined") return;
@@ -11989,6 +12080,7 @@ export default function LocalPage({
         await waitForUiPaint();
 
         try {
+          if (isApiGuardClientLocked()) return;
           window.sessionStorage.setItem(
             RESTORE_BACKUP_AFTER_RELOAD_KEY,
             "1",
@@ -15925,6 +16017,127 @@ export default function LocalPage({
     };
   }, []);
 
+  useEffect(() => {
+    const lockAndClearLocalData = (): void => {
+      if (apiGuardActiveRef.current) {
+        setIsSettingsReady(true);
+        setPageLoadingText("");
+        return;
+      }
+
+      apiGuardActiveRef.current = true;
+      setApiGuardClientLocked(true);
+      setIsSettingsReady(true);
+      setPageLoadingText("");
+
+      // Clear all product-facing in-memory state. The surrounding Local page
+      // remains mounted and keeps its normal layout with an empty product list.
+      productsRef.current = [];
+      syncVersionRef.current = 0;
+      setProducts([]);
+      setCacheSyncVersion(0);
+      setAvailableRemoteSyncVersion(null);
+      setPendingImageUploadCount(0);
+      setIsBackupRestoreReady(false);
+      setSettings(defaultSettings);
+      setPostedRecords([]);
+      setScheduleAssignments({});
+      setScheduleConfig(defaultScheduleConfig);
+      setDraft(emptyDraft);
+      setQuery("");
+      setActiveCategoryTab("all");
+      setSelectedProductId("");
+      setExpandedProductIds(new Set<string>());
+      setPendingDoneProductIds(new Set<string>());
+      setPendingShare(null);
+      setPendingDownload(null);
+      setPendingBackup(null);
+      setPendingConfirm(null);
+      setModalStack([]);
+      setAlbumSource(null);
+      setImageOverlayEditor(null);
+      setImageOverlayLayers([]);
+      setSelectedImageOverlayLayerId("");
+      setCopiedKey("");
+      setSelectedDescriptionCopy(null);
+      setDownloadedProductIds(new Set<string>());
+
+      pendingImageUploadsRef.current.forEach((record) => {
+        cancelledPendingImageUploadIdsRef.current.add(record.id);
+      });
+      pendingImageUploadsRef.current.clear();
+      failedPendingImageUploadIdsRef.current.clear();
+      pendingImageQueueHydratedRef.current = false;
+      pendingImageUploadPumpRef.current = false;
+      Array.from(pendingImageObjectUrlsRef.current.keys()).forEach((imageId) => {
+        releasePendingImageObjectUrl(imageId);
+      });
+
+      if (imageBlobPrefetchTimer !== null) {
+        window.clearTimeout(imageBlobPrefetchTimer);
+        imageBlobPrefetchTimer = null;
+      }
+      imageBlobRequests.clear();
+      imageClipboardPngRequests.clear();
+      pendingImageBlobPrefetches.clear();
+      clearImageBlobMemoryCache();
+
+      setLocalOverlayTemplates((current) => {
+        current.forEach((template) => URL.revokeObjectURL(template.previewUrl));
+        return [];
+      });
+
+      try {
+        window.localStorage.clear();
+        window.sessionStorage.clear();
+      } catch {
+        // The application remains empty even if browser storage is restricted.
+      }
+
+      if (!apiGuardCleanupPromiseRef.current) {
+        apiGuardCleanupPromiseRef.current = pendingImageQueueWriteRef.current
+          .catch(() => undefined)
+          .then(() => clearAllBrowserLocalData())
+          .finally(() => {
+            apiGuardCleanupPromiseRef.current = null;
+          });
+      }
+    };
+
+    const unsubscribe = subscribeApiGuardEvents((event) => {
+      if (event.type === "connection") {
+        if (!event.connected) {
+          // Fail closed without changing the visible page layout.
+          lockAndClearLocalData();
+          setApiGuardSnapshotReady(true);
+        }
+        return;
+      }
+
+      const { state } = event;
+      if (state.revision < apiGuardRevisionRef.current) return;
+      apiGuardRevisionRef.current = state.revision;
+
+      if (state.enabled) {
+        lockAndClearLocalData();
+        setApiGuardSnapshotReady(true);
+        return;
+      }
+
+      const wasGuarded = apiGuardActiveRef.current;
+      apiGuardActiveRef.current = false;
+      setApiGuardClientLocked(false);
+      setApiGuardSnapshotReady(true);
+
+      if (wasGuarded) {
+        // Browser caches were cleared. Reload cleanly before allowing sync again.
+        window.location.reload();
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
   if (!isSettingsReady) {
     return (
       <main
@@ -18177,9 +18390,8 @@ export default function LocalPage({
                 type="button"
                 data-luxury-accent="cyan"
                 title="Chọn nền tảng thiết bị để điều chỉnh luồng Tải ảnh"
-                aria-label={`Thiết bị hiện tại: ${
-                  devicePlatform === "android" ? "Android" : "iOS"
-                }`}
+                aria-label={`Thiết bị hiện tại: ${devicePlatform === "android" ? "Android" : "iOS"
+                  }`}
                 aria-haspopup="dialog"
                 className={`${headerActionButtonBaseClassName} ${headerActiveButtonClassName}`}
                 onClick={() => openModal("deviceSettings")}
