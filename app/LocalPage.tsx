@@ -9277,6 +9277,10 @@ export default function LocalPage({
     }
   };
 
+  // Keep the latest sync handler available to the long-lived API Guard SSE listener.
+  const handleRefreshCloudDataRef = useRef(handleRefreshCloudData);
+  handleRefreshCloudDataRef.current = handleRefreshCloudData;
+
   const checkForRemoteSyncUpdate = useCallback(async (): Promise<void> => {
     if (
       isApiGuardClientLocked() ||
@@ -16125,14 +16129,57 @@ export default function LocalPage({
       }
 
       const wasGuarded = apiGuardActiveRef.current;
-      apiGuardActiveRef.current = false;
-      setApiGuardClientLocked(false);
-      setApiGuardSnapshotReady(true);
 
-      if (wasGuarded) {
-        // Browser caches were cleared. Reload cleanly before allowing sync again.
-        window.location.reload();
+      if (!wasGuarded) {
+        // First trusted DISABLE snapshot on a fresh visit: let normal bootstrap run.
+        apiGuardActiveRef.current = false;
+        setApiGuardClientLocked(false);
+        setApiGuardSnapshotReady(true);
+        return;
       }
+
+      // Keep the client locked until queued writes and browser-cache deletion finish.
+      // Then fetch from sync version 0 so the server returns the initial snapshot.
+      const resumeRevision = state.revision;
+      setPageLoadingText("Đang chuẩn bị đồng bộ dữ liệu...");
+
+      void (async (): Promise<void> => {
+        // Discard pending state patches while still locked; never push stale local
+        // defaults or pre-lock edits back to MongoDB during the resume sequence.
+        await flushQueuedAppStatePatch();
+
+        const cleanupPromise = apiGuardCleanupPromiseRef.current;
+        if (cleanupPromise) {
+          await cleanupPromise;
+        }
+
+        // A newer ENABLE/DISABLE event supersedes this resume attempt.
+        if (
+          apiGuardRevisionRef.current !== resumeRevision ||
+          !apiGuardActiveRef.current
+        ) {
+          return;
+        }
+
+        apiGuardActiveRef.current = false;
+        setApiGuardClientLocked(false);
+        setApiGuardSnapshotReady(true);
+
+        await handleRefreshCloudDataRef.current({
+          notifyWhenCurrent: false,
+          notifyOnError: true,
+        });
+      })().catch((error: unknown) => {
+        if (isApiGuardClientLocked()) return;
+
+        Toastify(
+          error instanceof Error
+            ? error.message
+            : "Không thể tự đồng bộ dữ liệu sau khi mở khóa",
+          400,
+        );
+        setPageLoadingText("");
+      });
     });
 
     return unsubscribe;
