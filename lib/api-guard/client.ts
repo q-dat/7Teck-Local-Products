@@ -81,7 +81,8 @@ const ensureEventSource = (): void => {
 
   source.onerror = () => {
     isConnected = false;
-    setApiGuardClientLocked(true);
+    // Preserve the last server-confirmed Guard state. A transient SSE error
+    // is not an ENABLE command; the HTTP middleware remains authoritative.
     publish({ type: "connection", connected: false });
   };
 
@@ -92,7 +93,7 @@ const ensureEventSource = (): void => {
       const parsed: unknown = JSON.parse(message.data);
       const state = normalizeApiGuardState(parsed);
       if (!state) {
-        setApiGuardClientLocked(true);
+        // Ignore malformed snapshots without treating them as a lock command.
         publish({ type: "connection", connected: false });
         return;
       }
@@ -103,7 +104,7 @@ const ensureEventSource = (): void => {
       setApiGuardClientLocked(state.enabled);
       publish({ type: "state", state });
     } catch {
-      setApiGuardClientLocked(true);
+      // A parsing failure is not an ENABLE command. Keep the last trusted state.
       publish({ type: "connection", connected: false });
     }
   });
@@ -126,9 +127,9 @@ export const subscribeApiGuardEvents = (
         listener({ type: "state", state: latestState });
       }
     } else {
-      // A cached DISABLE snapshot is not trustworthy while the stream is down.
-      // New subscribers stay locked until a fresh server snapshot arrives.
-      setApiGuardClientLocked(true);
+      // A cached snapshot is not replayed while disconnected, but the last
+      // confirmed client lock state is preserved. Connection loss alone must
+      // never clear Local storage or be interpreted as ENABLE.
       listener({ type: "connection", connected: false });
     }
   } else {

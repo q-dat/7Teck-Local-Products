@@ -3109,13 +3109,18 @@ const queueAppStatePatch = (patch: Record<string, unknown>): void => {
   }, 450);
 };
 
+const discardQueuedAppStatePatch = (): void => {
+  if (statePatchTimer) clearTimeout(statePatchTimer);
+  statePatchTimer = null;
+  pendingStatePatch = {};
+};
+
 const flushQueuedAppStatePatch = async (): Promise<void> => {
   if (isApiGuardClientLocked()) {
-    if (statePatchTimer) clearTimeout(statePatchTimer);
-    statePatchTimer = null;
-    pendingStatePatch = {};
+    discardQueuedAppStatePatch();
     return;
   }
+
   if (statePatchTimer) clearTimeout(statePatchTimer);
   statePatchTimer = null;
 
@@ -16031,6 +16036,9 @@ export default function LocalPage({
 
       apiGuardActiveRef.current = true;
       setApiGuardClientLocked(true);
+      // Drop delayed Local state patches as soon as ENABLE arrives. They must
+      // never be flushed back to MongoDB when the server later sends DISABLE.
+      discardQueuedAppStatePatch();
       setIsSettingsReady(true);
       setPageLoadingText("");
 
@@ -16110,16 +16118,17 @@ export default function LocalPage({
 
     const unsubscribe = subscribeApiGuardEvents((event) => {
       if (event.type === "connection") {
-        if (!event.connected) {
-          // Fail closed without changing the visible page layout.
-          lockAndClearLocalData();
-          setApiGuardSnapshotReady(true);
-        }
+        // Connection changes are transport status only, never an API Guard
+        // command. A tab switch, browser suspension, or temporary network loss
+        // must not clear Local data or trigger a fresh synchronization.
+        // Keep the last confirmed Guard state until a new server snapshot arrives.
         return;
       }
 
       const { state } = event;
-      if (state.revision < apiGuardRevisionRef.current) return;
+      // Each server revision is processed once. Duplicate snapshots after an
+      // SSE reconnect must not repeat the clear or auto-sync sequence.
+      if (state.revision <= apiGuardRevisionRef.current) return;
       apiGuardRevisionRef.current = state.revision;
 
       if (state.enabled) {
@@ -16138,16 +16147,18 @@ export default function LocalPage({
         return;
       }
 
-      // Keep the client locked until queued writes and browser-cache deletion finish.
+      // Keep the client locked until browser-cache deletion finishes. Queued
+      // Local state patches were discarded at ENABLE and must not be replayed.
       // Then fetch from sync version 0 so the server returns the initial snapshot.
       const resumeRevision = state.revision;
+      // The shared client receives DISABLE before this listener runs. Re-lock
+      // synchronously so no Local request or cache write can race cleanup.
+      setApiGuardClientLocked(true);
       setPageLoadingText("Đang chuẩn bị đồng bộ dữ liệu...");
 
       void (async (): Promise<void> => {
-        // Discard pending state patches while still locked; never push stale local
-        // defaults or pre-lock edits back to MongoDB during the resume sequence.
-        await flushQueuedAppStatePatch();
-
+        // ENABLE already discarded every delayed patch while the client was
+        // locked. Do not flush a stale Local state patch during DISABLE.
         const cleanupPromise = apiGuardCleanupPromiseRef.current;
         if (cleanupPromise) {
           await cleanupPromise;
