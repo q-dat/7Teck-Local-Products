@@ -56,6 +56,7 @@ import {
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import ProductPosterGenerator from "@/components/ProductPosterGenerator";
 import {
   isApiGuardClientLocked,
   registerApiGuardRequest,
@@ -6726,6 +6727,7 @@ export default function LocalPage({
   const [pendingDownload, setPendingDownload] =
     useState<DownloadRequest | null>(null);
   const [isPostQueueOpen, setIsPostQueueOpen] = useState<boolean>(false);
+  const [isPosterGeneratorOpen, setIsPosterGeneratorOpen] = useState<boolean>(false);
   const [postQueueStage, setPostQueueStage] = useState<"categories" | "products" | "complete">("categories");
   const [postQueueSelectedCategories, setPostQueueSelectedCategories] = useState<string[]>([]);
   const [postQueueProducts, setPostQueueProducts] = useState<LocalProduct[]>([]);
@@ -8700,11 +8702,11 @@ export default function LocalPage({
   const currentPostQueueProduct = postQueueProducts[postQueueIndex] ?? null;
   const currentPostQueuePostText = currentPostQueueProduct
     ? buildPostText(
-      currentPostQueueProduct,
-      settings.commonDescription,
-      activeContactText,
-      includeSocialTags,
-    )
+        currentPostQueueProduct,
+        settings.commonDescription,
+        activeContactText,
+        includeSocialTags,
+      )
     : "";
 
   useEffect(() => {
@@ -16109,6 +16111,7 @@ export default function LocalPage({
         event.metaKey ||
         activeModal ||
         isPostQueueOpen ||
+        isPosterGeneratorOpen ||
         isFacebookSearchDialogOpen ||
         isHeaderActionsMenuOpen ||
         isMobileCategoryMenuOpen ||
@@ -16164,6 +16167,7 @@ export default function LocalPage({
   }, [
     activeModal,
     isPostQueueOpen,
+    isPosterGeneratorOpen,
     isBackupSaving,
     isConfirmExecuting,
     isFacebookSearchDialogOpen,
@@ -16187,6 +16191,7 @@ export default function LocalPage({
         isTypingTarget(event.target) ||
         activeModal ||
         isPostQueueOpen ||
+        isPosterGeneratorOpen ||
         isFacebookSearchDialogOpen ||
         isHeaderActionsMenuOpen ||
         isMobileCategoryMenuOpen ||
@@ -16243,6 +16248,7 @@ export default function LocalPage({
     headerShortcuts,
     isHeaderShortcutsEnabled,
     isPostQueueOpen,
+    isPosterGeneratorOpen,
     isBackupSaving,
     isConfirmExecuting,
     isSettingsReady,
@@ -16394,6 +16400,7 @@ export default function LocalPage({
       setPendingBackup(null);
       setPendingConfirm(null);
       setIsPostQueueOpen(false);
+      setIsPosterGeneratorOpen(false);
       setPostQueueStage("categories");
       setPostQueueSelectedCategories([]);
       setPostQueueProducts([]);
@@ -18654,6 +18661,24 @@ export default function LocalPage({
               >
                 <FiUploadCloud aria-hidden="true" className={iconClassName} />
                 Đăng bài
+              </button>
+
+              <button
+                type="button"
+                data-luxury-accent="blue"
+                title="Tách nền, ghép tên và giá vào template poster sản phẩm 1:1"
+                aria-label="Tạo poster sản phẩm"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => {
+                  if (isApiGuardClientLocked()) {
+                    Toastify("Chức năng hiện chưa khả dụng", 300);
+                    return;
+                  }
+                  setIsPosterGeneratorOpen(true);
+                }}
+              >
+                <FiImage aria-hidden="true" className={iconClassName} />
+                Poster
               </button>
 
               <button
@@ -24956,6 +24981,10 @@ export default function LocalPage({
             ) : null}
           </section>
         </div>
+      ) : null}
+
+      {isPosterGeneratorOpen ? (
+        <ProductPosterGenerator onClose={() => setIsPosterGeneratorOpen(false)} />
       ) : null}
 
       {pendingConfirm ? (
