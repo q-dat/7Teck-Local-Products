@@ -467,25 +467,19 @@ const createSafeFilename = (value: string): string => {
 
 const createClipboardImageFile = (
     clipboardData: DataTransfer,
-    filenamePrefix: 'pasted-product' | 'pasted-background',
 ): File | null => {
-    const imageItem = Array.from(clipboardData.items).find((item) =>
-        item.kind === 'file' && SUPPORTED_IMAGE_TYPES.has(item.type),
-    );
-    const imageBlob = imageItem?.getAsFile();
-    if (!imageBlob) return null;
+    // Match the Local product form: read File objects from clipboardData.files
+    // first, then fall back to DataTransfer.items for browser-specific clipboard
+    // implementations. Do not rebuild the File unless it is actually a Blob.
+    const directFiles = Array.from(clipboardData.files ?? []);
+    const itemFiles = Array.from(clipboardData.items ?? [])
+        .filter((item) => item.kind === 'file')
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
 
-    const extension = imageBlob.type === 'image/png'
-        ? 'png'
-        : imageBlob.type === 'image/webp'
-            ? 'webp'
-            : 'jpg';
-
-    return new File(
-        [imageBlob],
-        `${filenamePrefix}-${Date.now()}.${extension}`,
-        { type: imageBlob.type, lastModified: Date.now() },
-    );
+    return [...directFiles, ...itemFiles].find((file) =>
+        SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase()),
+    ) ?? null;
 };
 
 export default function ProductPosterGenerator({
@@ -603,13 +597,11 @@ export default function ProductPosterGenerator({
     }, [applyProductFile]);
 
     const handleProductPaste = useCallback((event: ReactClipboardEvent<HTMLDivElement>): void => {
-        const pastedFile = createClipboardImageFile(
-            event.clipboardData,
-            'pasted-product',
-        );
+        const pastedFile = createClipboardImageFile(event.clipboardData);
         if (!pastedFile) return;
 
         event.preventDefault();
+        event.stopPropagation();
         applyProductFile(pastedFile);
     }, [applyProductFile]);
 
@@ -642,15 +634,35 @@ export default function ProductPosterGenerator({
     }, [applyBackgroundFile]);
 
     const handleBackgroundPaste = useCallback((event: ReactClipboardEvent<HTMLDivElement>): void => {
-        const pastedFile = createClipboardImageFile(
-            event.clipboardData,
-            'pasted-background',
-        );
+        const pastedFile = createClipboardImageFile(event.clipboardData);
         if (!pastedFile) return;
 
         event.preventDefault();
+        event.stopPropagation();
         applyBackgroundFile(pastedFile);
     }, [applyBackgroundFile]);
+
+    const handlePosterPaste = useCallback((event: ReactClipboardEvent<HTMLDivElement>): void => {
+        const pastedFile = createClipboardImageFile(event.clipboardData);
+        if (!pastedFile) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const target = event.target;
+        const pasteTarget = target instanceof Element
+            ? target.closest<HTMLElement>('[data-poster-paste-target]')?.dataset.posterPasteTarget
+            : undefined;
+
+        if (pasteTarget === 'background') {
+            applyBackgroundFile(pastedFile);
+            return;
+        }
+
+        // Pasting anywhere else in the poster dialog uses the product image slot,
+        // including when focus is in the name or price input.
+        applyProductFile(pastedFile);
+    }, [applyBackgroundFile, applyProductFile]);
 
     const handleLayerPointerDown = useCallback((
         event: ReactPointerEvent<HTMLElement>,
@@ -903,6 +915,7 @@ export default function ProductPosterGenerator({
             role="dialog"
             aria-modal="true"
             aria-label="Tạo poster sản phẩm"
+            onPaste={handlePosterPaste}
             onMouseDown={(event) => {
                 if (event.target === event.currentTarget) onClose();
             }}
@@ -949,6 +962,7 @@ export default function ProductPosterGenerator({
                             </label>
 
                             <div
+                                data-poster-paste-target="product"
                                 className="col-span-2 flex min-w-0 flex-col gap-1 xl:col-span-1"
                                 onPaste={handleProductPaste}
                                 tabIndex={0}
@@ -975,6 +989,7 @@ export default function ProductPosterGenerator({
                             </div>
 
                             <div
+                                data-poster-paste-target="background"
                                 className="col-span-2 flex min-w-0 flex-col gap-1.5 rounded-xl border border-white/10 bg-black/15 p-2 xl:col-span-1"
                                 onPaste={handleBackgroundPaste}
                                 tabIndex={0}
