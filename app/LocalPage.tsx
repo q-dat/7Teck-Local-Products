@@ -6725,6 +6725,16 @@ export default function LocalPage({
   >(null);
   const [pendingDownload, setPendingDownload] =
     useState<DownloadRequest | null>(null);
+  const [isPostQueueOpen, setIsPostQueueOpen] = useState<boolean>(false);
+  const [postQueueStage, setPostQueueStage] = useState<"categories" | "products" | "complete">("categories");
+  const [postQueueSelectedCategories, setPostQueueSelectedCategories] = useState<string[]>([]);
+  const [postQueueProducts, setPostQueueProducts] = useState<LocalProduct[]>([]);
+  const [postQueueIndex, setPostQueueIndex] = useState<number>(0);
+  const [postQueueItemStatuses, setPostQueueItemStatuses] = useState<Record<string, "confirmed">>({});
+  const [isPostQueueProcessing, setIsPostQueueProcessing] = useState<boolean>(false);
+  const postQueueProcessingRef = useRef<boolean>(false);
+  const postQueueStartButtonRef = useRef<HTMLButtonElement | null>(null);
+  const postQueueConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const [pendingShare, setPendingShare] = useState<ShareRequest | null>(
     () => loadPersistedShareModalState()?.pendingShare ?? null,
   );
@@ -8647,6 +8657,77 @@ export default function LocalPage({
   const downloadableProducts = useMemo(() => {
     return viewProducts.filter((product) => !product.isDone);
   }, [viewProducts]);
+
+  const postQueueCandidates = useMemo(
+    () =>
+      sortProductsByCategoryThenDoneThenPrice(
+        downloadableProducts.filter((product) => !pendingDoneProductIds.has(product.id)),
+        pendingDoneProductIds,
+        categories,
+      ),
+    [categories, downloadableProducts, pendingDoneProductIds],
+  );
+
+  const postQueueCategoryOptions = useMemo(() => {
+    const countByKey = new Map<string, number>();
+
+    postQueueCandidates.forEach((product) => {
+      const categoryName = normalizeCategoryName(product.category) || "Chưa phân loại";
+      const key = normalizeTextKey(categoryName);
+      countByKey.set(key, (countByKey.get(key) ?? 0) + 1);
+    });
+
+    const orderedNames: string[] = [];
+    const addedKeys = new Set<string>();
+
+    categories.forEach((category) => {
+      const key = normalizeTextKey(category);
+      if (!countByKey.has(key) || addedKeys.has(key)) return;
+      orderedNames.push(category);
+      addedKeys.add(key);
+    });
+
+    if (countByKey.has(normalizeTextKey("Chưa phân loại")) && !addedKeys.has(normalizeTextKey("Chưa phân loại"))) {
+      orderedNames.push("Chưa phân loại");
+    }
+
+    return orderedNames.map((name) => ({
+      name,
+      count: countByKey.get(normalizeTextKey(name)) ?? 0,
+    }));
+  }, [categories, postQueueCandidates]);
+
+  const currentPostQueueProduct = postQueueProducts[postQueueIndex] ?? null;
+  const currentPostQueuePostText = currentPostQueueProduct
+    ? buildPostText(
+      currentPostQueueProduct,
+      settings.commonDescription,
+      activeContactText,
+      includeSocialTags,
+    )
+    : "";
+
+  useEffect(() => {
+    if (
+      !isPostQueueOpen ||
+      postQueueStage !== "categories" ||
+      postQueueSelectedCategories.length === 0
+    ) {
+      return;
+    }
+
+    postQueueStartButtonRef.current?.focus({ preventScroll: true });
+  }, [
+    isPostQueueOpen,
+    postQueueSelectedCategories.length,
+    postQueueStage,
+  ]);
+
+  useEffect(() => {
+    if (!isPostQueueOpen || postQueueStage !== "products") return;
+
+    postQueueConfirmButtonRef.current?.focus({ preventScroll: true });
+  }, [isPostQueueOpen, postQueueIndex, postQueueStage]);
 
   const imageDownloadCategoryOptions = useMemo(() => {
     const categoryMap = new Map<string, { name: string; count: number }>();
@@ -12451,6 +12532,242 @@ export default function LocalPage({
     setDownloadedProductIds(nextProductIds);
   };
 
+  const closePostQueue = (): void => {
+    if (postQueueProcessingRef.current) return;
+
+    setIsPostQueueOpen(false);
+    setPostQueueStage("categories");
+    setPostQueueSelectedCategories([]);
+    setPostQueueProducts([]);
+    setPostQueueIndex(0);
+    setPostQueueItemStatuses({});
+  };
+
+  const openPostQueue = (): void => {
+    if (isApiGuardClientLocked()) {
+      Toastify("Chức năng hiện chưa khả dụng", 300);
+      return;
+    }
+
+    setPostQueueStage("categories");
+    setPostQueueSelectedCategories([]);
+    setPostQueueProducts([]);
+    setPostQueueIndex(0);
+    setPostQueueItemStatuses({});
+    setIsPostQueueOpen(true);
+  };
+
+  const togglePostQueueCategory = (category: string): void => {
+    setPostQueueSelectedCategories((current) => {
+      const selectedIndex = current.findIndex(
+        (item) => normalizeTextKey(item) === normalizeTextKey(category),
+      );
+
+      if (selectedIndex >= 0) {
+        return current.filter((_, index) => index !== selectedIndex);
+      }
+
+      return [...current, category];
+    });
+  };
+
+  const movePostQueueCategory = (index: number, direction: -1 | 1): void => {
+    setPostQueueSelectedCategories((current) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+
+      const next = [...current];
+      const [movedCategory] = next.splice(index, 1);
+      if (!movedCategory) return current;
+
+      next.splice(targetIndex, 0, movedCategory);
+      return next;
+    });
+  };
+
+  const startPostQueue = (): void => {
+    if (isApiGuardClientLocked()) {
+      Toastify("Chức năng hiện chưa khả dụng", 300);
+      return;
+    }
+
+    if (postQueueSelectedCategories.length === 0) {
+      Toastify("Hãy chọn ít nhất một danh mục", 300);
+      return;
+    }
+
+    const nextProducts = postQueueSelectedCategories.flatMap((category) => {
+      const categoryKey = normalizeTextKey(category);
+      return postQueueCandidates.filter((product) => {
+        const productCategory = normalizeCategoryName(product.category) || "Chưa phân loại";
+        return normalizeTextKey(productCategory) === categoryKey;
+      });
+    });
+
+    if (nextProducts.length === 0) {
+      Toastify("Các danh mục đã chọn không còn sản phẩm chưa DONE", 300);
+      return;
+    }
+
+    setPostQueueProducts(nextProducts);
+    setPostQueueIndex(0);
+    setPostQueueItemStatuses({});
+    setPostQueueStage("products");
+  };
+
+  const advancePostQueue = (productId: string): void => {
+    setPostQueueItemStatuses((current) => ({ ...current, [productId]: "confirmed" }));
+
+    if (postQueueIndex >= postQueueProducts.length - 1) {
+      setPostQueueStage("complete");
+      return;
+    }
+
+    setPostQueueIndex((current) => Math.min(current + 1, postQueueProducts.length - 1));
+  };
+
+  const navigatePostQueue = (direction: -1 | 1): void => {
+    if (isPostQueueProcessing || postQueueProducts.length === 0) return;
+
+    setPostQueueStage("products");
+    setPostQueueIndex((current) =>
+      Math.min(postQueueProducts.length - 1, Math.max(0, current + direction)),
+    );
+  };
+
+  const confirmPostQueueProduct = async (): Promise<void> => {
+    const product = currentPostQueueProduct;
+    if (!product || postQueueProcessingRef.current) return;
+
+    if (isApiGuardClientLocked()) {
+      Toastify("Không thể thao tác khi dữ liệu đang bị khóa", 300);
+      return;
+    }
+
+    if (
+      product.images.length > 0 &&
+      devicePlatform !== "ios" &&
+      (isLocalImageManagerBusy || localImageArchiveLockRef.current)
+    ) {
+      Toastify("Đang xử lý ảnh trên máy. Vui lòng thử lại sau.", 300);
+      return;
+    }
+
+    postQueueProcessingRef.current = true;
+    setIsPostQueueProcessing(true);
+
+    let copied = false;
+    let downloadResult: { downloadedCount: number; failedImageNames: string[] } = {
+      downloadedCount: 0,
+      failedImageNames: [],
+    };
+    let downloadError = "";
+
+    try {
+      let archiveWarning = "";
+
+      // Giống nút tải ảnh sản phẩm: chuyển toàn bộ ảnh đang có trong thư mục
+      // ảnh máy vào _trash trước khi bắt đầu tải ảnh của sản phẩm trong queue.
+      // iOS không dùng File System Access API cho thư mục ảnh Local.
+      if (product.images.length > 0 && devicePlatform !== "ios") {
+        const archiveResult = await archiveLocalImagesToTrash({
+          openManager: false,
+          showProgress: false,
+          showResultToast: false,
+        });
+
+        if (archiveResult.failed > 0) {
+          archiveWarning = "Một số ảnh trên máy chưa chuyển được vào _trash";
+        } else if (archiveResult.skipped) {
+          archiveWarning = "Chưa chuyển ảnh trên máy vào _trash";
+        }
+      }
+
+      if (isApiGuardClientLocked()) return;
+
+      const postText = buildPostText(
+        product,
+        settings.commonDescription,
+        activeContactText,
+        includeSocialTags,
+      );
+
+      if (postText.trim()) {
+        try {
+          await copyText(postText);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+
+      if (isApiGuardClientLocked()) return;
+
+      // Chỉ tải product.images; internalImages tuyệt đối không đưa vào hàng đợi.
+      if (product.images.length > 0) {
+        try {
+          downloadResult = await downloadOriginalImagesInOrder(product.images, 0);
+        } catch (error) {
+          downloadError = error instanceof Error ? error.message : "Không thể tải ảnh";
+        }
+      }
+
+      if (isApiGuardClientLocked()) return;
+
+      if (
+        product.images.length > 0 &&
+        downloadError.length === 0 &&
+        downloadResult.failedImageNames.length === 0 &&
+        downloadResult.downloadedCount === product.images.length
+      ) {
+        markProductImagesDownloaded([product.id]);
+      }
+
+      advancePostQueue(product.id);
+
+      const feedback: string[] = [];
+      feedback.push(copied ? "đã copy Post" : "không copy được Post");
+      if (archiveWarning) feedback.push(archiveWarning);
+      if (product.images.length === 0) {
+        feedback.push("không có ảnh chính");
+      } else if (downloadError) {
+        feedback.push(downloadError);
+      } else if (downloadResult.failedImageNames.length > 0) {
+        feedback.push(
+          `tải được ${downloadResult.downloadedCount}/${product.images.length} ảnh`,
+        );
+      } else {
+        feedback.push(`đã tải ${downloadResult.downloadedCount} ảnh`);
+      }
+
+      Toastify(feedback.join(" · "), copied && !downloadError && downloadResult.failedImageNames.length === 0 ? 200 : 300);
+    } finally {
+      postQueueProcessingRef.current = false;
+      setIsPostQueueProcessing(false);
+    }
+  };
+
+  const handlePostQueueKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void => {
+    if (postQueueStage !== "products") return;
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      navigatePostQueue(event.key === "ArrowLeft" ? -1 : 1);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      postQueueConfirmButtonRef.current?.focus({ preventScroll: true });
+
+      if (!isPostQueueProcessing) {
+        void confirmPostQueueProduct();
+      }
+    }
+  };
+
   const clearDownloadedProductSession = (): void => {
     if (typeof window === "undefined") return;
 
@@ -15791,6 +16108,7 @@ export default function LocalPage({
         event.ctrlKey ||
         event.metaKey ||
         activeModal ||
+        isPostQueueOpen ||
         isFacebookSearchDialogOpen ||
         isHeaderActionsMenuOpen ||
         isMobileCategoryMenuOpen ||
@@ -15845,6 +16163,7 @@ export default function LocalPage({
     };
   }, [
     activeModal,
+    isPostQueueOpen,
     isBackupSaving,
     isConfirmExecuting,
     isFacebookSearchDialogOpen,
@@ -15867,6 +16186,7 @@ export default function LocalPage({
       if (
         isTypingTarget(event.target) ||
         activeModal ||
+        isPostQueueOpen ||
         isFacebookSearchDialogOpen ||
         isHeaderActionsMenuOpen ||
         isMobileCategoryMenuOpen ||
@@ -15922,6 +16242,7 @@ export default function LocalPage({
     activeModal,
     headerShortcuts,
     isHeaderShortcutsEnabled,
+    isPostQueueOpen,
     isBackupSaving,
     isConfirmExecuting,
     isSettingsReady,
@@ -16072,6 +16393,14 @@ export default function LocalPage({
       setPendingDownload(null);
       setPendingBackup(null);
       setPendingConfirm(null);
+      setIsPostQueueOpen(false);
+      setPostQueueStage("categories");
+      setPostQueueSelectedCategories([]);
+      setPostQueueProducts([]);
+      setPostQueueIndex(0);
+      setPostQueueItemStatuses({});
+      postQueueProcessingRef.current = false;
+      setIsPostQueueProcessing(false);
       setModalStack([]);
       setAlbumSource(null);
       setImageOverlayEditor(null);
@@ -18313,6 +18642,18 @@ export default function LocalPage({
               >
                 <FiSearch aria-hidden="true" className={iconClassName} />
                 FB Search
+              </button>
+
+              <button
+                type="button"
+                data-luxury-accent="emerald"
+                title="Duyệt sản phẩm chưa DONE theo thứ tự danh mục, tải ảnh chính và copy Post"
+                aria-label="Đăng bài theo danh mục"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={openPostQueue}
+              >
+                <FiUploadCloud aria-hidden="true" className={iconClassName} />
+                Đăng bài
               </button>
 
               <button
@@ -21419,6 +21760,7 @@ export default function LocalPage({
 
                   <div className="min-w-0 shrink-0 border-t border-white/10 bg-slate-950/95 p-2">
                     <button
+                      autoFocus
                       type="submit"
                       className="flex min-h-9 w-full items-center justify-center gap-2 rounded-md bg-cyan-300 p-2 text-xs font-black text-slate-950 transition hover:bg-cyan-200 active:opacity-80"
                     >
@@ -24342,6 +24684,280 @@ export default function LocalPage({
         ) : null}
       </AnimatePresence>
 
+      {isPostQueueOpen ? (
+        <div
+          className="fixed inset-0 z-[2147483002] flex h-dvh w-full items-center justify-center bg-black/80 p-2 backdrop-blur-md xl:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Đăng bài theo danh mục"
+          onKeyDown={handlePostQueueKeyDown}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closePostQueue();
+          }}
+        >
+          <section className="relative flex max-h-[96dvh] min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-[#d8c99f]/25 bg-[linear-gradient(145deg,#0b1722,#050a11)] shadow-[0_28px_100px_rgba(0,0,0,0.75)]">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-3 py-3 xl:px-5">
+              <div className="min-w-0">
+                <h2 className="text-sm font-black tracking-wide text-white xl:text-base">
+                  Đăng bài
+                </h2>
+                <p className="mt-0.5 text-[10px] text-slate-400">
+                  {postQueueStage === "categories"
+                    ? `${postQueueCandidates.length} sản phẩm chưa DONE`
+                    : postQueueStage === "products"
+                      ? `${postQueueIndex + 1} / ${postQueueProducts.length} sản phẩm`
+                      : `${Object.values(postQueueItemStatuses).filter((status) => status === "confirmed").length} đã xác nhận`}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isPostQueueProcessing}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+                onClick={closePostQueue}
+                aria-label="Đóng đăng bài"
+              >
+                <FiX aria-hidden="true" className="h-4 w-4" />
+              </button>
+            </header>
+
+            {postQueueStage === "categories" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 xl:p-5">
+                <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)] xl:gap-6">
+                  <section className="min-w-0">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-black text-white">Chọn danh mục</h3>
+                      <span className="text-[10px] text-slate-500">Thứ tự chọn = thứ tự đăng</span>
+                    </div>
+                    {postQueueCategoryOptions.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                        {postQueueCategoryOptions.map((category) => {
+                          const selectedIndex = postQueueSelectedCategories.findIndex(
+                            (item) => normalizeTextKey(item) === normalizeTextKey(category.name),
+                          );
+                          const selected = selectedIndex >= 0;
+
+                          return (
+                            <button
+                              key={normalizeTextKey(category.name)}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => togglePostQueueCategory(category.name)}
+                              className={`flex min-h-12 items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${selected
+                                ? "border-emerald-300/45 bg-emerald-300/[0.09] text-emerald-100"
+                                : "border-white/10 bg-white/[0.025] text-slate-200 hover:border-white/20 hover:bg-white/[0.05]"
+                                }`}
+                            >
+                              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-[11px] font-black ${selected
+                                ? "border-emerald-200/40 bg-emerald-200 text-slate-950"
+                                : "border-white/10 bg-black/20 text-slate-500"
+                                }`}>
+                                {selected ? selectedIndex + 1 : "+"}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-xs font-bold">{category.name}</span>
+                              <span className="shrink-0 text-[10px] font-semibold text-slate-500">{category.count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-white/10 px-4 py-10 text-center text-xs text-slate-500">
+                        Không có sản phẩm chưa DONE.
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="text-xs font-black text-white">Thứ tự đăng</h3>
+                      <span className="text-[10px] text-slate-500">{postQueueSelectedCategories.length} danh mục</span>
+                    </div>
+                    {postQueueSelectedCategories.length > 0 ? (
+                      <ol className="space-y-2">
+                        {postQueueSelectedCategories.map((category, index) => (
+                          <li key={normalizeTextKey(category)} className="flex min-w-0 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2 py-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#d8c99f]/15 text-[10px] font-black text-[#eadfbe]">{index + 1}</span>
+                            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-200">{category}</span>
+                            <button
+                              type="button"
+                              disabled={index === 0}
+                              onClick={() => movePostQueueCategory(index, -1)}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 text-slate-400 transition hover:bg-white/10 hover:text-white disabled:opacity-25"
+                              title="Đưa lên"
+                              aria-label={`Đưa ${category} lên trước`}
+                            >
+                              <FiArrowUp aria-hidden="true" className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={index === postQueueSelectedCategories.length - 1}
+                              onClick={() => movePostQueueCategory(index, 1)}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 text-slate-400 transition hover:bg-white/10 hover:text-white disabled:opacity-25"
+                              title="Đưa xuống"
+                              aria-label={`Đưa ${category} xuống sau`}
+                            >
+                              <FiArrowUp aria-hidden="true" className="h-3.5 w-3.5 rotate-180" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => togglePostQueueCategory(category)}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-rose-300/15 text-rose-200/70 transition hover:bg-rose-300/10 hover:text-rose-100"
+                              title="Bỏ danh mục"
+                              aria-label={`Bỏ ${category}`}
+                            >
+                              <FiX aria-hidden="true" className="h-3.5 w-3.5" />
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="rounded-lg border border-dashed border-white/10 px-3 py-8 text-center text-[11px] text-slate-500">
+                        Chọn danh mục bên trái theo thứ tự muốn đăng.
+                      </p>
+                    )}
+                  </section>
+                </div>
+              </div>
+            ) : null}
+
+            {postQueueStage === "products" && currentPostQueueProduct ? (
+              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-2 xl:p-4">
+                <div className="mb-2 flex shrink-0 items-center justify-center gap-2 xl:mb-3">
+                  <span className="max-w-[45%] truncate rounded-full border border-[#d8c99f]/20 bg-[#d8c99f]/[0.07] px-3 py-1 text-[10px] font-bold text-[#eadfbe]">
+                    {normalizeCategoryName(currentPostQueueProduct.category) || "Chưa phân loại"}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-semibold text-slate-400">
+                    {postQueueIndex + 1} / {postQueueProducts.length}
+                  </span>
+                  {postQueueItemStatuses[currentPostQueueProduct.id] ? (
+                    <span className="rounded-full bg-emerald-300/10 px-2.5 py-1 text-[9px] font-black text-emerald-200">
+                      ĐÃ XÁC NHẬN
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.85fr)] xl:gap-4">
+                  <div className="flex min-h-[34dvh] min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/35 p-2 xl:min-h-0">
+                    {currentPostQueueProduct.images[0]?.dataUrl ? (
+                      <img
+                        src={createCloudinaryThumbnailUrl(currentPostQueueProduct.images[0].dataUrl, 1280)}
+                        alt={currentPostQueueProduct.name}
+                        width={1280}
+                        height={1280}
+                        loading="eager"
+                        decoding="async"
+                        fetchPriority="high"
+                        className="block h-full max-h-[42dvh] w-full object-contain xl:max-h-full"
+                      />
+                    ) : (
+                      <div className="flex h-full min-h-[34dvh] w-full flex-col items-center justify-center gap-2 text-slate-600 xl:min-h-0">
+                        <FiImage aria-hidden="true" className="h-10 w-10" />
+                        <span className="text-xs">Chưa có ảnh chính</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/20 p-3 xl:p-4">
+                    <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/[0.07] bg-white/[0.025] p-3">
+                      <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-200 xl:text-sm">
+                        {currentPostQueuePostText || "Sản phẩm chưa có nội dung Post."}
+                      </pre>
+                    </div>
+                  </aside>
+                </div>
+
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-between px-2 xl:px-3">
+                  <button
+                    type="button"
+                    disabled={postQueueIndex <= 0 || isPostQueueProcessing}
+                    onClick={() => navigatePostQueue(-1)}
+                    className="pointer-events-auto flex h-11 w-11 shrink-0 -translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    title="Sản phẩm trước"
+                    aria-label="Sản phẩm trước"
+                  >
+                    <FiChevronLeft aria-hidden="true" className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={postQueueIndex >= postQueueProducts.length - 1 || isPostQueueProcessing}
+                    onClick={() => navigatePostQueue(1)}
+                    className="pointer-events-auto flex h-11 w-11 shrink-0 translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    title="Sản phẩm tiếp"
+                    aria-label="Sản phẩm tiếp"
+                  >
+                    <FiChevronRight aria-hidden="true" className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {postQueueStage === "complete" ? (
+              <div className="flex min-h-[50dvh] flex-1 flex-col items-center justify-center gap-3 px-5 py-8 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-full border border-emerald-300/25 bg-emerald-300/10 text-emerald-200">
+                  <FiCheckCircle aria-hidden="true" className="h-7 w-7" />
+                </span>
+                <h3 className="text-base font-black text-white">Đã duyệt hết danh sách</h3>
+                <p className="text-xs text-slate-400">
+                  {Object.values(postQueueItemStatuses).filter((status) => status === "confirmed").length} sản phẩm đã xác nhận
+                </p>
+                <div className="mt-2 flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-lg border border-white/15 bg-white/[0.04] px-5 py-2 text-xs font-bold text-slate-200 transition hover:bg-white/[0.08]"
+                    onClick={() => {
+                      setPostQueueIndex(Math.max(0, postQueueProducts.length - 1));
+                      setPostQueueStage("products");
+                    }}
+                  >
+                    Xem lại danh sách
+                  </button>
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-lg bg-[#eadfbe] px-6 py-2 text-xs font-black text-slate-950 transition hover:brightness-105"
+                    onClick={closePostQueue}
+                  >
+                    Hoàn tất
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {postQueueStage === "categories" ? (
+              <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 px-3 py-3 xl:px-5">
+                <span className="text-[10px] text-slate-500">
+                  {postQueueSelectedCategories.length > 0
+                    ? `${postQueueSelectedCategories.length} danh mục · ${postQueueSelectedCategories.reduce((total, category) => total + (postQueueCategoryOptions.find((option) => normalizeTextKey(option.name) === normalizeTextKey(category))?.count ?? 0), 0)} sản phẩm`
+                    : "Chưa chọn danh mục"}
+                </span>
+                <button
+                  ref={postQueueStartButtonRef}
+                  autoFocus
+                  type="button"
+                  disabled={postQueueSelectedCategories.length === 0}
+                  onClick={startPostQueue}
+                  className="min-h-10 rounded-lg bg-emerald-300 px-5 py-2 text-xs font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  Bắt đầu
+                </button>
+              </footer>
+            ) : null}
+
+            {postQueueStage === "products" ? (
+              <footer className="flex shrink-0 justify-center border-t border-white/10 px-3 py-3 xl:px-5">
+                <button
+                  ref={postQueueConfirmButtonRef}
+                  type="button"
+                  disabled={isPostQueueProcessing}
+                  onClick={() => void confirmPostQueueProduct()}
+                  className="flex min-h-11 min-w-40 items-center justify-center gap-2 rounded-lg bg-emerald-300 px-6 py-2 text-xs font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {isPostQueueProcessing ? "Đang xử lý..." : "Xác Nhận"}
+                </button>
+              </footer>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+
       {pendingConfirm ? (
         <div className="luxury-modal-overlay fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center p-3">
           <div
@@ -24403,6 +25019,7 @@ export default function LocalPage({
                   </button>
 
                   <button
+                    autoFocus
                     type="button"
                     disabled={isConfirmExecuting}
                     className="rounded-xl bg-cyan-300 px-3 py-2.5 text-[11px] font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-60"
@@ -24449,6 +25066,7 @@ export default function LocalPage({
                   </button>
 
                   <button
+                    autoFocus
                     type="button"
                     disabled={isConfirmExecuting}
                     className={`rounded-md p-2 text-xs font-black transition disabled:cursor-wait disabled:opacity-60 ${pendingConfirm.tone === "danger"
@@ -24648,6 +25266,7 @@ export default function LocalPage({
                 Hủy
               </button>
               <button
+                autoFocus
                 type="submit"
                 className="min-h-10 border border-[#f0e3c0]/80 bg-[linear-gradient(135deg,#f2e8cd,#c9b47c)] px-3 py-2 text-xs font-black text-[#17130a] transition hover:brightness-105 active:opacity-80"
               >
