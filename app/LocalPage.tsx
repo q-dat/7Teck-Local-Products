@@ -9376,23 +9376,18 @@ export default function LocalPage({
   };
 
   useEffect(() => {
-    if (!apiGuardSnapshotReady) return;
-
     let cancelled = false;
 
-    // Keep the regular Local workspace available, but never hydrate browser
-    // cache while the server has the API Guard enabled or cannot be verified.
-    if (apiGuardActiveRef.current || isApiGuardClientLocked()) {
-      setIsSettingsReady(true);
-      setPageLoadingText("");
-      return;
-    }
-
-    setPageLoadingText("Đang đọc dữ liệu cache trên thiết bị...");
+    // Restore the last device snapshot immediately. API Guard verification runs
+    // independently through SSE; a confirmed ENABLE event clears this state.
+    // The client remains request-locked until the server sends a trusted snapshot.
+    setPageLoadingText("Đang khôi phục dữ liệu từ thiết bị...");
 
     void readBootstrapCache()
       .then((cacheRecord) => {
-        if (cancelled || apiGuardActiveRef.current || isApiGuardClientLocked()) {
+        // An ENABLE command may arrive while IndexedDB is being read. Never
+        // apply the cache after that confirmed command has started cleanup.
+        if (cancelled || apiGuardActiveRef.current) {
           return;
         }
 
@@ -9452,10 +9447,22 @@ export default function LocalPage({
   }, [isSettingsReady, registerRemoteSyncVersion, setLocalSyncVersion]);
 
   useEffect(() => {
-    if (!isSettingsReady || typeof window === "undefined") return;
+    // Sync-version checks are background work and must wait for a trusted
+    // server snapshot. Local cache restoration above does not wait for SSE.
+    if (
+      !isSettingsReady ||
+      !apiGuardSnapshotReady ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
 
     void checkForRemoteSyncUpdate();
-  }, [checkForRemoteSyncUpdate, isSettingsReady]);
+  }, [
+    apiGuardSnapshotReady,
+    checkForRemoteSyncUpdate,
+    isSettingsReady,
+  ]);
 
   useEffect(() => {
     if (
@@ -16202,7 +16209,9 @@ export default function LocalPage({
         className={`min-h-dvh w-full bg-[#050a11] text-slate-100`}
       >
         <ToastContainer style={{ zIndex: 1000000 }} />
-        <LoadingOverlay text={pageLoadingText || "Đang tải dữ liệu, vui lòng chờ..."} />
+        <LoadingOverlay
+          text={pageLoadingText || "Đang khôi phục dữ liệu từ thiết bị..."}
+        />
       </main>
     );
   }
