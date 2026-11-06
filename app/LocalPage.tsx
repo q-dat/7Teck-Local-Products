@@ -360,7 +360,11 @@ type HeaderShortcutActionId =
   | "contact"
   | "reloadPage"
   | "refreshCloud"
-  | "toggleRemoteSyncReminder";
+  | "toggleRemoteSyncReminder"
+  | "postQueue"
+  | "posterGenerator"
+  | "toggleDoneProductsVisibility"
+  | "deviceSettings";
 
 type HeaderShortcutConfig = Record<HeaderShortcutActionId, string>;
 
@@ -522,6 +526,30 @@ const HEADER_SHORTCUT_ACTIONS: readonly HeaderShortcutDefinition[] = [
     description: "Bật hoặc tắt nhắc đồng bộ tự động",
     defaultShortcut: "Shift+F",
   },
+  {
+    id: "postQueue",
+    label: "Đăng bài",
+    description: "Mở luồng duyệt và đăng bài theo thứ tự danh mục",
+    defaultShortcut: "Shift+H",
+  },
+  {
+    id: "posterGenerator",
+    label: "Poster",
+    description: "Mở công cụ tạo poster sản phẩm",
+    defaultShortcut: "Shift+J",
+  },
+  {
+    id: "toggleDoneProductsVisibility",
+    label: "Hiện / Ẩn DONE",
+    description: "Hiện hoặc ẩn sản phẩm đã DONE trong danh mục",
+    defaultShortcut: "Shift+K",
+  },
+  {
+    id: "deviceSettings",
+    label: "Thiết bị",
+    description: "Mở cài đặt nền tảng Android hoặc iOS",
+    defaultShortcut: "Shift+L",
+  },
 ];
 
 const HEADER_SHORTCUT_STORAGE_KEY =
@@ -539,7 +567,7 @@ const createDefaultHeaderShortcuts = (): HeaderShortcutConfig => {
 
 const DEFAULT_HEADER_SHORTCUTS = createDefaultHeaderShortcuts();
 
-const LEGACY_HEADER_SHORTCUT_DEFAULTS: HeaderShortcutConfig = {
+const LEGACY_HEADER_SHORTCUT_DEFAULTS: Partial<HeaderShortcutConfig> = {
   toggleHeaderVisibility: "Ctrl+Alt+1",
   addProduct: "Ctrl+Alt+2",
   navigation: "Ctrl+Alt+3",
@@ -8702,11 +8730,11 @@ export default function LocalPage({
   const currentPostQueueProduct = postQueueProducts[postQueueIndex] ?? null;
   const currentPostQueuePostText = currentPostQueueProduct
     ? buildPostText(
-        currentPostQueueProduct,
-        settings.commonDescription,
-        activeContactText,
-        includeSocialTags,
-      )
+      currentPostQueueProduct,
+      settings.commonDescription,
+      activeContactText,
+      includeSocialTags,
+    )
     : "";
 
   useEffect(() => {
@@ -9868,6 +9896,18 @@ export default function LocalPage({
         }
       }
 
+      // The post queue is rendered as a sibling overlay, so its key handler
+      // cannot receive Escape while focus remains on the Header trigger.
+      if (isPostQueueOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          if (!postQueueProcessingRef.current) {
+            closePostQueue();
+          }
+        }
+        return;
+      }
+
       if (
         event.code === "Space" &&
         !activeModal &&
@@ -9981,6 +10021,7 @@ export default function LocalPage({
     albumImages.length,
     albumLightboxIndex,
     handleCancelSearchInput,
+    isPostQueueOpen,
     handleCloseAlbumFullscreen,
     pendingDownload,
     pendingShare,
@@ -12752,6 +12793,17 @@ export default function LocalPage({
   const handlePostQueueKeyDown = (
     event: ReactKeyboardEvent<HTMLDivElement>,
   ): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!postQueueProcessingRef.current) {
+        closePostQueue();
+      }
+
+      return;
+    }
+
     if (postQueueStage !== "products") return;
 
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -18652,9 +18704,12 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="postQueue"
+                data-header-shortcut-key={headerShortcuts["postQueue"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["postQueue"])}
                 type="button"
                 data-luxury-accent="emerald"
-                title="Duyệt sản phẩm chưa DONE theo thứ tự danh mục, tải ảnh chính và copy Post"
+                title={`Duyệt sản phẩm chưa DONE theo thứ tự danh mục, tải ảnh chính và copy Post · ${formatHeaderShortcutLabel(headerShortcuts.postQueue)}`}
                 aria-label="Đăng bài theo danh mục"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={openPostQueue}
@@ -18664,9 +18719,12 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="posterGenerator"
+                data-header-shortcut-key={headerShortcuts["posterGenerator"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["posterGenerator"])}
                 type="button"
                 data-luxury-accent="blue"
-                title="Tách nền, ghép tên và giá vào template poster sản phẩm 1:1"
+                title={`Tách nền, ghép tên và giá vào template poster sản phẩm 1:1 · ${formatHeaderShortcutLabel(headerShortcuts.posterGenerator)}`}
                 aria-label="Tạo poster sản phẩm"
                 className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
                 onClick={() => {
@@ -18744,8 +18802,8 @@ export default function LocalPage({
                     ? `Đang tải nền ${pendingImageUploadCount} ảnh lên Cloudinary`
                     : availableRemoteSyncVersion !== null &&
                       availableRemoteSyncVersion > cacheSyncVersion
-                      ? "Có dữ liệu mới từ thiết bị khác; đồng bộ phần thay đổi"
-                      : "Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB"
+                      ? `Có dữ liệu mới từ thiết bị khác; đồng bộ phần thay đổi · ${formatHeaderShortcutLabel(headerShortcuts.refreshCloud)}`
+                      : `Kiểm tra phiên bản và chỉ tải dữ liệu mới từ MongoDB · ${formatHeaderShortcutLabel(headerShortcuts.refreshCloud)}`
                 }
                 className={`${headerActionButtonBaseClassName} ${availableRemoteSyncVersion !== null && availableRemoteSyncVersion > cacheSyncVersion
                   ? headerActiveButtonClassName
@@ -18792,6 +18850,9 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="toggleDoneProductsVisibility"
+                data-header-shortcut-key={headerShortcuts["toggleDoneProductsVisibility"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["toggleDoneProductsVisibility"])}
                 type="button"
                 data-luxury-accent="gold"
                 title={
@@ -18820,9 +18881,12 @@ export default function LocalPage({
               </button>
 
               <button
+                data-header-shortcut-action="deviceSettings"
+                data-header-shortcut-key={headerShortcuts["deviceSettings"] || ""}
+                aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["deviceSettings"])}
                 type="button"
                 data-luxury-accent="cyan"
-                title="Chọn nền tảng thiết bị để điều chỉnh luồng Tải ảnh"
+                title={`Chọn nền tảng thiết bị để điều chỉnh luồng Tải ảnh · ${formatHeaderShortcutLabel(headerShortcuts.deviceSettings)}`}
                 aria-label={`Thiết bị hiện tại: ${devicePlatform === "android" ? "Android" : "iOS"
                   }`}
                 aria-haspopup="dialog"
