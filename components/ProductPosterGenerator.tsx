@@ -12,6 +12,9 @@ import {
     type ReactNode,
 } from 'react';
 import {
+    FiAlignCenter,
+    FiAlignLeft,
+    FiAlignRight,
     FiCheck,
     FiDownload,
     FiImage,
@@ -59,6 +62,8 @@ type PosterPointerAction = {
     initial: PosterLayer;
 };
 
+type TextAlignment = 'left' | 'center' | 'right';
+
 type TextLayout = {
     lines: string[];
     fontSize: number;
@@ -66,6 +71,9 @@ type TextLayout = {
 };
 
 const POSTER_SIZE = 1600;
+const PRODUCT_LAYER_MIN_SCALE = 0.2;
+const PRODUCT_LAYER_MAX_SCALE = 7;
+const PRODUCT_LAYER_MIN_VISIBLE_PERCENT = 8;
 const MAX_IMAGE_BYTES = 40 * 1024 * 1024;
 const MAX_BACKGROUND_BYTES = 24 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set([
@@ -156,27 +164,71 @@ const findAlphaBounds = (bitmap: ImageBitmap): AlphaBounds => {
     return { x, y, width: right - x, height: bottom - y };
 };
 
+const splitLongWord = (
+    context: CanvasRenderingContext2D,
+    word: string,
+    maximumWidth: number,
+): string[] => {
+    const chunks: string[] = [];
+    let chunk = '';
+
+    for (const character of Array.from(word)) {
+        const candidate = `${chunk}${character}`;
+        if (chunk && context.measureText(candidate).width > maximumWidth) {
+            chunks.push(chunk);
+            chunk = character;
+        } else {
+            chunk = candidate;
+        }
+    }
+
+    if (chunk) chunks.push(chunk);
+    return chunks.length > 0 ? chunks : [''];
+};
+
 const wrapText = (
     context: CanvasRenderingContext2D,
     value: string,
     maximumWidth: number,
 ): string[] => {
-    const words = value.trim().split(/\s+/u).filter(Boolean);
+    const paragraphs = value.replace(/\r\n?/gu, '\n').split('\n');
     const lines: string[] = [];
-    let line = '';
 
-    for (const word of words) {
-        const candidate = line ? `${line} ${word}` : word;
-        if (context.measureText(candidate).width <= maximumWidth || !line) {
-            line = candidate;
-            continue;
+    paragraphs.forEach((paragraph) => {
+        const words = paragraph.trim().split(/\s+/u).filter(Boolean);
+        if (words.length === 0) {
+            lines.push('');
+            return;
         }
-        lines.push(line);
-        line = word;
-    }
 
-    if (line) lines.push(line);
-    return lines;
+        let line = '';
+        words.forEach((word) => {
+            if (context.measureText(word).width > maximumWidth) {
+                if (line) {
+                    lines.push(line);
+                    line = '';
+                }
+
+                const chunks = splitLongWord(context, word, maximumWidth);
+                lines.push(...chunks.slice(0, -1));
+                line = chunks[chunks.length - 1] ?? '';
+                return;
+            }
+
+            const candidate = line ? `${line} ${word}` : word;
+            if (!line || context.measureText(candidate).width <= maximumWidth) {
+                line = candidate;
+                return;
+            }
+
+            lines.push(line);
+            line = word;
+        });
+
+        lines.push(line);
+    });
+
+    return lines.length > 0 ? lines : [''];
 };
 
 const fitTextLayout = (
@@ -185,24 +237,31 @@ const fitTextLayout = (
     maximumWidth: number,
     maximumHeight: number,
     preferredFontSize: number,
-    maximumLines: number,
+    maximumLines = Number.POSITIVE_INFINITY,
 ): TextLayout => {
-    for (let fontSize = Math.max(24, preferredFontSize); fontSize >= 24; fontSize -= 2) {
+    const minimumFontSize = 12;
+    const startingFontSize = Math.max(minimumFontSize, preferredFontSize);
+
+    for (let fontSize = startingFontSize; fontSize >= minimumFontSize; fontSize -= 2) {
         context.font = `900 ${fontSize}px Arial, Helvetica, sans-serif`;
         const lines = wrapText(context, value, maximumWidth);
-        const lineHeight = Math.round(fontSize * 0.94);
+        const lineHeight = Math.round(fontSize * 1.08);
         const fitsWidth = lines.every((line) => context.measureText(line).width <= maximumWidth);
-        if (fitsWidth && lines.length <= maximumLines && lineHeight * lines.length <= maximumHeight) {
+
+        if (
+            fitsWidth &&
+            lines.length <= maximumLines &&
+            lineHeight * lines.length <= maximumHeight
+        ) {
             return { lines, fontSize, lineHeight };
         }
     }
 
-    const fontSize = 24;
-    context.font = `900 ${fontSize}px Arial, Helvetica, sans-serif`;
+    context.font = `900 ${minimumFontSize}px Arial, Helvetica, sans-serif`;
     return {
         lines: wrapText(context, value, maximumWidth).slice(0, maximumLines),
-        fontSize,
-        lineHeight: 23,
+        fontSize: minimumFontSize,
+        lineHeight: Math.round(minimumFontSize * 1.08),
     };
 };
 
@@ -308,6 +367,7 @@ const drawTextLayer = (
     value: string,
     layer: PosterLayer,
     kind: 'title' | 'price',
+    alignment: TextAlignment = 'center',
 ): void => {
     const x = (layer.x / 100) * POSTER_SIZE;
     const y = (layer.y / 100) * POSTER_SIZE;
@@ -319,13 +379,19 @@ const drawTextLayer = (
         width * 0.96,
         height * 0.9,
         layer.fontSize,
-        kind === 'title' ? 2 : 1,
+        kind === 'title' ? Number.POSITIVE_INFINITY : 1,
     );
 
     context.save();
-    context.textAlign = 'center';
+    context.beginPath();
+    context.rect(x, y, width, height);
+    context.clip();
+    context.textAlign = alignment;
     context.textBaseline = 'middle';
-    context.font = `900 ${textLayout.fontSize}px Arial, Helvetica, sans-serif`;
+    context.font = kind === 'price'
+        ? `900 ${textLayout.fontSize}px \"Arial Black\", Impact, Arial, sans-serif`
+        : `900 ${textLayout.fontSize}px Arial, Helvetica, sans-serif`;
+    context.lineJoin = 'round';
     context.shadowColor = kind === 'title'
         ? 'rgba(0,0,0,0.12)'
         : 'rgba(205,0,0,0.14)';
@@ -347,13 +413,21 @@ const drawTextLayer = (
 
     const totalHeight = textLayout.lines.length * textLayout.lineHeight;
     const firstBaseline = y + height / 2 - totalHeight / 2 + textLayout.lineHeight / 2;
+    const textAnchorX = alignment === 'left'
+        ? x + width * 0.02
+        : alignment === 'right'
+            ? x + width * 0.98
+            : x + width / 2;
     textLayout.lines.forEach((line, index) => {
-        context.fillText(
-            line,
-            x + width / 2,
-            firstBaseline + index * textLayout.lineHeight,
-            width * 0.96,
-        );
+        const baseline = firstBaseline + index * textLayout.lineHeight;
+
+        if (kind === 'price') {
+            context.strokeStyle = '#dc0000';
+            context.lineWidth = Math.max(2, textLayout.fontSize * 0.022);
+            context.strokeText(line, textAnchorX, baseline, width * 0.96);
+        }
+
+        context.fillText(line, textAnchorX, baseline, width * 0.96);
     });
     context.restore();
 };
@@ -364,6 +438,7 @@ const createPosterBlob = async (
     cutout: Blob,
     background: Blob | null,
     layout: PosterLayout,
+    titleAlignment: TextAlignment,
 ): Promise<Blob> => {
     const [productBitmap, backgroundBitmap] = await Promise.all([
         loadImageBitmap(cutout),
@@ -436,7 +511,7 @@ const createPosterBlob = async (
             drawHeight,
         );
 
-        drawTextLayer(context, name.trim(), layout.title, 'title');
+        drawTextLayer(context, name, layout.title, 'title', titleAlignment);
         drawTextLayer(context, price.trim(), layout.price, 'price');
 
         return await new Promise<Blob>((resolve, reject) => {
@@ -496,6 +571,7 @@ export default function ProductPosterGenerator({
     const stageRef = useRef<HTMLDivElement | null>(null);
 
     const [productName, setProductName] = useState<string>('');
+    const [titleAlignment, setTitleAlignment] = useState<TextAlignment>('center');
     const [price, setPrice] = useState<string>('');
     const [sourceFile, setSourceFile] = useState<File | null>(null);
     const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string>('');
@@ -703,22 +779,63 @@ export default function ProductPosterGenerator({
             const nextLayer = { ...initial };
 
             if (action.mode === 'move') {
-                nextLayer.x = clamp(initial.x + deltaX, 0, 100 - initial.width);
-                nextLayer.y = clamp(initial.y + deltaY, 0, 100 - initial.height);
+                if (action.layerId === 'product') {
+                    // Keep a small part of the product layer reachable while allowing
+                    // the visible product itself to extend beyond every poster edge.
+                    nextLayer.x = clamp(
+                        initial.x + deltaX,
+                        PRODUCT_LAYER_MIN_VISIBLE_PERCENT - initial.width,
+                        100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                    );
+                    nextLayer.y = clamp(
+                        initial.y + deltaY,
+                        PRODUCT_LAYER_MIN_VISIBLE_PERCENT - initial.height,
+                        100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                    );
+                } else {
+                    nextLayer.x = clamp(initial.x + deltaX, 0, 100 - initial.width);
+                    nextLayer.y = clamp(initial.y + deltaY, 0, 100 - initial.height);
+                }
+            } else if (action.layerId === 'product') {
+                // Product resize is uniform and can grow to 7x the default layer.
+                // The canvas itself clips overflow to the final 1:1 poster boundary.
+                const widthDeltaRatio = deltaX / Math.max(initial.width, 1);
+                const heightDeltaRatio = deltaY / Math.max(initial.height, 1);
+                const dominantDeltaRatio = Math.abs(widthDeltaRatio) >= Math.abs(heightDeltaRatio)
+                    ? widthDeltaRatio
+                    : heightDeltaRatio;
+                const minimumWidth = INITIAL_LAYOUT.product.width * PRODUCT_LAYER_MIN_SCALE;
+                const maximumWidth = INITIAL_LAYOUT.product.width * PRODUCT_LAYER_MAX_SCALE;
+                const nextWidth = clamp(
+                    initial.width * (1 + dominantDeltaRatio),
+                    minimumWidth,
+                    maximumWidth,
+                );
+                const scale = nextWidth / Math.max(initial.width, 1);
+                nextLayer.width = nextWidth;
+                nextLayer.height = initial.height * scale;
+                nextLayer.x = clamp(
+                    initial.x,
+                    PRODUCT_LAYER_MIN_VISIBLE_PERCENT - nextLayer.width,
+                    100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                );
+                nextLayer.y = clamp(
+                    initial.y,
+                    PRODUCT_LAYER_MIN_VISIBLE_PERCENT - nextLayer.height,
+                    100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                );
             } else {
                 const nextWidth = clamp(initial.width + deltaX, 8, 100 - initial.x);
                 const nextHeight = clamp(initial.height + deltaY, 6, 100 - initial.y);
                 nextLayer.width = nextWidth;
                 nextLayer.height = nextHeight;
-                if (action.layerId !== 'product') {
-                    const widthScale = nextWidth / Math.max(initial.width, 1);
-                    const heightScale = nextHeight / Math.max(initial.height, 1);
-                    nextLayer.fontSize = clamp(
-                        initial.fontSize * Math.min(widthScale, heightScale),
-                        30,
-                        420,
-                    );
-                }
+                const widthScale = nextWidth / Math.max(initial.width, 1);
+                const heightScale = nextHeight / Math.max(initial.height, 1);
+                nextLayer.fontSize = clamp(
+                    initial.fontSize * Math.min(widthScale, heightScale),
+                    30,
+                    420,
+                );
             }
 
             return { ...current, [action.layerId]: nextLayer };
@@ -745,11 +862,12 @@ export default function ProductPosterGenerator({
 
         try {
             const posterBlob = await createPosterBlob(
-                productName.trim(),
+                productName.replace(/\r\n?/gu, '\n'),
                 price.trim(),
                 cutoutBlob,
                 useUploadedBackground ? backgroundBlob : null,
                 layout,
+                titleAlignment,
             );
             const nextUrl = URL.createObjectURL(posterBlob);
             revokeUrl(posterPreviewUrlRef.current);
@@ -769,6 +887,7 @@ export default function ProductPosterGenerator({
         price,
         productName,
         revokeUrl,
+        titleAlignment,
         useUploadedBackground,
     ]);
 
@@ -792,8 +911,50 @@ export default function ProductPosterGenerator({
         invalidateExport();
     };
 
+    const updateTitleAlignment = (value: TextAlignment): void => {
+        setTitleAlignment(value);
+        invalidateExport();
+    };
+
+    const updateProductScale = (scalePercent: number): void => {
+        const scale = clamp(
+            scalePercent / 100,
+            PRODUCT_LAYER_MIN_SCALE,
+            PRODUCT_LAYER_MAX_SCALE,
+        );
+
+        setLayout((current) => {
+            const product = current.product;
+            const nextWidth = INITIAL_LAYOUT.product.width * scale;
+            const nextHeight = INITIAL_LAYOUT.product.height * scale;
+            const centerX = product.x + product.width / 2;
+            const centerY = product.y + product.height / 2;
+
+            return {
+                ...current,
+                product: {
+                    ...product,
+                    width: nextWidth,
+                    height: nextHeight,
+                    x: clamp(
+                        centerX - nextWidth / 2,
+                        PRODUCT_LAYER_MIN_VISIBLE_PERCENT - nextWidth,
+                        100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                    ),
+                    y: clamp(
+                        centerY - nextHeight / 2,
+                        PRODUCT_LAYER_MIN_VISIBLE_PERCENT - nextHeight,
+                        100 - PRODUCT_LAYER_MIN_VISIBLE_PERCENT,
+                    ),
+                },
+            };
+        });
+        invalidateExport();
+    };
+
     const resetLayout = (): void => {
         setLayout(INITIAL_LAYOUT);
+        setTitleAlignment('center');
         setSelectedLayer('product');
         invalidateExport();
     };
@@ -839,7 +1000,7 @@ export default function ProductPosterGenerator({
     const getPreviewFontSize = (
         value: string,
         layer: PosterLayer,
-        maximumLines: number,
+        kind: 'title' | 'price',
     ): number => {
         if (typeof document === 'undefined') return layer.fontSize;
         const measureCanvas = document.createElement('canvas');
@@ -852,7 +1013,7 @@ export default function ProductPosterGenerator({
             ((layer.width / 100) * POSTER_SIZE) * 0.96,
             ((layer.height / 100) * POSTER_SIZE) * 0.9,
             layer.fontSize,
-            maximumLines,
+            kind === 'title' ? Number.POSITIVE_INFINITY : 1,
         ).fontSize;
     };
 
@@ -860,9 +1021,14 @@ export default function ProductPosterGenerator({
         value: string,
         layer: PosterLayer,
         kind: 'title' | 'price',
+        alignment: TextAlignment = 'center',
     ): CSSProperties => ({
-        fontSize: `${(getPreviewFontSize(value, layer, kind === 'title' ? 2 : 1) / POSTER_SIZE) * 100}cqw`,
-        lineHeight: 0.94,
+        fontSize: `${(getPreviewFontSize(value, layer, kind) / POSTER_SIZE) * 100}cqw`,
+        lineHeight: 1.08,
+        fontFamily: kind === 'price' ? '"Arial Black", Impact, Arial, sans-serif' : 'Arial, Helvetica, sans-serif',
+        fontWeight: kind === 'price' ? 950 : 900,
+        WebkitTextStroke: kind === 'price' ? '1.1px #e00000' : undefined,
+        textAlign: alignment,
         backgroundImage: kind === 'title'
             ? 'linear-gradient(90deg,#050505 0%,#030303 58%,#064fc0 78%,#0876e8 100%)'
             : 'linear-gradient(90deg,#ff1717 0%,#e90000 55%,#ff3030 100%)',
@@ -900,7 +1066,7 @@ export default function ProductPosterGenerator({
                         aria-label={`Thay đổi kích thước ${LAYER_LABELS[id]}`}
                         onPointerDown={(event) => handleLayerPointerDown(event, id, 'resize')}
                         onClick={(event) => event.stopPropagation()}
-                        className="absolute -bottom-2 -right-2 z-30 flex h-5 w-5 cursor-nwse-resize items-center justify-center rounded-full border-2 border-white bg-cyan-400 text-slate-950 shadow-lg touch-none"
+                        className={`absolute z-30 flex h-5 w-5 cursor-nwse-resize items-center justify-center rounded-full border-2 border-white bg-cyan-400 text-slate-950 shadow-lg touch-none ${id === 'product' ? 'bottom-1 right-1' : '-bottom-2 -right-2'}`}
                     >
                         <span className="h-1.5 w-1.5 rounded-full bg-slate-950" />
                     </button>
@@ -939,16 +1105,40 @@ export default function ProductPosterGenerator({
                 <div className="min-h-0 flex-1 overflow-hidden p-2 xl:p-3">
                     <div className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-2 xl:grid-cols-[300px_minmax(0,1fr)] xl:grid-rows-1 xl:gap-4">
                         <div className="grid min-h-0 min-w-0 grid-cols-2 content-start gap-2 overflow-hidden xl:flex xl:flex-col xl:gap-2.5">
-                            <label className="flex min-w-0 flex-col gap-1">
-                                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tên sản phẩm</span>
-                                <input
+                            <div className="flex min-w-0 flex-col gap-1">
+                                <label htmlFor="poster-product-name" className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tên sản phẩm</label>
+                                <textarea
+                                    id="poster-product-name"
                                     value={productName}
                                     onChange={(event) => updateProductName(event.target.value)}
-                                    placeholder="Ví dụ: Dell Latitude 5440"
-                                    maxLength={90}
-                                    className="h-9 w-full min-w-0 rounded-lg border border-white/10 bg-slate-950/80 px-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
+                                    placeholder="Nhập tên sản phẩm. Enter để xuống dòng..."
+                                    rows={3}
+                                    spellCheck={false}
+                                    className="min-h-[76px] w-full min-w-0 resize-y rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm leading-5 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60"
                                 />
-                            </label>
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[8px] text-slate-500">Không giới hạn ký tự · Enter để xuống dòng</span>
+                                    <span className="text-[8px] tabular-nums text-slate-500">{productName.length.toLocaleString('vi-VN')} ký tự</span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1" aria-label="Căn chỉnh tên sản phẩm trên poster">
+                                    {([
+                                        { value: 'left', label: 'Trái', Icon: FiAlignLeft },
+                                        { value: 'center', label: 'Giữa', Icon: FiAlignCenter },
+                                        { value: 'right', label: 'Phải', Icon: FiAlignRight },
+                                    ] as const).map(({ value, label, Icon }) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            onClick={() => updateTitleAlignment(value)}
+                                            aria-pressed={titleAlignment === value}
+                                            className={`flex min-h-7 items-center justify-center gap-1 rounded-md border px-1.5 text-[9px] font-bold transition ${titleAlignment === value ? 'border-cyan-300/45 bg-cyan-300/10 text-cyan-100' : 'border-white/10 bg-white/[0.025] text-slate-400 hover:bg-white/[0.06]'}`}
+                                        >
+                                            <Icon className="h-3 w-3" aria-hidden="true" />
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
 
                             <label className="flex min-w-0 flex-col gap-1">
                                 <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Giá</span>
@@ -1203,9 +1393,17 @@ export default function ProductPosterGenerator({
 
                                     {renderLayerControls(
                                         'title',
-                                        <span className="pointer-events-none flex h-full w-full items-center justify-center overflow-hidden break-words text-center font-black" style={textLayerStyle(productName || 'Tên sản phẩm', layout.title, 'title')}>
-                                            {productName || 'Tên sản phẩm'}
-                                        </span>,
+                                        <div
+                                            className="pointer-events-none flex h-full w-full items-center overflow-hidden font-black"
+                                            style={{ justifyContent: titleAlignment === 'left' ? 'flex-start' : titleAlignment === 'right' ? 'flex-end' : 'center' }}
+                                        >
+                                            <span
+                                                className="block w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                                                style={textLayerStyle(productName || 'Tên sản phẩm', layout.title, 'title', titleAlignment)}
+                                            >
+                                                {productName || 'Tên sản phẩm'}
+                                            </span>
+                                        </div>,
                                         layerStyle(layout.title),
                                     )}
                                 </div>
@@ -1224,6 +1422,24 @@ export default function ProductPosterGenerator({
                                         {LAYER_LABELS[id]}
                                     </button>
                                 ))}
+                                {selectedLayer === 'product' ? (
+                                    <label className="flex min-w-[150px] flex-1 items-center gap-2 px-1">
+                                        <span className="shrink-0 text-[9px] font-semibold text-slate-400">Zoom</span>
+                                        <input
+                                            type="range"
+                                            min={PRODUCT_LAYER_MIN_SCALE * 100}
+                                            max={PRODUCT_LAYER_MAX_SCALE * 100}
+                                            step={5}
+                                            value={Math.round((layout.product.width / INITIAL_LAYOUT.product.width) * 100)}
+                                            onChange={(event) => updateProductScale(Number(event.target.value))}
+                                            className="min-w-0 flex-1 accent-cyan-300"
+                                            aria-label="Phóng to hoặc thu nhỏ ảnh sản phẩm"
+                                        />
+                                        <span className="w-10 shrink-0 text-right text-[9px] tabular-nums text-cyan-200">
+                                            {Math.round((layout.product.width / INITIAL_LAYOUT.product.width) * 100)}%
+                                        </span>
+                                    </label>
+                                ) : null}
                             </div>
 
                             <footer className="flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
