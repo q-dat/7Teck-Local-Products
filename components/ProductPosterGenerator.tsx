@@ -64,11 +64,6 @@ type PosterPointerAction = {
 
 type TextAlignment = 'left' | 'center' | 'right';
 
-type TextLayout = {
-    lines: string[];
-    fontSize: number;
-    lineHeight: number;
-};
 
 const POSTER_SIZE = 1600;
 const PRODUCT_LAYER_MIN_SCALE = 0.2;
@@ -164,6 +159,46 @@ const findAlphaBounds = (bitmap: ImageBitmap): AlphaBounds => {
     return { x, y, width: right - x, height: bottom - y };
 };
 
+const cropBlobToAlphaBounds = async (blob: Blob): Promise<Blob> => {
+    const bitmap = await loadImageBitmap(blob);
+
+    try {
+        const bounds = findAlphaBounds(bitmap);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, bounds.width);
+        canvas.height = Math.max(1, bounds.height);
+
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Không thể chuẩn hóa vùng ảnh sản phẩm.');
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(
+            bitmap,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height,
+            0,
+            0,
+            bounds.width,
+            bounds.height,
+        );
+
+        const croppedBlob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((value) => {
+                if (value) resolve(value);
+                else reject(new Error('Không thể tạo ảnh PNG đã căn vùng trong suốt.'));
+            }, 'image/png');
+        });
+
+        canvas.width = 0;
+        canvas.height = 0;
+        return croppedBlob;
+    } finally {
+        bitmap.close();
+    }
+};
+
 const splitLongWord = (
     context: CanvasRenderingContext2D,
     word: string,
@@ -229,40 +264,6 @@ const wrapText = (
     });
 
     return lines.length > 0 ? lines : [''];
-};
-
-const fitTextLayout = (
-    context: CanvasRenderingContext2D,
-    value: string,
-    maximumWidth: number,
-    maximumHeight: number,
-    preferredFontSize: number,
-    maximumLines = Number.POSITIVE_INFINITY,
-): TextLayout => {
-    const minimumFontSize = 12;
-    const startingFontSize = Math.max(minimumFontSize, preferredFontSize);
-
-    for (let fontSize = startingFontSize; fontSize >= minimumFontSize; fontSize -= 2) {
-        context.font = `900 ${fontSize}px Arial, Helvetica, sans-serif`;
-        const lines = wrapText(context, value, maximumWidth);
-        const lineHeight = Math.round(fontSize * 1.08);
-        const fitsWidth = lines.every((line) => context.measureText(line).width <= maximumWidth);
-
-        if (
-            fitsWidth &&
-            lines.length <= maximumLines &&
-            lineHeight * lines.length <= maximumHeight
-        ) {
-            return { lines, fontSize, lineHeight };
-        }
-    }
-
-    context.font = `900 ${minimumFontSize}px Arial, Helvetica, sans-serif`;
-    return {
-        lines: wrapText(context, value, maximumWidth).slice(0, maximumLines),
-        fontSize: minimumFontSize,
-        lineHeight: Math.round(minimumFontSize * 1.08),
-    };
 };
 
 const drawDefaultBackground = (context: CanvasRenderingContext2D): void => {
@@ -362,6 +363,11 @@ const drawImageCover = (
     );
 };
 
+const getCanvasTextFont = (kind: 'title' | 'price', fontSize: number): string =>
+    kind === 'price'
+        ? `950 ${fontSize}px "Arial Black", Impact, Arial, sans-serif`
+        : `900 ${fontSize}px Arial, Helvetica, sans-serif`;
+
 const drawTextLayer = (
     context: CanvasRenderingContext2D,
     value: string,
@@ -373,24 +379,13 @@ const drawTextLayer = (
     const y = (layer.y / 100) * POSTER_SIZE;
     const width = (layer.width / 100) * POSTER_SIZE;
     const height = (layer.height / 100) * POSTER_SIZE;
-    const textLayout = fitTextLayout(
-        context,
-        value,
-        width * 0.96,
-        height * 0.9,
-        layer.fontSize,
-        kind === 'title' ? Number.POSITIVE_INFINITY : 1,
-    );
+    const fontSize = Math.max(12, layer.fontSize);
+    const lineHeight = fontSize * 1.08;
 
     context.save();
-    context.beginPath();
-    context.rect(x, y, width, height);
-    context.clip();
     context.textAlign = alignment;
     context.textBaseline = 'middle';
-    context.font = kind === 'price'
-        ? `900 ${textLayout.fontSize}px \"Arial Black\", Impact, Arial, sans-serif`
-        : `900 ${textLayout.fontSize}px Arial, Helvetica, sans-serif`;
+    context.font = getCanvasTextFont(kind, fontSize);
     context.lineJoin = 'round';
     context.shadowColor = kind === 'title'
         ? 'rgba(0,0,0,0.12)'
@@ -411,24 +406,27 @@ const drawTextLayer = (
     }
     context.fillStyle = gradient;
 
-    const totalHeight = textLayout.lines.length * textLayout.lineHeight;
-    const firstBaseline = y + height / 2 - totalHeight / 2 + textLayout.lineHeight / 2;
+    const lines = wrapText(context, value, Math.max(1, width * 0.96));
+    const totalHeight = lines.length * lineHeight;
+    const firstBaseline = y + height / 2 - totalHeight / 2 + lineHeight / 2;
     const textAnchorX = alignment === 'left'
         ? x + width * 0.02
         : alignment === 'right'
             ? x + width * 0.98
             : x + width / 2;
-    textLayout.lines.forEach((line, index) => {
-        const baseline = firstBaseline + index * textLayout.lineHeight;
+
+    lines.forEach((line, index) => {
+        const baseline = firstBaseline + index * lineHeight;
 
         if (kind === 'price') {
             context.strokeStyle = '#dc0000';
-            context.lineWidth = Math.max(2, textLayout.fontSize * 0.022);
-            context.strokeText(line, textAnchorX, baseline, width * 0.96);
+            context.lineWidth = Math.max(2, fontSize * 0.022);
+            context.strokeText(line, textAnchorX, baseline);
         }
 
-        context.fillText(line, textAnchorX, baseline, width * 0.96);
+        context.fillText(line, textAnchorX, baseline);
     });
+
     context.restore();
 };
 
@@ -458,7 +456,9 @@ const createPosterBlob = async (
             drawDefaultBackground(context);
         }
 
-        const productBounds = findAlphaBounds(productBitmap);
+        // The cutout is alpha-trimmed once when background removal completes.
+        // Use its full normalized bitmap here, matching the preview's object-contain
+        // sizing against the exact same product layer rectangle.
         const productLayer = layout.product;
         const area = {
             x: (productLayer.x / 100) * POSTER_SIZE,
@@ -467,11 +467,11 @@ const createPosterBlob = async (
             height: (productLayer.height / 100) * POSTER_SIZE,
         };
         const scale = Math.min(
-            area.width / productBounds.width,
-            area.height / productBounds.height,
+            area.width / productBitmap.width,
+            area.height / productBitmap.height,
         );
-        const drawWidth = productBounds.width * scale;
-        const drawHeight = productBounds.height * scale;
+        const drawWidth = productBitmap.width * scale;
+        const drawHeight = productBitmap.height * scale;
         const drawX = area.x + (area.width - drawWidth) / 2;
         const drawY = area.y + (area.height - drawHeight) / 2;
 
@@ -499,17 +499,7 @@ const createPosterBlob = async (
         );
         context.fill();
 
-        context.drawImage(
-            productBitmap,
-            productBounds.x,
-            productBounds.y,
-            productBounds.width,
-            productBounds.height,
-            drawX,
-            drawY,
-            drawWidth,
-            drawHeight,
-        );
+        context.drawImage(productBitmap, drawX, drawY, drawWidth, drawHeight);
 
         drawTextLayer(context, name, layout.title, 'title', titleAlignment);
         drawTextLayer(context, price.trim(), layout.price, 'price');
@@ -630,11 +620,16 @@ export default function ProductPosterGenerator({
             });
 
             if (controller.signal.aborted) return;
-            const nextUrl = URL.createObjectURL(result.blob);
+            setProgress({ label: 'Đang căn vùng sản phẩm...', percent: 96 });
+            const normalizedCutout = await cropBlobToAlphaBounds(result.blob);
+            if (controller.signal.aborted) return;
+
+            const nextUrl = URL.createObjectURL(normalizedCutout);
+            revokeUrl(cutoutPreviewUrlRef.current);
             cutoutPreviewUrlRef.current = nextUrl;
-            setCutoutBlob(result.blob);
+            setCutoutBlob(normalizedCutout);
             setCutoutPreviewUrl(nextUrl);
-            setProgress({ label: 'Đã tách nền xong', percent: 100 });
+            setProgress({ label: 'Đã tách nền và căn vùng sản phẩm', percent: 100 });
         } catch (error) {
             if (controller.signal.aborted) return;
             setErrorMessage(
@@ -833,8 +828,8 @@ export default function ProductPosterGenerator({
                 const heightScale = nextHeight / Math.max(initial.height, 1);
                 nextLayer.fontSize = clamp(
                     initial.fontSize * Math.min(widthScale, heightScale),
-                    30,
-                    420,
+                    12,
+                    1200,
                 );
             }
 
@@ -913,6 +908,15 @@ export default function ProductPosterGenerator({
 
     const updateTitleAlignment = (value: TextAlignment): void => {
         setTitleAlignment(value);
+        invalidateExport();
+    };
+
+    const updateTextFontSize = (layerId: 'title' | 'price', fontSize: number): void => {
+        const nextFontSize = clamp(Math.round(fontSize), 12, 1200);
+        setLayout((current) => ({
+            ...current,
+            [layerId]: { ...current[layerId], fontSize: nextFontSize },
+        }));
         invalidateExport();
     };
 
@@ -997,33 +1001,30 @@ export default function ProductPosterGenerator({
         height: `${layer.height}%`,
     });
 
-    const getPreviewFontSize = (
+    const getPreviewTextLines = (
         value: string,
         layer: PosterLayer,
         kind: 'title' | 'price',
-    ): number => {
-        if (typeof document === 'undefined') return layer.fontSize;
+    ): string[] => {
+        if (typeof document === 'undefined') return [value];
         const measureCanvas = document.createElement('canvas');
         const context = measureCanvas.getContext('2d');
-        if (!context) return layer.fontSize;
+        if (!context) return [value];
 
-        return fitTextLayout(
+        context.font = getCanvasTextFont(kind, Math.max(12, layer.fontSize));
+        return wrapText(
             context,
-            value || 'Tên sản phẩm',
-            ((layer.width / 100) * POSTER_SIZE) * 0.96,
-            ((layer.height / 100) * POSTER_SIZE) * 0.9,
-            layer.fontSize,
-            kind === 'title' ? Number.POSITIVE_INFINITY : 1,
-        ).fontSize;
+            value,
+            Math.max(1, ((layer.width / 100) * POSTER_SIZE) * 0.96),
+        );
     };
 
     const textLayerStyle = (
-        value: string,
         layer: PosterLayer,
         kind: 'title' | 'price',
         alignment: TextAlignment = 'center',
     ): CSSProperties => ({
-        fontSize: `${(getPreviewFontSize(value, layer, kind) / POSTER_SIZE) * 100}cqw`,
+        fontSize: `${(Math.max(12, layer.fontSize) / POSTER_SIZE) * 100}cqw`,
         lineHeight: 1.08,
         fontFamily: kind === 'price' ? '"Arial Black", Impact, Arial, sans-serif' : 'Arial, Helvetica, sans-serif',
         fontWeight: kind === 'price' ? 950 : 900,
@@ -1385,8 +1386,13 @@ export default function ProductPosterGenerator({
 
                                     {renderLayerControls(
                                         'price',
-                                        <span className="pointer-events-none flex h-full w-full items-center justify-center overflow-hidden whitespace-nowrap text-center font-black" style={textLayerStyle(price || 'Giá sản phẩm', layout.price, 'price')}>
-                                            {price || 'Giá sản phẩm'}
+                                        <span
+                                            className="pointer-events-none flex h-full w-full flex-col items-center justify-center overflow-visible text-center font-black"
+                                            style={textLayerStyle(layout.price, 'price')}
+                                        >
+                                            {getPreviewTextLines(price || 'Giá sản phẩm', layout.price, 'price').map((line, index) => (
+                                                <span key={`${index}-${line}`} className="block w-full whitespace-pre">{line || '\u00a0'}</span>
+                                            ))}
                                         </span>,
                                         layerStyle(layout.price),
                                     )}
@@ -1394,14 +1400,16 @@ export default function ProductPosterGenerator({
                                     {renderLayerControls(
                                         'title',
                                         <div
-                                            className="pointer-events-none flex h-full w-full items-center overflow-hidden font-black"
+                                            className="pointer-events-none flex h-full w-full items-center overflow-visible font-black"
                                             style={{ justifyContent: titleAlignment === 'left' ? 'flex-start' : titleAlignment === 'right' ? 'flex-end' : 'center' }}
                                         >
                                             <span
-                                                className="block w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
-                                                style={textLayerStyle(productName || 'Tên sản phẩm', layout.title, 'title', titleAlignment)}
+                                                className="block w-full whitespace-normal"
+                                                style={{ ...textLayerStyle(layout.title, 'title', titleAlignment), paddingInline: '2%', boxSizing: 'border-box' }}
                                             >
-                                                {productName || 'Tên sản phẩm'}
+                                                {getPreviewTextLines(productName || 'Tên sản phẩm', layout.title, 'title').map((line, index) => (
+                                                    <span key={`${index}-${line}`} className="block w-full whitespace-pre">{line || '\u00a0'}</span>
+                                                ))}
                                             </span>
                                         </div>,
                                         layerStyle(layout.title),
@@ -1422,6 +1430,33 @@ export default function ProductPosterGenerator({
                                         {LAYER_LABELS[id]}
                                     </button>
                                 ))}
+                                {selectedLayer === 'title' || selectedLayer === 'price' ? (
+                                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-md border border-cyan-300/15 bg-cyan-300/[0.035] px-2 py-1.5">
+                                        <label htmlFor="poster-text-size" className="shrink-0 text-[9px] font-semibold text-slate-300">Cỡ chữ (px)</label>
+                                        <input
+                                            id="poster-text-size"
+                                            type="range"
+                                            min={12}
+                                            max={1200}
+                                            step={1}
+                                            value={Math.round(layout[selectedLayer].fontSize)}
+                                            onChange={(event) => updateTextFontSize(selectedLayer, Number(event.target.value))}
+                                            className="min-w-[90px] flex-1 accent-cyan-300"
+                                            aria-label={`Cỡ chữ ${LAYER_LABELS[selectedLayer]} theo pixel`}
+                                        />
+                                        <input
+                                            type="number"
+                                            min={12}
+                                            max={1200}
+                                            step={1}
+                                            value={Math.round(layout[selectedLayer].fontSize)}
+                                            onChange={(event) => updateTextFontSize(selectedLayer, Number(event.target.value))}
+                                            className="h-7 w-[68px] rounded-md border border-white/10 bg-slate-950 px-1.5 text-right text-[10px] font-bold tabular-nums text-cyan-100 outline-none focus:border-cyan-300/50"
+                                            aria-label={`Nhập cỡ chữ ${LAYER_LABELS[selectedLayer]} theo pixel`}
+                                        />
+                                        <span className="text-[8px] text-slate-500">Kéo tay nắm để zoom</span>
+                                    </div>
+                                ) : null}
                                 {selectedLayer === 'product' ? (
                                     <label className="flex min-w-[150px] flex-1 items-center gap-2 px-1">
                                         <span className="shrink-0 text-[9px] font-semibold text-slate-400">Zoom</span>
