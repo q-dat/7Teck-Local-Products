@@ -66,6 +66,8 @@ type TextAlignment = 'left' | 'center' | 'right';
 
 
 const POSTER_SIZE = 1600;
+const MAX_PROCESSING_IMAGE_DIMENSION = 3200;
+const ALPHA_SCAN_MAX_DIMENSION = 1600;
 const PRODUCT_LAYER_MIN_SCALE = 0.2;
 const PRODUCT_LAYER_MAX_SCALE = 7;
 const PRODUCT_LAYER_MIN_VISIBLE_PERCENT = 8;
@@ -115,63 +117,173 @@ const loadImageBitmap = async (blob: Blob): Promise<ImageBitmap> => {
     return createImageBitmap(blob);
 };
 
+const resizeImageBlob = async (
+    blob: Blob,
+    maxDimension: number,
+): Promise<Blob> => {
+    const bitmap = await loadImageBitmap(blob);
+    const longestSide = Math.max(bitmap.width, bitmap.height);
+
+    if (longestSide <= maxDimension) {
+        bitmap.close();
+        return blob;
+    }
+
+    const scale = maxDimension / longestSide;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    try {
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Không thể chuẩn hóa kích thước ảnh.');
+
+        context.drawImage(bitmap, 0, 0, width, height);
+        return await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(
+                (value) => {
+                    if (value) resolve(value);
+                    else reject(new Error('Không thể tối ưu ảnh đầu vào.'));
+                },
+                'image/webp',
+                0.95,
+            );
+        });
+    } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+        bitmap.close();
+    }
+};
+
+const prepareBackgroundRemovalFile = async (file: File): Promise<File> => {
+    const resizedBlob = await resizeImageBlob(
+        file,
+        MAX_PROCESSING_IMAGE_DIMENSION,
+    );
+    if (resizedBlob === file) return file;
+
+    const baseName = file.name.replace(/\.[^.]+$/u, '') || 'product-image';
+    const extension = resizedBlob.type === 'image/webp' ? 'webp' : 'png';
+    const outputType = resizedBlob.type || 'image/png';
+
+    return new File([resizedBlob], `${baseName}.${extension}`, {
+        type: outputType,
+        lastModified: file.lastModified,
+    });
+};
+
+const loadPosterBackgroundBitmap = async (blob: Blob): Promise<ImageBitmap> => {
+    const bitmap = await loadImageBitmap(blob);
+    const longestSide = Math.max(bitmap.width, bitmap.height);
+
+    if (longestSide <= MAX_PROCESSING_IMAGE_DIMENSION) return bitmap;
+
+    const scale = MAX_PROCESSING_IMAGE_DIMENSION / longestSide;
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    try {
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Không thể chuẩn hóa ảnh nền poster.');
+
+        context.drawImage(bitmap, 0, 0, width, height);
+        return await createImageBitmap(canvas);
+    } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+        bitmap.close();
+    }
+};
+
 const findAlphaBounds = (bitmap: ImageBitmap): AlphaBounds => {
+    const scale = Math.min(
+        1,
+        ALPHA_SCAN_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height),
+    );
+    const scanWidth = Math.max(1, Math.round(bitmap.width * scale));
+    const scanHeight = Math.max(1, Math.round(bitmap.height * scale));
     const scanCanvas = document.createElement('canvas');
-    scanCanvas.width = bitmap.width;
-    scanCanvas.height = bitmap.height;
+    scanCanvas.width = scanWidth;
+    scanCanvas.height = scanHeight;
 
-    const context = scanCanvas.getContext('2d', { willReadFrequently: true });
-    if (!context) throw new Error('Không thể đọc dữ liệu ảnh đã tách nền.');
+    try {
+        const context = scanCanvas.getContext('2d', { willReadFrequently: true });
+        if (!context) throw new Error('Không thể đọc dữ liệu ảnh đã tách nền.');
 
-    context.drawImage(bitmap, 0, 0);
-    const pixels = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
-    const stride = Math.max(1, Math.floor(Math.max(bitmap.width, bitmap.height) / 1800));
-    let minimumX = bitmap.width;
-    let minimumY = bitmap.height;
-    let maximumX = -1;
-    let maximumY = -1;
+        context.drawImage(bitmap, 0, 0, scanWidth, scanHeight);
+        const pixels = context.getImageData(0, 0, scanWidth, scanHeight).data;
+        let minimumX = scanWidth;
+        let minimumY = scanHeight;
+        let maximumX = -1;
+        let maximumY = -1;
 
-    for (let y = 0; y < bitmap.height; y += stride) {
-        for (let x = 0; x < bitmap.width; x += stride) {
-            const alpha = pixels[(y * bitmap.width + x) * 4 + 3] ?? 0;
-            if (alpha <= 12) continue;
-            minimumX = Math.min(minimumX, x);
-            minimumY = Math.min(minimumY, y);
-            maximumX = Math.max(maximumX, x);
-            maximumY = Math.max(maximumY, y);
+        for (let y = 0; y < scanHeight; y += 1) {
+            for (let x = 0; x < scanWidth; x += 1) {
+                const alpha = pixels[(y * scanWidth + x) * 4 + 3] ?? 0;
+                if (alpha <= 12) continue;
+                minimumX = Math.min(minimumX, x);
+                minimumY = Math.min(minimumY, y);
+                maximumX = Math.max(maximumX, x);
+                maximumY = Math.max(maximumY, y);
+            }
         }
+
+        if (maximumX < minimumX || maximumY < minimumY) {
+            return { x: 0, y: 0, width: bitmap.width, height: bitmap.height };
+        }
+
+        const scaleX = bitmap.width / scanWidth;
+        const scaleY = bitmap.height / scanHeight;
+        const sourceMinimumX = Math.floor(minimumX * scaleX);
+        const sourceMinimumY = Math.floor(minimumY * scaleY);
+        const sourceMaximumX = Math.min(
+            bitmap.width - 1,
+            Math.ceil((maximumX + 1) * scaleX) - 1,
+        );
+        const sourceMaximumY = Math.min(
+            bitmap.height - 1,
+            Math.ceil((maximumY + 1) * scaleY) - 1,
+        );
+        const contentWidth = sourceMaximumX - sourceMinimumX + 1;
+        const contentHeight = sourceMaximumY - sourceMinimumY + 1;
+        const paddingX = Math.max(2, Math.round(contentWidth * 0.025));
+        const paddingY = Math.max(2, Math.round(contentHeight * 0.025));
+        const x = Math.max(0, sourceMinimumX - paddingX);
+        const y = Math.max(0, sourceMinimumY - paddingY);
+        const right = Math.min(bitmap.width, sourceMaximumX + paddingX + 1);
+        const bottom = Math.min(bitmap.height, sourceMaximumY + paddingY + 1);
+
+        return { x, y, width: right - x, height: bottom - y };
+    } finally {
+        scanCanvas.width = 0;
+        scanCanvas.height = 0;
     }
-
-    scanCanvas.width = 0;
-    scanCanvas.height = 0;
-
-    if (maximumX < minimumX || maximumY < minimumY) {
-        return { x: 0, y: 0, width: bitmap.width, height: bitmap.height };
-    }
-
-    const paddingX = Math.max(2, Math.round((maximumX - minimumX + 1) * 0.025));
-    const paddingY = Math.max(2, Math.round((maximumY - minimumY + 1) * 0.025));
-    const x = Math.max(0, minimumX - paddingX);
-    const y = Math.max(0, minimumY - paddingY);
-    const right = Math.min(bitmap.width, maximumX + paddingX + 1);
-    const bottom = Math.min(bitmap.height, maximumY + paddingY + 1);
-
-    return { x, y, width: right - x, height: bottom - y };
 };
 
 const cropBlobToAlphaBounds = async (blob: Blob): Promise<Blob> => {
     const bitmap = await loadImageBitmap(blob);
+    const canvas = document.createElement('canvas');
 
     try {
         const bounds = findAlphaBounds(bitmap);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, bounds.width);
-        canvas.height = Math.max(1, bounds.height);
+        const outputScale = Math.min(
+            1,
+            MAX_PROCESSING_IMAGE_DIMENSION / Math.max(bounds.width, bounds.height),
+        );
+        const outputWidth = Math.max(1, Math.round(bounds.width * outputScale));
+        const outputHeight = Math.max(1, Math.round(bounds.height * outputScale));
+        canvas.width = outputWidth;
+        canvas.height = outputHeight;
 
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Không thể chuẩn hóa vùng ảnh sản phẩm.');
 
-        context.clearRect(0, 0, canvas.width, canvas.height);
         context.drawImage(
             bitmap,
             bounds.x,
@@ -180,21 +292,19 @@ const cropBlobToAlphaBounds = async (blob: Blob): Promise<Blob> => {
             bounds.height,
             0,
             0,
-            bounds.width,
-            bounds.height,
+            outputWidth,
+            outputHeight,
         );
 
-        const croppedBlob = await new Promise<Blob>((resolve, reject) => {
+        return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((value) => {
                 if (value) resolve(value);
                 else reject(new Error('Không thể tạo ảnh PNG đã căn vùng trong suốt.'));
             }, 'image/png');
         });
-
+    } finally {
         canvas.width = 0;
         canvas.height = 0;
-        return croppedBlob;
-    } finally {
         bitmap.close();
     }
 };
@@ -438,13 +548,13 @@ const createPosterBlob = async (
     layout: PosterLayout,
     titleAlignment: TextAlignment,
 ): Promise<Blob> => {
-    const [productBitmap, backgroundBitmap] = await Promise.all([
-        loadImageBitmap(cutout),
-        background ? loadImageBitmap(background) : Promise.resolve(null),
-    ]);
+    const productBitmap = await loadImageBitmap(cutout);
+    let backgroundBitmap: ImageBitmap | null = null;
+    const canvas = document.createElement('canvas');
 
     try {
-        const canvas = document.createElement('canvas');
+        if (background) backgroundBitmap = await loadPosterBackgroundBitmap(background);
+
         canvas.width = POSTER_SIZE;
         canvas.height = POSTER_SIZE;
         const context = canvas.getContext('2d');
@@ -456,9 +566,6 @@ const createPosterBlob = async (
             drawDefaultBackground(context);
         }
 
-        // The cutout is alpha-trimmed once when background removal completes.
-        // Use its full normalized bitmap here, matching the preview's object-contain
-        // sizing against the exact same product layer rectangle.
         const productLayer = layout.product;
         const area = {
             x: (productLayer.x / 100) * POSTER_SIZE,
@@ -500,19 +607,18 @@ const createPosterBlob = async (
         context.fill();
 
         context.drawImage(productBitmap, drawX, drawY, drawWidth, drawHeight);
-
         drawTextLayer(context, name, layout.title, 'title', titleAlignment);
         drawTextLayer(context, price.trim(), layout.price, 'price');
 
         return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((blob) => {
-                canvas.width = 0;
-                canvas.height = 0;
                 if (blob) resolve(blob);
                 else reject(new Error('Không thể xuất poster PNG.'));
             }, 'image/png');
         });
     } finally {
+        canvas.width = 0;
+        canvas.height = 0;
         productBitmap.close();
         backgroundBitmap?.close();
     }
@@ -558,6 +664,16 @@ export default function ProductPosterGenerator({
     const backgroundPreviewUrlRef = useRef<string>('');
     const posterPreviewUrlRef = useRef<string>('');
     const pointerActionRef = useRef<PosterPointerAction | null>(null);
+    const pendingPointerPositionRef = useRef<{
+        pointerId: number;
+        clientX: number;
+        clientY: number;
+    } | null>(null);
+    const pointerFrameRef = useRef<number | null>(null);
+    const previewTextMeasureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const posterRevisionRef = useRef<number>(0);
+    const isGeneratingPosterRef = useRef<boolean>(false);
+    const isMountedRef = useRef<boolean>(true);
     const stageRef = useRef<HTMLDivElement | null>(null);
 
     const [productName, setProductName] = useState<string>('');
@@ -583,7 +699,11 @@ export default function ProductPosterGenerator({
     }, []);
 
     const invalidateExport = useCallback((): void => {
-        revokeUrl(posterPreviewUrlRef.current);
+        posterRevisionRef.current += 1;
+        const currentUrl = posterPreviewUrlRef.current;
+        if (!currentUrl) return;
+
+        revokeUrl(currentUrl);
         posterPreviewUrlRef.current = '';
         setPosterPreviewUrl('');
     }, [revokeUrl]);
@@ -604,11 +724,18 @@ export default function ProductPosterGenerator({
 
         try {
             const { removeBackground } = await import('@bg0/browser');
-            const result = await removeBackground(file, {
+            if (controller.signal.aborted || !isMountedRef.current) return;
+
+            setProgress({ label: 'Đang chuẩn hóa kích thước ảnh...', percent: 2 });
+            const processingFile = await prepareBackgroundRemovalFile(file);
+            if (controller.signal.aborted || !isMountedRef.current) return;
+
+            const result = await removeBackground(processingFile, {
                 model: 'lite',
                 quality: 'quality',
                 signal: controller.signal,
                 onProgress: ({ stage, progress: currentProgress }) => {
+                    if (controller.signal.aborted || !isMountedRef.current) return;
                     const normalizedProgress = currentProgress <= 1
                         ? currentProgress * 100
                         : currentProgress;
@@ -619,10 +746,10 @@ export default function ProductPosterGenerator({
                 },
             });
 
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted || !isMountedRef.current) return;
             setProgress({ label: 'Đang căn vùng sản phẩm...', percent: 96 });
             const normalizedCutout = await cropBlobToAlphaBounds(result.blob);
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted || !isMountedRef.current) return;
 
             const nextUrl = URL.createObjectURL(normalizedCutout);
             revokeUrl(cutoutPreviewUrlRef.current);
@@ -636,7 +763,12 @@ export default function ProductPosterGenerator({
                 error instanceof Error ? error.message : 'Không thể tách nền ảnh. Vui lòng thử lại.',
             );
         } finally {
-            if (!controller.signal.aborted) setIsRemovingBackground(false);
+            if (abortControllerRef.current === controller) {
+                abortControllerRef.current = null;
+                if (!controller.signal.aborted && isMountedRef.current) {
+                    setIsRemovingBackground(false);
+                }
+            }
         }
     }, [invalidateExport, revokeUrl]);
 
@@ -762,12 +894,16 @@ export default function ProductPosterGenerator({
         };
     }, [layout]);
 
-    const handleStagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+    const applyStagePointerPosition = useCallback((
+        pointerId: number,
+        clientX: number,
+        clientY: number,
+    ): void => {
         const action = pointerActionRef.current;
-        if (!action || action.pointerId !== event.pointerId) return;
+        if (!action || action.pointerId !== pointerId) return;
 
-        const deltaX = ((event.clientX - action.startClientX) / action.stageWidth) * 100;
-        const deltaY = ((event.clientY - action.startClientY) / action.stageHeight) * 100;
+        const deltaX = ((clientX - action.startClientX) / action.stageWidth) * 100;
+        const deltaY = ((clientY - action.startClientY) / action.stageHeight) * 100;
 
         setLayout((current) => {
             const initial = action.initial;
@@ -775,8 +911,6 @@ export default function ProductPosterGenerator({
 
             if (action.mode === 'move') {
                 if (action.layerId === 'product') {
-                    // Keep a small part of the product layer reachable while allowing
-                    // the visible product itself to extend beyond every poster edge.
                     nextLayer.x = clamp(
                         initial.x + deltaX,
                         PRODUCT_LAYER_MIN_VISIBLE_PERCENT - initial.width,
@@ -792,8 +926,6 @@ export default function ProductPosterGenerator({
                     nextLayer.y = clamp(initial.y + deltaY, 0, 100 - initial.height);
                 }
             } else if (action.layerId === 'product') {
-                // Product resize is uniform and can grow to 7x the default layer.
-                // The canvas itself clips overflow to the final 1:1 poster boundary.
                 const widthDeltaRatio = deltaX / Math.max(initial.width, 1);
                 const heightDeltaRatio = deltaY / Math.max(initial.height, 1);
                 const dominantDeltaRatio = Math.abs(widthDeltaRatio) >= Math.abs(heightDeltaRatio)
@@ -838,20 +970,54 @@ export default function ProductPosterGenerator({
         invalidateExport();
     }, [invalidateExport]);
 
+    const handleStagePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
+        const action = pointerActionRef.current;
+        if (!action || action.pointerId !== event.pointerId) return;
+
+        pendingPointerPositionRef.current = {
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+        };
+
+        if (pointerFrameRef.current !== null) return;
+        pointerFrameRef.current = window.requestAnimationFrame(() => {
+            pointerFrameRef.current = null;
+            const pending = pendingPointerPositionRef.current;
+            pendingPointerPositionRef.current = null;
+            if (pending) {
+                applyStagePointerPosition(
+                    pending.pointerId,
+                    pending.clientX,
+                    pending.clientY,
+                );
+            }
+        });
+    }, [applyStagePointerPosition]);
+
     const handleStagePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
         if (pointerActionRef.current?.pointerId !== event.pointerId) return;
+
+        if (pointerFrameRef.current !== null) {
+            window.cancelAnimationFrame(pointerFrameRef.current);
+            pointerFrameRef.current = null;
+        }
+        pendingPointerPositionRef.current = null;
+        applyStagePointerPosition(event.pointerId, event.clientX, event.clientY);
         pointerActionRef.current = null;
-    }, []);
+    }, [applyStagePointerPosition]);
 
     const handleGeneratePoster = useCallback(async (): Promise<void> => {
         if (
             !cutoutBlob ||
             !productName.trim() ||
             !price.trim() ||
-            isGeneratingPoster ||
+            isGeneratingPosterRef.current ||
             isRemovingBackground
         ) return;
 
+        isGeneratingPosterRef.current = true;
+        const generationRevision = posterRevisionRef.current;
         setIsGeneratingPoster(true);
         setErrorMessage('');
 
@@ -864,19 +1030,31 @@ export default function ProductPosterGenerator({
                 layout,
                 titleAlignment,
             );
+            if (
+                !isMountedRef.current ||
+                generationRevision !== posterRevisionRef.current
+            ) return;
+
             const nextUrl = URL.createObjectURL(posterBlob);
             revokeUrl(posterPreviewUrlRef.current);
             posterPreviewUrlRef.current = nextUrl;
             setPosterPreviewUrl(nextUrl);
         } catch (error) {
-            setErrorMessage(error instanceof Error ? error.message : 'Không thể tạo poster.');
+            if (
+                isMountedRef.current &&
+                generationRevision === posterRevisionRef.current
+            ) {
+                setErrorMessage(
+                    error instanceof Error ? error.message : 'Không thể tạo poster.',
+                );
+            }
         } finally {
-            setIsGeneratingPoster(false);
+            isGeneratingPosterRef.current = false;
+            if (isMountedRef.current) setIsGeneratingPoster(false);
         }
     }, [
         backgroundBlob,
         cutoutBlob,
-        isGeneratingPoster,
         isRemovingBackground,
         layout,
         price,
@@ -976,12 +1154,35 @@ export default function ProductPosterGenerator({
     }, [onClose]);
 
     useEffect(() => {
+        isMountedRef.current = true;
+
         return () => {
+            isMountedRef.current = false;
+            posterRevisionRef.current += 1;
             abortControllerRef.current?.abort();
+            abortControllerRef.current = null;
+
+            if (pointerFrameRef.current !== null) {
+                window.cancelAnimationFrame(pointerFrameRef.current);
+                pointerFrameRef.current = null;
+            }
+            pendingPointerPositionRef.current = null;
+            pointerActionRef.current = null;
+
             revokeUrl(sourcePreviewUrlRef.current);
             revokeUrl(cutoutPreviewUrlRef.current);
             revokeUrl(backgroundPreviewUrlRef.current);
             revokeUrl(posterPreviewUrlRef.current);
+            sourcePreviewUrlRef.current = '';
+            cutoutPreviewUrlRef.current = '';
+            backgroundPreviewUrlRef.current = '';
+            posterPreviewUrlRef.current = '';
+
+            if (previewTextMeasureCanvasRef.current) {
+                previewTextMeasureCanvasRef.current.width = 0;
+                previewTextMeasureCanvasRef.current.height = 0;
+                previewTextMeasureCanvasRef.current = null;
+            }
         };
     }, [revokeUrl]);
 
@@ -1007,7 +1208,11 @@ export default function ProductPosterGenerator({
         kind: 'title' | 'price',
     ): string[] => {
         if (typeof document === 'undefined') return [value];
-        const measureCanvas = document.createElement('canvas');
+        let measureCanvas = previewTextMeasureCanvasRef.current;
+        if (!measureCanvas) {
+            measureCanvas = document.createElement('canvas');
+            previewTextMeasureCanvasRef.current = measureCanvas;
+        }
         const context = measureCanvas.getContext('2d');
         if (!context) return [value];
 
@@ -1234,7 +1439,7 @@ export default function ProductPosterGenerator({
                                 </div>
                                 {backgroundPreviewUrl ? (
                                     <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 p-1.5">
-                                        <img src={backgroundPreviewUrl} alt="Ảnh nền đã tải" className="h-8 w-8 shrink-0 rounded-md object-cover" />
+                                        <img src={backgroundPreviewUrl} alt="Ảnh nền đã tải" decoding="async" className="h-8 w-8 shrink-0 rounded-md object-cover" />
                                         <span className="min-w-0 flex-1 truncate text-[10px] text-slate-400">{backgroundBlob?.name}</span>
                                         <button
                                             type="button"
@@ -1260,14 +1465,14 @@ export default function ProductPosterGenerator({
                                     <div className="min-w-0 rounded-lg border border-white/10 bg-black/20 p-1.5">
                                         <p className="mb-1 text-[8px] font-bold text-slate-500">ẢNH GỐC</p>
                                         <div className="flex h-12 items-center justify-center overflow-hidden rounded-md bg-white/[0.04]">
-                                            <img src={sourcePreviewUrl} alt="Ảnh gốc sản phẩm" className="h-full w-full object-contain" />
+                                            <img src={sourcePreviewUrl} alt="Ảnh gốc sản phẩm" decoding="async" className="h-full w-full object-contain" />
                                         </div>
                                     </div>
                                     <div className="min-w-0 rounded-lg border border-white/10 bg-black/20 p-1.5">
                                         <p className="mb-1 text-[8px] font-bold text-slate-500">ĐÃ TÁCH NỀN</p>
                                         <div className="flex h-12 items-center justify-center overflow-hidden rounded-md bg-[linear-gradient(45deg,#1e293b_25%,transparent_25%,transparent_75%,#1e293b_75%),linear-gradient(45deg,#1e293b_25%,transparent_25%,transparent_75%,#1e293b_75%)] bg-[position:0_0,8px_8px] bg-[size:16px_16px]">
                                             {cutoutPreviewUrl ? (
-                                                <img src={cutoutPreviewUrl} alt="Ảnh sản phẩm đã tách nền" className="h-full w-full object-contain" />
+                                                <img src={cutoutPreviewUrl} alt="Ảnh sản phẩm đã tách nền" decoding="async" className="h-full w-full object-contain" />
                                             ) : isRemovingBackground ? (
                                                 <FiLoader className="h-5 w-5 animate-spin text-cyan-200" aria-hidden="true" />
                                             ) : (
@@ -1343,7 +1548,7 @@ export default function ProductPosterGenerator({
                                     onClick={() => setSelectedLayer('product')}
                                 >
                                     {useUploadedBackground && backgroundPreviewUrl ? (
-                                        <img src={backgroundPreviewUrl} alt="Nền poster" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover" />
+                                        <img src={backgroundPreviewUrl} alt="Nền poster" draggable={false} decoding="async" className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover" />
                                     ) : (
                                         <>
                                             <div className="pointer-events-none absolute inset-0 bg-white" />
@@ -1374,7 +1579,7 @@ export default function ProductPosterGenerator({
                                     {renderLayerControls(
                                         'product',
                                         cutoutPreviewUrl ? (
-                                            <img src={cutoutPreviewUrl} alt="Sản phẩm đã tách nền" draggable={false} className="pointer-events-none h-full w-full select-none object-contain drop-shadow-[0_20px_18px_rgba(20,35,50,0.20)]" />
+                                            <img src={cutoutPreviewUrl} alt="Sản phẩm đã tách nền" draggable={false} decoding="async" className="pointer-events-none h-full w-full select-none object-contain drop-shadow-[0_20px_18px_rgba(20,35,50,0.20)]" />
                                         ) : (
                                             <div className="pointer-events-none flex h-full w-full flex-col items-center justify-center gap-2 border border-dashed border-slate-300/70 bg-white/35 text-slate-500">
                                                 <FiImage className="h-[10%] w-[10%]" aria-hidden="true" />

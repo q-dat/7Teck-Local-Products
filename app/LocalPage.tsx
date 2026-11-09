@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -56,13 +58,16 @@ import {
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import ProductPosterGenerator from "@/components/ProductPosterGenerator";
 import {
   isApiGuardClientLocked,
   registerApiGuardRequest,
   setApiGuardClientLocked,
   subscribeApiGuardEvents,
 } from "@/lib/api-guard/client";
+
+const ProductPosterGenerator = lazy(
+  () => import("@/components/ProductPosterGenerator"),
+);
 
 type ProductImage = {
   id: string;
@@ -25048,7 +25053,21 @@ export default function LocalPage({
       ) : null}
 
       {isPosterGeneratorOpen ? (
-        <ProductPosterGenerator onClose={() => setIsPosterGeneratorOpen(false)} />
+        <Suspense
+          fallback={
+            <div
+              className="fixed inset-0 z-[2147483010] flex h-dvh w-full items-center justify-center bg-black/80 p-4 text-sm font-semibold text-white"
+              role="status"
+              aria-live="polite"
+            >
+              Đang tải công cụ Poster...
+            </div>
+          }
+        >
+          <ProductPosterGenerator
+            onClose={() => setIsPosterGeneratorOpen(false)}
+          />
+        </Suspense>
       ) : null}
 
       {pendingConfirm ? (
