@@ -3468,8 +3468,14 @@ const normalizeSelectedFacebookGroupIds = (
 
 const extractSocialTagText = (value: string): string[] => {
   const matches = value.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+  const uniqueTags = new Map<string, string>();
 
-  return Array.from(new Set(matches));
+  matches.forEach((tag) => {
+    const normalizedTag = tag.toLocaleLowerCase("vi-VN");
+    if (!uniqueTags.has(normalizedTag)) uniqueTags.set(normalizedTag, tag);
+  });
+
+  return Array.from(uniqueTags.values());
 };
 
 const randomizeSocialTagText = (value: string): string => {
@@ -3487,20 +3493,7 @@ const randomizeSocialTagText = (value: string): string => {
     ];
   }
 
-  if (shuffledTags.length <= 3) {
-    return shuffledTags.join(" ");
-  }
-
-  const minimumTagCount = 3;
-  const maximumRemovableCount = shuffledTags.length - minimumTagCount;
-  const removableCount =
-    1 + Math.floor(Math.random() * maximumRemovableCount);
-  const keepCount = Math.max(
-    minimumTagCount,
-    shuffledTags.length - removableCount,
-  );
-
-  return shuffledTags.slice(0, keepCount).join(" ");
+  return shuffledTags.slice(0, 5).join(" ");
 };
 
 const removeSocialTags = (value: string): string => {
@@ -4294,6 +4287,23 @@ const appendContactTextWithoutTransformingContent = (
   return `${value}\n\n${cleanContactText}`;
 };
 
+const appendRandomSocialTagsForCopy = (
+  value: string,
+  includeSocialTags: boolean,
+  socialTagSource = value,
+): string => {
+  if (!includeSocialTags) return value;
+
+  const socialTagText = randomizeSocialTagText(socialTagSource);
+  if (!socialTagText) return value;
+
+  const cleanValue = removeSocialTags(value);
+  const sections = cleanValue ? [cleanValue] : [];
+  sections.push(socialTagText);
+
+  return sections.join("\n\n");
+};
+
 const composeCopyText = (
   value: string,
   contactText: string,
@@ -4324,25 +4334,27 @@ const composeCopyText = (
   return sections.join("\n\n");
 };
 
+const buildPostTextSource = (
+  product: LocalProduct,
+  commonDescription: string,
+  contactText: string,
+): string => {
+  const description = product.description.trim() || commonDescription.trim();
+  return appendContactTextWithoutTransformingContent(description, contactText);
+};
+
 const buildPostText = (
   product: LocalProduct,
   commonDescription: string,
   contactText: string,
   includeSocialTags: boolean,
 ): string => {
-  const description = product.description.trim() || commonDescription.trim();
-
-  if (isPropertyContentType(product.contentType)) {
-    return composeCopyText(
-      description,
-      contactText,
-      includeSocialTags,
-    );
-  }
-
-  // The product description already contains the actual post body. Do not prepend
-  // admin-only metadata (product name, raw price, category) to COPY_POST.cmd.
-  return composeCopyText(description, contactText, includeSocialTags);
+  // Tags are randomized here, at the moment the Post text is requested for copying.
+  return composeCopyText(
+    buildPostTextSource(product, commonDescription, contactText),
+    "",
+    includeSocialTags,
+  );
 };
 
 const normalizeCommentPrice = (priceText: string): string => {
@@ -5994,7 +6006,10 @@ const encodePowerShellCommand = (command: string): string => {
   return encodeBytesAsBase64(bytes);
 };
 
-const createCopyPostCommand = (postText: string): string => {
+const createCopyPostCommand = (
+  postText: string,
+  includeSocialTags: boolean,
+): string => {
   const encodedPostText = encodeBytesAsBase64(new TextEncoder().encode(postText));
   const payloadLines = encodedPostText.match(/.{1,76}/gu) ?? [""];
   const powerShellScript = [
@@ -6009,7 +6024,23 @@ const createCopyPostCommand = (postText: string): string => {
     "$payloadLines = $lines[($start + 1)..($end - 1)]",
     "$postBytes = [System.Convert]::FromBase64String(($payloadLines -join ''))",
     "$postText = [System.Text.Encoding]::UTF8.GetString($postBytes)",
-    "Set-Clipboard -Value $postText -ErrorAction Stop",
+    "$includeSocialTags = " + (includeSocialTags ? "$true" : "$false"),
+    "$tagList = @()",
+    "if ($includeSocialTags) {",
+    "  foreach ($match in [regex]::Matches($postText, '#[\\p{L}\\p{N}_]+')) {",
+    "    if ($tagList -notcontains $match.Value) { $tagList += $match.Value }",
+    "  }",
+    "}",
+    "$cleanPostText = [regex]::Replace($postText, '#[\\p{L}\\p{N}_]+', '').Trim()",
+    "$randomTags = @()",
+    "if ($tagList.Count -gt 0) {",
+    "  $randomTags = @($tagList | Get-Random -Count ([Math]::Min(5, $tagList.Count)))",
+    "}",
+    "$sections = @()",
+    "if (-not [string]::IsNullOrWhiteSpace($cleanPostText)) { $sections += $cleanPostText }",
+    "if ($randomTags.Count -gt 0) { $sections += ($randomTags -join ' ') }",
+    "$copyText = [string]::Join([Environment]::NewLine + [Environment]::NewLine, $sections)",
+    "Set-Clipboard -Value $copyText -ErrorAction Stop",
     "Write-Output 'Product post copied to clipboard.'",
     "Start-Sleep -Milliseconds 700",
     "} catch {",
@@ -6082,6 +6113,7 @@ const saveProductImagesIntoFolders = async (
   products: LocalProduct[],
   rootDirectoryHandle: LocalFileSystemDirectoryHandle,
   postTextByProductId: ReadonlyMap<string, string>,
+  includeSocialTags: boolean,
 ): Promise<ProductFolderImageSaveResult> => {
   const reservedFolderNames = new Set<string>();
   const completedProductIds: string[] = [];
@@ -6187,7 +6219,7 @@ const saveProductImagesIntoFolders = async (
         throw new Error("Không tìm thấy nội dung Post của sản phẩm");
       }
 
-      const copyPostCommand = createCopyPostCommand(postText);
+      const copyPostCommand = createCopyPostCommand(postText, includeSocialTags);
       const copyPostHandle = await productDirectoryHandle.getFileHandle(
         "COPY_POST.cmd",
         { create: true },
@@ -6505,11 +6537,10 @@ const buildRandomSchedule = (
 
       const description =
         candidate.description.trim() || commonDescription.trim();
-      const postText = buildPostText(
+      const postText = buildPostTextSource(
         candidate,
         commonDescription,
         contactText,
-        includeSocialTags,
       );
 
       dailyUsedProductIds.add(candidate.id);
@@ -13244,18 +13275,24 @@ export default function LocalPage({
     const contactText = contactTextOverride ?? activeContactText;
 
     if (autoCopyShareMode === "comment") {
+      const commentBody = source.commentTextIsVerbatim
+        ? appendContactTextWithoutTransformingContent(
+          source.commentText,
+          contactText,
+        )
+        : composeCopyText(
+          source.commentText,
+          contactText,
+          false,
+        );
+
       return {
         label: "Cmt",
-        text: source.commentTextIsVerbatim
-          ? appendContactTextWithoutTransformingContent(
-            source.commentText,
-            contactText,
-          )
-          : composeCopyText(
-            source.commentText,
-            contactText,
-            false,
-          ),
+        text: appendRandomSocialTagsForCopy(
+          commentBody,
+          includeSocialTags,
+          [source.postText, source.commentText].join("\n"),
+        ),
       };
     }
 
@@ -14409,10 +14446,19 @@ export default function LocalPage({
         shareContactText,
         includeSocialTags,
       )
-      : composeCopyText(
-        request.commentText,
-        shareContactText,
-        false,
+      : appendRandomSocialTagsForCopy(
+        request.commentTextIsVerbatim
+          ? appendContactTextWithoutTransformingContent(
+            request.commentText,
+            shareContactText,
+          )
+          : composeCopyText(
+            request.commentText,
+            shareContactText,
+            false,
+          ),
+        includeSocialTags,
+        [request.postText, request.commentText].join("\n"),
       );
   };
 
@@ -15145,11 +15191,10 @@ export default function LocalPage({
       products.map(
         (product): [string, string] => [
           product.id,
-          buildPostText(
+          buildPostTextSource(
             product,
             settings.commonDescription,
             activeContactText,
-            includeSocialTags,
           ),
         ],
       ),
@@ -15178,6 +15223,7 @@ export default function LocalPage({
           products,
           directoryHandle,
           postTextByProductId,
+          includeSocialTags,
         );
         if (result.completedProductIds.length > 0) {
           markProductImagesDownloaded(result.completedProductIds);
@@ -15247,6 +15293,7 @@ export default function LocalPage({
             remainingProducts,
             directoryHandle,
             postTextByProductId,
+            includeSocialTags,
           );
           if (result.completedProductIds.length > 0) {
             markProductImagesDownloaded(result.completedProductIds);
@@ -20087,13 +20134,17 @@ export default function LocalPage({
                               void handleCopyField(
                                 `cmt-${product.id}`,
                                 "cmt",
-                                buildCommentContentText(
-                                  product.name,
-                                  descriptionPreview,
-                                  product.priceText,
-                                  activeContactText,
-                                  product.contentType,
-                                  product.realEstateComment,
+                                appendRandomSocialTagsForCopy(
+                                  buildCommentContentText(
+                                    product.name,
+                                    descriptionPreview,
+                                    product.priceText,
+                                    activeContactText,
+                                    product.contentType,
+                                    product.realEstateComment,
+                                  ),
+                                  includeSocialTags,
+                                  [descriptionPreview, product.realEstateComment].join("\n"),
                                 ),
                               );
                             }}
@@ -24432,7 +24483,12 @@ export default function LocalPage({
                             void handleCopyField(
                               `slot-post-${selectedAssignedSlot.key}`,
                               "bài viết",
-                              selectedAssignedSlot.postText,
+                              composeCopyText(
+                                selectedAssignedSlot.postText,
+                                "",
+                                includeSocialTags,
+                                selectedAssignedSlot.description,
+                              ),
                             )
                           }
                         >
@@ -24474,8 +24530,12 @@ export default function LocalPage({
                       </div>
 
                       <pre className="mt-2 max-h-[50dvh] overflow-y-auto whitespace-pre-wrap rounded-md border border-white/10 bg-slate-950 p-2 text-xs leading-6 text-slate-200">
-                        {selectedAssignedSlot.postText ||
-                          "Chưa có nội dung bài viết"}
+                        {composeCopyText(
+                          selectedAssignedSlot.postText,
+                          "",
+                          includeSocialTags,
+                          selectedAssignedSlot.description,
+                        ) || "Chưa có nội dung bài viết"}
                       </pre>
                     </article>
                   </section>
