@@ -1,6 +1,16 @@
 export type ProductContentType =
   "technology" | "realEstate" | "rental" | "propertyRental";
 
+export type ProductPosterRecord = {
+  id: string;
+  fileName: string;
+  posterName: string;
+  url: string;
+  publicId: string;
+  version: number;
+  createdAt: string;
+};
+
 export type CloudinaryProductImage = {
   id?: string;
   name?: string;
@@ -22,10 +32,12 @@ export type ProductRecord = {
   price: number;
   priceText: string;
   category: string;
+  categoryGroup: string;
   contentType: ProductContentType;
   realEstateComment: string;
   images: CloudinaryProductImage[];
   internalImages: CloudinaryProductImage[];
+  posters: ProductPosterRecord[];
   isDone: boolean;
   doneAt: string;
   createdAt: string;
