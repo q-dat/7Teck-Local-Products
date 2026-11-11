@@ -6113,6 +6113,7 @@ const saveProductImagesIntoFolders = async (
   products: LocalProduct[],
   rootDirectoryHandle: LocalFileSystemDirectoryHandle,
   postTextByProductId: ReadonlyMap<string, string>,
+  includeSocialTags: boolean,
 ): Promise<ProductFolderImageSaveResult> => {
   const reservedFolderNames = new Set<string>();
   const completedProductIds: string[] = [];
@@ -15222,6 +15223,7 @@ export default function LocalPage({
           products,
           directoryHandle,
           postTextByProductId,
+          includeSocialTags,
         );
         if (result.completedProductIds.length > 0) {
           markProductImagesDownloaded(result.completedProductIds);
@@ -15291,6 +15293,7 @@ export default function LocalPage({
             remainingProducts,
             directoryHandle,
             postTextByProductId,
+            includeSocialTags,
           );
           if (result.completedProductIds.length > 0) {
             markProductImagesDownloaded(result.completedProductIds);
