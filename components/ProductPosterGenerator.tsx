@@ -27,6 +27,11 @@ import {
 
 type ProductPosterGeneratorProps = {
     onClose: () => void;
+    initialProductName?: string;
+    initialPrice?: string;
+    initialImageUrl?: string;
+    initialImageName?: string;
+    onSavePoster?: (posterBlob: Blob, fileName: string, posterName: string) => Promise<void>;
 };
 
 type RemovalProgress = {
@@ -655,6 +660,11 @@ const createClipboardImageFile = (
 
 export default function ProductPosterGenerator({
     onClose,
+    initialProductName,
+    initialPrice,
+    initialImageUrl,
+    initialImageName,
+    onSavePoster,
 }: ProductPosterGeneratorProps) {
     const productInputRef = useRef<HTMLInputElement | null>(null);
     const backgroundInputRef = useRef<HTMLInputElement | null>(null);
@@ -663,6 +673,7 @@ export default function ProductPosterGenerator({
     const cutoutPreviewUrlRef = useRef<string>('');
     const backgroundPreviewUrlRef = useRef<string>('');
     const posterPreviewUrlRef = useRef<string>('');
+    const posterBlobRef = useRef<Blob | null>(null);
     const pointerActionRef = useRef<PosterPointerAction | null>(null);
     const pendingPointerPositionRef = useRef<{
         pointerId: number;
@@ -676,9 +687,10 @@ export default function ProductPosterGenerator({
     const isMountedRef = useRef<boolean>(true);
     const stageRef = useRef<HTMLDivElement | null>(null);
 
-    const [productName, setProductName] = useState<string>('');
+    const [productName, setProductName] = useState<string>(initialProductName ?? '');
     const [titleAlignment, setTitleAlignment] = useState<TextAlignment>('center');
-    const [price, setPrice] = useState<string>('');
+    const [price, setPrice] = useState<string>(initialPrice ?? '');
+    const [isSavingPoster, setIsSavingPoster] = useState<boolean>(false);
     const [sourceFile, setSourceFile] = useState<File | null>(null);
     const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string>('');
     const [cutoutBlob, setCutoutBlob] = useState<Blob | null>(null);
@@ -700,6 +712,7 @@ export default function ProductPosterGenerator({
 
     const invalidateExport = useCallback((): void => {
         posterRevisionRef.current += 1;
+        posterBlobRef.current = null;
         const currentUrl = posterPreviewUrlRef.current;
         if (!currentUrl) return;
 
@@ -792,6 +805,46 @@ export default function ProductPosterGenerator({
         setErrorMessage('');
         void processBackground(file);
     }, [processBackground, revokeUrl]);
+
+    useEffect(() => {
+        if (!initialImageUrl) return;
+
+        let isActive = true;
+
+        const loadInitialImage = async (): Promise<void> => {
+            try {
+                const response = await fetch(initialImageUrl, { cache: 'force-cache' });
+                if (!response.ok) throw new Error('Không thể tải ảnh sản phẩm.');
+
+                const blob = await response.blob();
+                const extension = initialImageName?.split('.').pop()?.toLowerCase();
+                const detectedType = blob.type.toLowerCase();
+                const imageType = SUPPORTED_IMAGE_TYPES.has(detectedType)
+                    ? detectedType
+                    : extension === 'png'
+                        ? 'image/png'
+                        : extension === 'webp'
+                            ? 'image/webp'
+                            : 'image/jpeg';
+                const file = new File(
+                    [blob],
+                    initialImageName || 'product-image.jpg',
+                    { type: imageType },
+                );
+
+                if (isActive) applyProductFile(file);
+            } catch {
+                if (isActive) {
+                    setErrorMessage('Không tự tải được ảnh từ máy chủ. Hãy chọn ảnh sản phẩm thủ công.');
+                }
+            }
+        };
+
+        void loadInitialImage();
+        return () => {
+            isActive = false;
+        };
+    }, [applyProductFile, initialImageName, initialImageUrl]);
 
     const handleProductFileChange = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
         const file = event.target.files?.[0] ?? null;
@@ -1035,6 +1088,7 @@ export default function ProductPosterGenerator({
                 generationRevision !== posterRevisionRef.current
             ) return;
 
+            posterBlobRef.current = posterBlob;
             const nextUrl = URL.createObjectURL(posterBlob);
             revokeUrl(posterPreviewUrlRef.current);
             posterPreviewUrlRef.current = nextUrl;
@@ -1073,6 +1127,29 @@ export default function ProductPosterGenerator({
         anchor.click();
         anchor.remove();
     }, [posterPreviewUrl, productName]);
+
+    const handleSavePoster = useCallback(async (): Promise<void> => {
+        const posterBlob = posterBlobRef.current;
+        if (!posterBlob || !onSavePoster || !productName.trim() || isSavingPoster) return;
+
+        setIsSavingPoster(true);
+        setErrorMessage('');
+
+        try {
+            await onSavePoster(
+                posterBlob,
+                createSafeFilename(productName),
+                productName.trim(),
+            );
+            onClose();
+        } catch (error) {
+            setErrorMessage(
+                error instanceof Error ? error.message : 'Không thể lưu poster vào sản phẩm.',
+            );
+        } finally {
+            if (isMountedRef.current) setIsSavingPoster(false);
+        }
+    }, [isSavingPoster, onClose, onSavePoster, productName]);
 
     const updateProductName = (value: string): void => {
         setProductName(value);
@@ -1177,6 +1254,7 @@ export default function ProductPosterGenerator({
             cutoutPreviewUrlRef.current = '';
             backgroundPreviewUrlRef.current = '';
             posterPreviewUrlRef.current = '';
+            posterBlobRef.current = null;
 
             if (previewTextMeasureCanvasRef.current) {
                 previewTextMeasureCanvasRef.current.width = 0;
@@ -1685,6 +1763,16 @@ export default function ProductPosterGenerator({
                             <footer className="flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
                                 <span className="text-[10px] text-slate-500">PNG · 1600 × 1600 · Tỷ lệ 1:1</span>
                                 <div className="flex flex-wrap items-center gap-2">
+                                    {posterPreviewUrl && onSavePoster ? (
+                                        <button
+                                            type="button"
+                                            disabled={isSavingPoster}
+                                            onClick={() => void handleSavePoster()}
+                                            className="flex min-h-10 items-center justify-center rounded-lg bg-emerald-300 px-4 py-2 text-xs font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-45"
+                                        >
+                                            {isSavingPoster ? 'Đang lưu...' : 'Lưu vào sản phẩm'}
+                                        </button>
+                                    ) : null}
                                     {posterPreviewUrl ? (
                                         <button
                                             type="button"
