@@ -3468,8 +3468,14 @@ const normalizeSelectedFacebookGroupIds = (
 
 const extractSocialTagText = (value: string): string[] => {
   const matches = value.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+  const uniqueTags = new Map<string, string>();
 
-  return Array.from(new Set(matches));
+  matches.forEach((tag) => {
+    const normalizedTag = tag.toLocaleLowerCase("vi-VN");
+    if (!uniqueTags.has(normalizedTag)) uniqueTags.set(normalizedTag, tag);
+  });
+
+  return Array.from(uniqueTags.values());
 };
 
 const randomizeSocialTagText = (value: string): string => {
@@ -6000,7 +6006,10 @@ const encodePowerShellCommand = (command: string): string => {
   return encodeBytesAsBase64(bytes);
 };
 
-const createCopyPostCommand = (postText: string): string => {
+const createCopyPostCommand = (
+  postText: string,
+  includeSocialTags: boolean,
+): string => {
   const encodedPostText = encodeBytesAsBase64(new TextEncoder().encode(postText));
   const payloadLines = encodedPostText.match(/.{1,76}/gu) ?? [""];
   const powerShellScript = [
@@ -6015,9 +6024,12 @@ const createCopyPostCommand = (postText: string): string => {
     "$payloadLines = $lines[($start + 1)..($end - 1)]",
     "$postBytes = [System.Convert]::FromBase64String(($payloadLines -join ''))",
     "$postText = [System.Text.Encoding]::UTF8.GetString($postBytes)",
+    "$includeSocialTags = " + (includeSocialTags ? "$true" : "$false"),
     "$tagList = @()",
-    "foreach ($match in [regex]::Matches($postText, '#[\\p{L}\\p{N}_]+')) {",
-    "  if ($tagList -notcontains $match.Value) { $tagList += $match.Value }",
+    "if ($includeSocialTags) {",
+    "  foreach ($match in [regex]::Matches($postText, '#[\\p{L}\\p{N}_]+')) {",
+    "    if ($tagList -notcontains $match.Value) { $tagList += $match.Value }",
+    "  }",
     "}",
     "$cleanPostText = [regex]::Replace($postText, '#[\\p{L}\\p{N}_]+', '').Trim()",
     "$randomTags = @()",
@@ -6206,7 +6218,7 @@ const saveProductImagesIntoFolders = async (
         throw new Error("Không tìm thấy nội dung Post của sản phẩm");
       }
 
-      const copyPostCommand = createCopyPostCommand(postText);
+      const copyPostCommand = createCopyPostCommand(postText, includeSocialTags);
       const copyPostHandle = await productDirectoryHandle.getFileHandle(
         "COPY_POST.cmd",
         { create: true },
