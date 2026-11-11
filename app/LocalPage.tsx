@@ -4012,9 +4012,7 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
       ? record.realEstateComment
       : "";
   const isDone =
-    typeof record.isDone === "boolean"
-      ? record.isDone
-      : hasDoneProductPrefix(record.name);
+    typeof record.isDone === "boolean" ? record.isDone : false;
 
   return {
     id: record.id,
