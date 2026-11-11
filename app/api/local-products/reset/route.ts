@@ -14,7 +14,7 @@ export async function DELETE() {
       async (session) => {
         const currentProducts = await ProductModel.find(
           {},
-          { _id: 0, images: 1, internalImages: 1 },
+          { _id: 0, images: 1, internalImages: 1, posters: 1 },
         )
           .session(session)
           .lean();

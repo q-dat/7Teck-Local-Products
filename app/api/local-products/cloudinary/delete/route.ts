@@ -21,6 +21,7 @@ export async function DELETE(request: Request) {
       $or: [
         { "images.publicId": { $in: publicIds } },
         { "internalImages.publicId": { $in: publicIds } },
+        { "posters.publicId": { $in: publicIds } },
       ],
     });
 

@@ -57,6 +57,7 @@ import {
   FiChevronRight,
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
+import type { ProductPosterRecord } from "@/types/local-products";
 import "react-toastify/dist/ReactToastify.css";
 import {
   isApiGuardClientLocked,
@@ -67,6 +68,9 @@ import {
 
 const ProductPosterGenerator = lazy(
   () => import("@/components/ProductPosterGenerator"),
+);
+const ProductPosterManagerModal = lazy(
+  () => import("@/components/ProductPosterManagerModal"),
 );
 
 type ProductImage = {
@@ -208,10 +212,12 @@ type LocalProduct = {
   price: number;
   priceText: string;
   category: string;
+  categoryGroup: string;
   contentType: ProductContentType;
   realEstateComment: string;
   images: ProductImage[];
   internalImages: ProductImage[];
+  posters: ProductPosterRecord[];
   isDone: boolean;
   doneAt: string;
   createdAt: string;
@@ -4006,9 +4012,7 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
       ? record.realEstateComment
       : "";
   const isDone =
-    typeof record.isDone === "boolean"
-      ? record.isDone
-      : hasDoneProductPrefix(record.name);
+    typeof record.isDone === "boolean" ? record.isDone : false;
 
   return {
     id: record.id,
@@ -4022,10 +4026,34 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
         : parsePriceNumber(priceText, contentType),
     priceText,
     category,
+    categoryGroup:
+      typeof record.categoryGroup === "string" ? record.categoryGroup : "",
     contentType,
     realEstateComment,
     images: normalizeImages(record.images),
     internalImages: normalizeImages(record.internalImages),
+    posters: Array.isArray(record.posters)
+      ? record.posters.flatMap((poster): ProductPosterRecord[] => {
+          if (typeof poster !== "object" || poster === null) return [];
+          const item = poster as Record<string, unknown>;
+          if (
+            typeof item.id !== "string" ||
+            typeof item.fileName !== "string" ||
+            typeof item.posterName !== "string" ||
+            typeof item.url !== "string" ||
+            typeof item.publicId !== "string"
+          ) return [];
+          return [{
+            id: item.id,
+            fileName: item.fileName,
+            posterName: item.posterName,
+            url: item.url,
+            publicId: item.publicId,
+            version: typeof item.version === "number" ? item.version : 0,
+            createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
+          }];
+        })
+      : [],
     isDone,
     doneAt: typeof record.doneAt === "string" ? record.doneAt : "",
     createdAt:
@@ -6761,6 +6789,7 @@ export default function LocalPage({
     useState<DownloadRequest | null>(null);
   const [isPostQueueOpen, setIsPostQueueOpen] = useState<boolean>(false);
   const [isPosterGeneratorOpen, setIsPosterGeneratorOpen] = useState<boolean>(false);
+  const [isPosterManagerOpen, setIsPosterManagerOpen] = useState<boolean>(false);
   const [postQueueStage, setPostQueueStage] = useState<"categories" | "products" | "complete">("categories");
   const [postQueueSelectedCategories, setPostQueueSelectedCategories] = useState<string[]>([]);
   const [postQueueProducts, setPostQueueProducts] = useState<LocalProduct[]>([]);
@@ -10809,6 +10838,87 @@ export default function LocalPage({
     return nextProduct;
   };
 
+  const handleSavePosterCategoryGroup = async (
+    productId: string,
+    categoryGroup: string,
+  ): Promise<void> => {
+    if (!requestWriteAccess()) {
+      setIsPosterManagerOpen(false);
+      throw new Error("Hãy mở khóa quyền ghi dữ liệu rồi thử lưu lại.");
+    }
+
+    const currentProduct = productsRef.current.find((product) => product.id === productId);
+    if (!currentProduct) throw new Error("Không tìm thấy sản phẩm cần cập nhật.");
+
+    const nextProduct: LocalProduct = {
+      ...currentProduct,
+      categoryGroup: categoryGroup.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveProductToDb(nextProduct);
+    commitLocalProduct(nextProduct);
+  };
+
+  const handleSaveProductPoster = async (
+    productId: string,
+    posterName: string,
+    posterBlob: Blob,
+    fileName: string,
+  ): Promise<void> => {
+    if (!requestWriteAccess()) {
+      setIsPosterManagerOpen(false);
+      throw new Error("Hãy mở khóa quyền ghi dữ liệu rồi thử lưu lại.");
+    }
+
+    const currentProduct = productsRef.current.find((product) => product.id === productId);
+    if (!currentProduct) throw new Error("Không tìm thấy sản phẩm cần lưu poster.");
+
+    const normalizedFileName = fileName.toLowerCase().endsWith(".png")
+      ? fileName
+      : fileName + ".png";
+    const posterFile = new File([posterBlob], normalizedFileName, {
+      type: "image/png",
+      lastModified: Date.now(),
+    });
+
+    let uploadedPoster: ProductImage | null = null;
+
+    try {
+      uploadedPoster = await uploadOriginalImageToCloudinary(posterFile);
+
+      const posterRecord: ProductPosterRecord = {
+        id: crypto.randomUUID(),
+        fileName: uploadedPoster.name,
+        posterName: posterName.trim() || currentProduct.name,
+        url: uploadedPoster.dataUrl,
+        publicId: uploadedPoster.publicId,
+        version: uploadedPoster.version,
+        createdAt: new Date().toISOString(),
+      };
+
+      const nextProduct: LocalProduct = {
+        ...currentProduct,
+        posters: [...currentProduct.posters, posterRecord],
+        updatedAt: new Date().toISOString(),
+      };
+
+      const cleanup = await saveProductToDb(nextProduct);
+      commitLocalProduct(nextProduct);
+
+      if (cleanup.failed.length > 0) {
+        Toastify("Đã lưu Poster nhưng còn tài nguyên Cloudinary cũ chưa xóa được.", 300);
+      } else {
+        Toastify("Đã lưu Poster vào sản phẩm.", 200);
+      }
+    } catch (error) {
+      if (uploadedPoster?.publicId) {
+        await deleteUnattachedCloudinaryImages([uploadedPoster.publicId]).catch(() => undefined);
+      }
+      throw error;
+    }
+  };
+
   const removeQueuedImageUpload = async (
     record: PendingImageUploadRecord,
     clearBlobCache = false,
@@ -11597,10 +11707,12 @@ export default function LocalPage({
       price: parsePriceNumber(priceText, contentType),
       priceText,
       category,
+      categoryGroup: currentProduct?.categoryGroup ?? "",
       contentType,
       realEstateComment,
       images: draft.images,
       internalImages: draft.internalImages,
+      posters: currentProduct?.posters ?? [],
       isDone: currentProduct?.isDone ?? false,
       doneAt: currentProduct?.doneAt ?? "",
       createdAt: currentProduct?.createdAt ?? now,
@@ -18495,6 +18607,24 @@ export default function LocalPage({
               </button>
 
               <button
+                type="button"
+                data-luxury-accent="blue"
+                title="Lọc DONE, quản lý poster và danh sách theo hai cấp danh mục"
+                aria-label="Quản lý Poster và danh sách"
+                className={`${headerActionButtonBaseClassName} ${headerNeutralButtonClassName}`}
+                onClick={() => {
+                  if (isApiGuardClientLocked()) {
+                    Toastify("Chức năng hiện chưa khả dụng", 300);
+                    return;
+                  }
+                  setIsPosterManagerOpen(true);
+                }}
+              >
+                <FiImage aria-hidden="true" className={iconClassName} />
+                Poster DS
+              </button>
+
+              <button
                 data-header-shortcut-action="schedule"
                 data-header-shortcut-key={headerShortcuts["schedule"] || ""}
                 aria-keyshortcuts={formatHeaderAriaShortcut(headerShortcuts["schedule"])}
@@ -25066,6 +25196,23 @@ export default function LocalPage({
         >
           <ProductPosterGenerator
             onClose={() => setIsPosterGeneratorOpen(false)}
+          />
+        </Suspense>
+      ) : null}
+
+      {isPosterManagerOpen ? (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/85 p-4 text-xs font-semibold text-white">
+              Đang tải danh sách Poster...
+            </div>
+          }
+        >
+          <ProductPosterManagerModal
+            products={viewProducts}
+            onClose={() => setIsPosterManagerOpen(false)}
+            onSaveCategoryGroup={handleSavePosterCategoryGroup}
+            onSavePoster={handleSaveProductPoster}
           />
         </Suspense>
       ) : null}

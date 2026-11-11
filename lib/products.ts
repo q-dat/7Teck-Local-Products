@@ -4,15 +4,24 @@ type ImageLike = { publicId?: unknown };
 
 export const getProductPublicIds = (product: unknown): string[] => {
   if (!product || typeof product !== "object") return [];
-  const record = product as { images?: unknown; internalImages?: unknown };
+  const record = product as { images?: unknown; internalImages?: unknown; posters?: unknown };
 
-  return [record.images, record.internalImages].flatMap((value) => {
+  const imagePublicIds = [record.images, record.internalImages].flatMap((value) => {
     if (!Array.isArray(value)) return [];
     return value.flatMap((image) => {
       const publicId = (image as ImageLike | null)?.publicId;
       return typeof publicId === "string" && publicId.trim() ? [publicId.trim()] : [];
     });
   });
+
+  const posterPublicIds = Array.isArray(record.posters)
+    ? record.posters.flatMap((poster) => {
+        const publicId = (poster as ImageLike | null)?.publicId;
+        return typeof publicId === "string" && publicId.trim() ? [publicId.trim()] : [];
+      })
+    : [];
+
+  return [...imagePublicIds, ...posterPublicIds];
 };
 
 export const validateProductInput = (value: unknown): ProductRecord => {
@@ -26,6 +35,8 @@ export const validateProductInput = (value: unknown): ProductRecord => {
     throw new Error("Sản phẩm thiếu tên");
   }
 
+  const posters = Array.isArray(product.posters) ? product.posters : [];
+
   for (const image of [...(product.images ?? []), ...(product.internalImages ?? [])]) {
     if (!image || typeof image !== "object") throw new Error("Ảnh không hợp lệ");
     if (!image.publicId || !image.dataUrl) {
@@ -36,5 +47,24 @@ export const validateProductInput = (value: unknown): ProductRecord => {
     }
   }
 
-  return product;
+  for (const poster of posters) {
+    if (!poster || typeof poster !== "object") throw new Error("Poster không hợp lệ");
+    if (
+      typeof poster.id !== "string" ||
+      typeof poster.fileName !== "string" ||
+      typeof poster.posterName !== "string" ||
+      typeof poster.url !== "string" ||
+      typeof poster.publicId !== "string" ||
+      !poster.publicId.trim() ||
+      !poster.url.startsWith("https://")
+    ) {
+      throw new Error("Poster chưa được upload hoàn tất lên Cloudinary");
+    }
+  }
+
+  return {
+    ...product,
+    categoryGroup: typeof product.categoryGroup === "string" ? product.categoryGroup : "",
+    posters,
+  };
 };
