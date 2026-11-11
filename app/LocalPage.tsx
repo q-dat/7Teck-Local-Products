@@ -20143,7 +20143,7 @@ export default function LocalPage({
                                     product.contentType,
                                     product.realEstateComment,
                                   ),
-                                  includeSocialTags,
+                                  false,
                                   [descriptionPreview, product.realEstateComment].join("\n"),
                                 ),
                               );
