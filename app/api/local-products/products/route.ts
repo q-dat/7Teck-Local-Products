@@ -43,7 +43,7 @@ export async function PUT(request: Request) {
       async (session) => {
         const previous = await ProductModel.find(
           {},
-          { _id: 0, images: 1, internalImages: 1 },
+          { _id: 0, images: 1, internalImages: 1, posters: 1 },
         )
           .session(session)
           .lean();
