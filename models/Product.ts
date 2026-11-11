@@ -21,6 +21,19 @@ const productImageSchema = new Schema(
   { _id: false },
 );
 
+const productPosterSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    fileName: { type: String, required: true },
+    posterName: { type: String, required: true },
+    url: { type: String, required: true },
+    publicId: { type: String, required: true, index: true },
+    version: { type: Number, default: 0 },
+    createdAt: { type: String, required: true },
+  },
+  { _id: false },
+);
+
 const productSchema = new Schema(
   {
     id: { type: String, required: true, unique: true, index: true },
@@ -31,6 +44,7 @@ const productSchema = new Schema(
     price: { type: Number, default: 0 },
     priceText: { type: String, default: "" },
     category: { type: String, default: "" },
+    categoryGroup: { type: String, default: "" },
     contentType: {
       type: String,
       enum: [...PRODUCT_CONTENT_TYPES],
@@ -39,6 +53,7 @@ const productSchema = new Schema(
     realEstateComment: { type: String, default: "" },
     images: { type: [productImageSchema], default: [] },
     internalImages: { type: [productImageSchema], default: [] },
+    posters: { type: [productPosterSchema], default: [] },
     isDone: { type: Boolean, default: false },
     doneAt: { type: String, default: "" },
     createdAt: { type: String, required: true },
