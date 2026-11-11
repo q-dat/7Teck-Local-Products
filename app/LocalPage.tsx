@@ -24484,6 +24484,7 @@ export default function LocalPage({
                                 selectedAssignedSlot.postText,
                                 "",
                                 includeSocialTags,
+                                selectedAssignedSlot.description,
                               ),
                             )
                           }
@@ -24530,6 +24531,7 @@ export default function LocalPage({
                           selectedAssignedSlot.postText,
                           "",
                           includeSocialTags,
+                          selectedAssignedSlot.description,
                         ) || "Chưa có nội dung bài viết"}
                       </pre>
                     </article>
