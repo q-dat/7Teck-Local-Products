@@ -24267,7 +24267,8 @@ export default function LocalPage({
                         aria-live="polite"
                         className="hidden 2xl:block mt-2 w-full rounded-md border border-white/10 bg-slate-950/70 px-2.5 py-1.5 text-center text-[10px] font-bold leading-4 text-slate-400"
                       >
-                        Cần {SYSTEM_DELETE_REQUIRED_CLICKS} lần click trong {SYSTEM_DELETE_CLICK_WINDOW_MS}ms để kích hoạt.
+                        {/* Cần {SYSTEM_DELETE_REQUIRED_CLICKS} lần click trong {SYSTEM_DELETE_CLICK_WINDOW_MS}ms để kích hoạt. */}
+                        Bị vô hiệu hóa chức năng
                       </p>
 
                     </article>
