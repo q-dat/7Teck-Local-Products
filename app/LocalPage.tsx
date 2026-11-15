@@ -993,6 +993,9 @@ type PersistedShareModalState = {
 };
 
 const SHARE_MODAL_SESSION_STORAGE_KEY = "local-products-share-modal-state-v1";
+const DATA_EDIT_UNLOCK_STORAGE_KEY = "local-products-data-edit-unlocked-v1";
+const DATA_EDIT_UNLOCK_REQUIRED_CLICKS = 5;
+const DATA_EDIT_UNLOCK_CLICK_WINDOW_MS = 1000;
 
 const loadPersistedShareModalState = (): PersistedShareModalState | null => {
   if (typeof window === "undefined") return null;
@@ -4027,25 +4030,25 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
     internalImages: normalizeImages(record.internalImages),
     posters: Array.isArray(record.posters)
       ? record.posters.flatMap((poster): ProductPosterRecord[] => {
-          if (typeof poster !== "object" || poster === null) return [];
-          const item = poster as Record<string, unknown>;
-          if (
-            typeof item.id !== "string" ||
-            typeof item.fileName !== "string" ||
-            typeof item.posterName !== "string" ||
-            typeof item.url !== "string" ||
-            typeof item.publicId !== "string"
-          ) return [];
-          return [{
-            id: item.id,
-            fileName: item.fileName,
-            posterName: item.posterName,
-            url: item.url,
-            publicId: item.publicId,
-            version: typeof item.version === "number" ? item.version : 0,
-            createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
-          }];
-        })
+        if (typeof poster !== "object" || poster === null) return [];
+        const item = poster as Record<string, unknown>;
+        if (
+          typeof item.id !== "string" ||
+          typeof item.fileName !== "string" ||
+          typeof item.posterName !== "string" ||
+          typeof item.url !== "string" ||
+          typeof item.publicId !== "string"
+        ) return [];
+        return [{
+          id: item.id,
+          fileName: item.fileName,
+          posterName: item.posterName,
+          url: item.url,
+          publicId: item.publicId,
+          version: typeof item.version === "number" ? item.version : 0,
+          createdAt: typeof item.createdAt === "string" ? item.createdAt : "",
+        }];
+      })
       : [],
     isDone,
     doneAt: typeof record.doneAt === "string" ? record.doneAt : "",
@@ -6640,6 +6643,23 @@ export default function LocalPage({
   );
   const [isWriteAccessUnlocked, setIsWriteAccessUnlocked] =
     useState<boolean>(false);
+  const isWriteAccessUnlockedRef = useRef<boolean>(false);
+  const dataEditUnlockTapCountRef = useRef<number>(0);
+  const dataEditUnlockFirstTapAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    let storedUnlockState = false;
+
+    try {
+      storedUnlockState =
+        window.localStorage.getItem(DATA_EDIT_UNLOCK_STORAGE_KEY) === "1";
+    } catch {
+      // Keep the permission locked when browser storage is unavailable.
+    }
+
+    isWriteAccessUnlockedRef.current = storedUnlockState;
+    setIsWriteAccessUnlocked(storedUnlockState);
+  }, []);
 
   const requestWriteAccess = useCallback((): boolean => {
     if (isWriteAccessUnlocked) return true;
@@ -6652,7 +6672,49 @@ export default function LocalPage({
   }, [isWriteAccessUnlocked]);
 
   const toggleWriteAccess = useCallback((): void => {
-    setIsWriteAccessUnlocked((current) => !current);
+    if (isWriteAccessUnlockedRef.current) {
+      isWriteAccessUnlockedRef.current = false;
+      setIsWriteAccessUnlocked(false);
+      dataEditUnlockTapCountRef.current = 0;
+      dataEditUnlockFirstTapAtRef.current = 0;
+
+      try {
+        window.localStorage.removeItem(DATA_EDIT_UNLOCK_STORAGE_KEY);
+      } catch {
+        // The permission still locks for this session if storage is unavailable.
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const firstTapAt = dataEditUnlockFirstTapAtRef.current;
+
+    if (
+      firstTapAt === 0 ||
+      now - firstTapAt > DATA_EDIT_UNLOCK_CLICK_WINDOW_MS
+    ) {
+      dataEditUnlockFirstTapAtRef.current = now;
+      dataEditUnlockTapCountRef.current = 1;
+      return;
+    }
+
+    dataEditUnlockTapCountRef.current += 1;
+    if (
+      dataEditUnlockTapCountRef.current < DATA_EDIT_UNLOCK_REQUIRED_CLICKS
+    ) {
+      return;
+    }
+
+    dataEditUnlockTapCountRef.current = 0;
+    dataEditUnlockFirstTapAtRef.current = 0;
+    isWriteAccessUnlockedRef.current = true;
+    setIsWriteAccessUnlocked(true);
+
+    try {
+      window.localStorage.setItem(DATA_EDIT_UNLOCK_STORAGE_KEY, "1");
+    } catch {
+      // Keep the permission unlocked for this session if storage is unavailable.
+    }
   }, []);
 
   const [products, setProducts] = useState<LocalProduct[]>([]);
@@ -12401,7 +12463,7 @@ export default function LocalPage({
     }
   };
 
-  const SYSTEM_DELETE_REQUIRED_CLICKS = 5;
+  const SYSTEM_DELETE_REQUIRED_CLICKS = 10;
   const SYSTEM_DELETE_CLICK_WINDOW_MS = 1000;
 
   const handleClearAllLocalData = (): void => {
@@ -15966,7 +16028,7 @@ export default function LocalPage({
 
     try {
       await request.onConfirm();
-      setPendingConfirm(null);
+      setPendingConfirm((current) => (current === request ? null : current));
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Không thể thực hiện thao tác";
@@ -16481,8 +16543,8 @@ export default function LocalPage({
     const handleCapsLockKeyUp = (event: KeyboardEvent): void => {
       if (event.key !== "CapsLock" && event.code !== "CapsLock") return;
 
-      // Caps Lock controls only the data-edit permission; it must not open or close the Data modal.
-      setIsWriteAccessUnlocked(event.getModifierState("CapsLock"));
+      // Caps Lock uses the same hidden toggle sequence as the permission button.
+      toggleWriteAccess();
     };
 
     const eventWindows = [window, pictureInPictureWindow].filter(
@@ -16499,7 +16561,7 @@ export default function LocalPage({
         targetWindow.removeEventListener("keyup", handleCapsLockKeyUp);
       });
     };
-  }, [pictureInPictureWindow]);
+  }, [pictureInPictureWindow, toggleWriteAccess]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -24291,14 +24353,15 @@ export default function LocalPage({
                           Quyền chỉnh sửa dữ liệu
                         </p>
                         <p className={`mt-0.5 text-[9px] font-bold ${isWriteAccessUnlocked ? "text-emerald-200" : "text-rose-200"}`}>
-                          {isWriteAccessUnlocked ? "Đã mở khóa · Có thể thêm / sửa / xóa" : "Đang khóa · Chỉ được xem và đọc dữ liệu"}
+                          {isWriteAccessUnlocked ? "Đã mở khóa · Có thể thêm / sửa / xóa" : "Bị vô hiệu hóa chức năng"}
                         </p>
                       </div>
                     </div>
                     <button
                       type="button"
                       aria-pressed={isWriteAccessUnlocked}
-                      title={isWriteAccessUnlocked ? "Khóa quyền chỉnh sửa dữ liệu" : "Mở khóa quyền chỉnh sửa dữ liệu"}
+                      aria-label={isWriteAccessUnlocked ? "Khóa quyền chỉnh sửa dữ liệu" : "Bị vô hiệu hóa chức năng"}
+                      title={isWriteAccessUnlocked ? "Khóa quyền chỉnh sửa dữ liệu" : "Bị vô hiệu hóa chức năng"}
                       className={`flex shrink-0 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[9px] font-black transition ${isWriteAccessUnlocked
                         ? "border-rose-300/35 bg-rose-300/10 text-rose-100 hover:bg-rose-300/20"
                         : "border-emerald-300/35 bg-emerald-300/10 text-emerald-100 hover:bg-emerald-300/20"
