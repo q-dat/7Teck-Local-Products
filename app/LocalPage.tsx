@@ -1359,7 +1359,7 @@ const ProductActionShortcutBadge = ({
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute right-1 top-0.5 z-[4] hidden h-3.5 min-w-3.5 items-center justify-center border border-[#f1e5c2] bg-[#f2e8cd] px-0.5 font-mono text-[8px] font-black leading-none text-[#17130a] shadow-[0_1px_4px_rgba(0,0,0,0.6)] xl:flex"
+      className="pointer-events-none absolute right-1 top-0.5 z-[4] hidden h-3.5 min-w-3.5 items-center justify-center border border-[#f1e5c2] bg-[#f2e8cd] px-0.5 font-mono text-[8px] font-black leading-none text-[#17130a] shadow-[0_1px_4px_rgba(0,0,0,0.6)] lg:flex"
     >
       {shortcut}
     </span>
@@ -1367,7 +1367,7 @@ const ProductActionShortcutBadge = ({
 };
 
 const headerActionButtonBaseClassName =
-  "group relative flex min-h-5 cursor-pointer items-center justify-start gap-1 overflow-hidden whitespace-nowrap border p-1.5 text-[10px] font-semibold [clip-path:polygon(7px_0,calc(100%_-_7px)_0,100%_7px,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,7px_100%,0_calc(100%_-_7px),0_7px)] transition-[color,background-color,border-color,transform,box-shadow,filter] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d8c99f]/[0.45] active:scale-[0.97] active:brightness-95 xl:min-w-0 xl:w-full xl:justify-center";
+  "group relative flex min-h-5 cursor-pointer items-center justify-start gap-1 overflow-hidden whitespace-nowrap border p-1.5 text-[10px] font-semibold [clip-path:polygon(7px_0,calc(100%_-_7px)_0,100%_7px,100%_calc(100%_-_7px),calc(100%_-_7px)_100%,7px_100%,0_calc(100%_-_7px),0_7px)] transition-[color,background-color,border-color,transform,box-shadow,filter] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d8c99f]/[0.45] active:scale-[0.97] active:brightness-95 lg:min-w-0 lg:w-full lg:justify-center";
 
 const headerNeutralButtonClassName =
   "border-white/[0.07] bg-[linear-gradient(145deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))] text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] hover:-translate-y-px hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.075] hover:text-[#f3e7c6] hover:shadow-[0_8px_20px_rgba(0,0,0,0.26)]";
@@ -16238,7 +16238,7 @@ export default function LocalPage({
           </button>
         </div>
 
-        <div className="grid min-w-0 max-h-[260px] grid-cols-3 gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 sm:max-h-[320px] sm:grid-cols-4 md:grid-cols-5 xl:max-h-[calc(90dvh-190px)] xl:grid-cols-4 2xl:grid-cols-5">
+        <div className="grid min-w-0 max-h-[260px] grid-cols-3 gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 sm:max-h-[320px] sm:grid-cols-4 md:grid-cols-5 lg:max-h-[calc(90dvh-190px)] lg:grid-cols-4 2xl:grid-cols-5">
           {images.map((image, index) => {
             const isDraggingImage =
               draggingDraftImageId === image.id &&
@@ -16248,7 +16248,7 @@ export default function LocalPage({
               <div
                 key={image.id}
                 draggable
-                className={`group relative h-[88px] cursor-grab overflow-hidden rounded-md bg-slate-900 transition active:cursor-grabbing sm:h-[96px] xl:h-[108px] ${isDraggingImage ? "scale-95 opacity-60" : ""}`}
+                className={`group relative h-[88px] cursor-grab overflow-hidden rounded-md bg-slate-900 transition active:cursor-grabbing sm:h-[96px] lg:h-[108px] ${isDraggingImage ? "scale-95 opacity-60" : ""}`}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", image.id);
                   event.dataTransfer.setData(
@@ -16834,7 +16834,7 @@ export default function LocalPage({
     <main
       className={`local-products-workspace min-h-dvh w-full overflow-x-hidden bg-[#050a11] text-slate-100 ${pictureInPictureWindow
         ? "pb-[50px]"
-        : "pb-[100px] xl:pb-[50px]"
+        : "pb-[100px] lg:pb-[68px]"
         }`}
       onPaste={(event) => {
         void handlePaste(event);
@@ -18303,18 +18303,18 @@ export default function LocalPage({
           z-index: 1005 !important;
         }
 
-        @media (min-width: 1280px) {
+        @media (min-width: 1024px) {
           .local-products-workspace .floating-workspace-actions {
             left: auto;
-            right: 1rem;
-            bottom: 72px;
+            right: 0.75rem;
+            bottom: calc(72px + env(safe-area-inset-bottom, 0px));
           }
 
           .local-products-workspace .floating-scroll-top {
             position: fixed !important;
-            left: 1rem !important;
+            left: 0.75rem !important;
             right: auto !important;
-            bottom: 72px !important;
+            bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
             z-index: 1005 !important;
           }
         }
@@ -18398,17 +18398,17 @@ export default function LocalPage({
             0 0 18px rgba(230, 207, 139, 0.1) !important;
         }
 
-        @media (min-width: 1280px) {
+        @media (min-width: 1024px) {
           .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] {
-            min-height: 72px;
-            gap: 8px;
-            padding: 11px 9px;
-            font-size: 11px;
+            min-height: 64px;
+            gap: 7px;
+            padding: 8px 7px;
+            font-size: 10px;
           }
 
           .local-products-workspace #header-action-menu[data-expanded="true"] > button[data-luxury-accent] > svg {
-            width: 22px;
-            height: 22px;
+            width: 20px;
+            height: 20px;
           }
         }
 
@@ -18456,7 +18456,7 @@ export default function LocalPage({
           />
         ) : null}
       </AnimatePresence>
-      <section className="flex w-full flex-col xl:min-h-[calc(100dvh-4rem)]">
+      <section className="flex w-full flex-col lg:min-h-[calc(100dvh-4rem)]">
         <header
           data-actions-open={isHeaderActionsMenuOpen ? "true" : undefined}
           data-header-visible={isHeaderVisible ? "true" : "false"}
@@ -18471,28 +18471,28 @@ export default function LocalPage({
             className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#d8c99f]/[0.55] to-transparent"
           />
 
-          <div className="relative grid w-full grid-cols-1 gap-2 xl:flex xl:flex-col xl:items-stretch xl:gap-1.5 xl:p-2">
-            <div className={`${isHeaderActionsMenuOpen ? "hidden" : "grid"} min-w-0 grid-cols-4 divide-x divide-[#d8c99f]/10 overflow-hidden border border-[#d8c99f]/[0.15] bg-[linear-gradient(135deg,rgba(216,201,159,0.055),rgba(255,255,255,0.012))] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] xl:hidden`}>
-              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 xl:min-h-8 xl:justify-between xl:border-l xl:border-[#d8c99f]/20 xl:bg-black/20 xl:px-3 xl:py-2 xl:text-[8px] xl:font-bold xl:uppercase xl:tracking-[0.08em] xl:text-slate-400">
-                <span className="font-bold tabular-nums text-[#d8c99f] xl:text-xs xl:font-black">
+          <div className="relative grid w-full grid-cols-1 gap-2 lg:flex lg:flex-col lg:items-stretch lg:gap-1.5 lg:p-2">
+            <div className={`${isHeaderActionsMenuOpen ? "hidden" : "grid"} min-w-0 grid-cols-4 divide-x divide-[#d8c99f]/10 overflow-hidden border border-[#d8c99f]/[0.15] bg-[linear-gradient(135deg,rgba(216,201,159,0.055),rgba(255,255,255,0.012))] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:hidden`}>
+              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 lg:min-h-8 lg:justify-between lg:border-l lg:border-[#d8c99f]/20 lg:bg-black/20 lg:px-3 lg:py-2 lg:text-[8px] lg:font-bold lg:uppercase lg:tracking-[0.08em] lg:text-slate-400">
+                <span className="font-bold tabular-nums text-[#d8c99f] lg:text-xs lg:font-black">
                   {activeProductCount}
                 </span>
                 đang bán
               </span>
-              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 xl:min-h-8 xl:justify-between xl:border-l xl:border-[#d8c99f]/20 xl:bg-black/20 xl:px-3 xl:py-2 xl:text-[8px] xl:font-bold xl:uppercase xl:tracking-[0.08em] xl:text-slate-400">
-                <span className="font-bold tabular-nums text-[#d8c99f] xl:text-xs xl:font-black">
+              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 lg:min-h-8 lg:justify-between lg:border-l lg:border-[#d8c99f]/20 lg:bg-black/20 lg:px-3 lg:py-2 lg:text-[8px] lg:font-bold lg:uppercase lg:tracking-[0.08em] lg:text-slate-400">
+                <span className="font-bold tabular-nums text-[#d8c99f] lg:text-xs lg:font-black">
                   {soldProductCount}
                 </span>
                 đã bán
               </span>
-              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 xl:min-h-8 xl:justify-between xl:border-l xl:border-[#d8c99f]/20 xl:bg-black/20 xl:px-3 xl:py-2 xl:text-[8px] xl:font-bold xl:uppercase xl:tracking-[0.08em] xl:text-slate-400">
-                <span className="font-bold tabular-nums text-[#d8c99f] xl:text-xs xl:font-black">
+              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 lg:min-h-8 lg:justify-between lg:border-l lg:border-[#d8c99f]/20 lg:bg-black/20 lg:px-3 lg:py-2 lg:text-[8px] lg:font-bold lg:uppercase lg:tracking-[0.08em] lg:text-slate-400">
+                <span className="font-bold tabular-nums text-[#d8c99f] lg:text-xs lg:font-black">
                   {totalImages}
                 </span>
                 ảnh
               </span>
-              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 xl:min-h-8 xl:justify-between xl:border-l xl:border-r xl:border-[#d8c99f]/20 xl:bg-black/20 xl:px-3 xl:py-2 xl:text-[8px] xl:font-bold xl:uppercase xl:tracking-[0.08em] xl:text-slate-400">
-                <span className="font-bold tabular-nums text-[#d8c99f] xl:text-xs xl:font-black">
+              <span className="flex min-w-0 items-center justify-center gap-1 whitespace-nowrap px-2 py-1.5 text-[9px] font-medium text-slate-500 lg:min-h-8 lg:justify-between lg:border-l lg:border-r lg:border-[#d8c99f]/20 lg:bg-black/20 lg:px-3 lg:py-2 lg:text-[8px] lg:font-bold lg:uppercase lg:tracking-[0.08em] lg:text-slate-400">
+                <span className="font-bold tabular-nums text-[#d8c99f] lg:text-xs lg:font-black">
                   {postedTodayCount}/{totalTodayTaskCount}
                 </span>
                 đã đăng
@@ -18503,8 +18503,8 @@ export default function LocalPage({
               id="header-action-menu"
               data-expanded={isHeaderActionsMenuOpen ? "true" : undefined}
               className={`${isHeaderActionsMenuOpen
-                ? "header-actions-menu-open pointer-events-auto fixed left-1/2 top-1/2 z-[1201] grid max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-3rem)] xl:max-w-5xl xl:grid-cols-4 xl:gap-3 xl:p-4"
-                : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] xl:grid-cols-[repeat(19,minmax(0,1fr))] xl:border-[#d8c99f]/[0.16] xl:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] xl:p-1.5 xl:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
+                ? "header-actions-menu-open pointer-events-auto fixed left-1/2 top-1/2 z-[1201] grid max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 grid-cols-2 gap-2 overflow-x-hidden overflow-y-auto overscroll-contain border p-3 lg:max-h-[calc(100dvh-3rem)] lg:max-w-4xl lg:grid-cols-4 lg:gap-3 lg:p-4"
+                : "grid grid-cols-4 gap-1 border border-[#d8c99f]/10 bg-[#070c13]/98 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] lg:grid-cols-[repeat(12,minmax(0,1fr))] xl:grid-cols-[repeat(19,minmax(0,1fr))] lg:border-[#d8c99f]/[0.16] lg:bg-[linear-gradient(90deg,rgba(255,255,255,0.015),rgba(216,201,159,0.045))] lg:p-1.5 lg:shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_12px_30px_rgba(0,0,0,0.2)]"
                 }`}
               onClick={() => {
                 if (isHeaderActionsMenuOpen) {
@@ -19164,7 +19164,7 @@ export default function LocalPage({
       focus-within:border-[#fff6d8]
       focus-within:text-[#fffbeF]
       focus-within:shadow-[0_0_10px_rgba(255,246,216,0.55),0_0_24px_rgba(232,200,117,0.28)]
-      xl:px-2
+      lg:px-2
     "
             >
               {/* Left luxury game border */}
@@ -19258,8 +19258,8 @@ export default function LocalPage({
         focus-visible:outline-none
         focus-visible:ring-0
         placeholder:text-[#f9e7b2]/85
-        xl:text-base
-        xl:leading-5
+        lg:text-base
+        lg:leading-5
       "
                 placeholder="Tìm tất cả sản phẩm"
                 aria-label="Tìm tất cả sản phẩm"
@@ -19312,7 +19312,7 @@ export default function LocalPage({
                   </div>
 
                   <div
-                    className="max-h-[150px] xl:max-h-[300px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
+                    className="max-h-[150px] lg:max-h-[300px] min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain py-1 [scrollbar-gutter:stable] touch-pan-y"
                     style={{ scrollbarWidth: "thin" }}
                   >
                     {searchSuggestions.map((suggestion) => {
@@ -19415,13 +19415,13 @@ export default function LocalPage({
                           duration: prefersReducedMotion ? 0.1 : 0.22,
                           ease: [0.16, 1, 0.3, 1],
                         }}
-                        className="fixed inset-0 z-[999] touch-none bg-black/60 backdrop-blur-[2px] md:hidden"
+                        className="fixed inset-0 z-[999] touch-none bg-black/60 backdrop-blur-[2px] lg:hidden"
                         onClick={() => setIsMobileCategoryMenuOpen(false)}
                       />
                     ) : null}
                   </AnimatePresence>
 
-                  <div className="mobile-category-menu-anchor fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] right-2 z-[1000] md:hidden">
+                  <div className="mobile-category-menu-anchor fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] right-2 z-[1000] lg:hidden">
                     <AnimatePresence initial={false}>
                       {isMobileCategoryMenuOpen ? (
                         <motion.div
@@ -19539,7 +19539,7 @@ export default function LocalPage({
                     </motion.button>
                   </div>
 
-                  <div className="mobile-category-navigation fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[1001] flex h-10 w-[40vw]  xs:w-[45vw] -translate-x-1/2 items-center gap-1 rounded-full border px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_8px_28px_rgba(0,0,0,0.32)] md:hidden">
+                  <div className="mobile-category-navigation fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[1001] flex h-10 w-[40vw]  xs:w-[45vw] -translate-x-1/2 items-center gap-1 rounded-full border px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.42),0_8px_28px_rgba(0,0,0,0.32)] lg:hidden">
                     <button
                       type="button"
                       aria-label="Danh mục trước"
@@ -19584,21 +19584,21 @@ export default function LocalPage({
                   </div>
 
                   <div
-                    className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 xl:grid xl:grid-cols-2 xl:grid-rows-2 xl:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
+                    className={`floating-workspace-actions fixed flex flex-col-reverse items-center gap-2.5 lg:grid lg:grid-cols-2 lg:grid-rows-2 lg:gap-2 ${isHeaderActionsMenuOpen ? "z-[1202]" : "z-[1000]"}`}
                   >
-                    <div className="flex items-center gap-2 xl:contents">
+                    <div className="flex items-center gap-2 lg:contents">
                       <motion.button
                         type="button"
                         aria-label="Chuyển ảnh trên máy vào _trash"
                         title="Ảnh máy: chuyển toàn bộ ảnh vào _trash"
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-                        className={`hidden h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-1 xl:row-start-2 xl:flex ${isLocalImageManagerBusy
+                        className={`hidden h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition lg:h-10 lg:w-10 lg:col-start-1 lg:row-start-2 lg:flex ${isLocalImageManagerBusy
                           ? "border-slate-600/60 bg-slate-800/90 text-slate-500"
                           : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)] hover:border-[#d8c99f]/45 hover:text-[#f3e7c6]"
                           }`}
                         onClick={() => void handleHeaderLocalImageShortcut()}
                       >
-                        {isLocalImageManagerBusy ? <FiRotateCw aria-hidden="true" className="h-6 w-6 animate-spin xl:h-5 xl:w-5" /> : <FiArchive aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />}
+                        {isLocalImageManagerBusy ? <FiRotateCw aria-hidden="true" className="h-6 w-6 animate-spin lg:h-5 lg:w-5" /> : <FiArchive aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />}
                       </motion.button>
 
                       <motion.button
@@ -19616,7 +19616,7 @@ export default function LocalPage({
                             : "Mở menu chức năng"
                         }
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-                        className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-2 ${isHeaderActionsMenuOpen
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition lg:h-10 lg:w-10 lg:col-start-2 lg:row-start-2 ${isHeaderActionsMenuOpen
                           ? "border-[#f1e5c2]/80 bg-[linear-gradient(135deg,#f2e8cd,#bda66d)] text-[#17130a] shadow-[0_14px_38px_rgba(190,164,99,0.26)]"
                           : "border-[#d8c99f]/25 bg-[linear-gradient(145deg,rgba(15,18,25,0.96),rgba(5,7,10,0.98))] text-[#eadfbe] shadow-[0_14px_38px_rgba(0,0,0,0.52)]"
                           }`}
@@ -19626,9 +19626,9 @@ export default function LocalPage({
                         }}
                       >
                         {isHeaderActionsMenuOpen ? (
-                          <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                          <FiX aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />
                         ) : (
-                          <FiMenu aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                          <FiMenu aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />
                         )}
                       </motion.button>
                     </div>
@@ -19649,7 +19649,7 @@ export default function LocalPage({
                             : "Mở nhanh liên hệ"
                       }
                       whileTap={prefersReducedMotion ? undefined : { scale: 0.95 }}
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition xl:col-start-2 xl:row-start-1 ${activeModal === "contact"
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center border backdrop-blur-xl transition lg:h-10 lg:w-10 lg:col-start-2 lg:row-start-1 ${activeModal === "contact"
                         ? "border-cyan-200/75 bg-[linear-gradient(135deg,#d8f6ff,#72bed6)] text-[#09202a] shadow-[0_14px_38px_rgba(69,177,211,0.28)]"
                         : activeContactOption
                           ? "border-emerald-200/40 bg-[linear-gradient(145deg,rgba(12,38,31,0.97),rgba(5,16,13,0.98))] text-emerald-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)]"
@@ -19666,9 +19666,9 @@ export default function LocalPage({
                       }}
                     >
                       {activeModal === "contact" ? (
-                        <FiX aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                        <FiX aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />
                       ) : (
-                        <FiPhone aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                        <FiPhone aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />
                       )}
                     </motion.button>
                   </div>
@@ -19685,10 +19685,10 @@ export default function LocalPage({
                         }}
                         aria-label="Cuộn lên đầu trang"
                         title="Lên đầu trang"
-                        className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95"
+                        className="floating-scroll-top pointer-events-auto fixed z-[1001] flex h-11 w-11 shrink-0 items-center justify-center border border-cyan-200/35 bg-[linear-gradient(145deg,rgba(14,37,50,0.97),rgba(5,13,20,0.98))] text-cyan-100 shadow-[0_12px_32px_rgba(0,0,0,0.42)] backdrop-blur-xl transition hover:border-cyan-200/60 hover:bg-cyan-300/15 active:scale-95 lg:h-10 lg:w-10"
                         onClick={handleScrollToTop}
                       >
-                        <FiArrowUp aria-hidden="true" className="h-6 w-6 xl:h-5 xl:w-5" />
+                        <FiArrowUp aria-hidden="true" className="h-6 w-6 lg:h-5 lg:w-5" />
                       </motion.button>
                     ) : null}
                   </AnimatePresence>
@@ -19712,7 +19712,7 @@ export default function LocalPage({
                   draggingCategory,
                   settings.categoryColors,
                 )}
-                className="category-drag-hud pointer-events-none fixed bottom-[48px] left-1/2 z-[1002] hidden -translate-x-1/2 items-center gap-2 border px-3 py-2 backdrop-blur-xl md:flex"
+                className="category-drag-hud pointer-events-none fixed bottom-[48px] left-1/2 z-[1002] hidden -translate-x-1/2 items-center gap-2 border px-3 py-2 backdrop-blur-xl lg:flex"
               >
                 <span className="category-drag-hud-block border px-2 py-1 text-[10px] font-black uppercase tracking-[0.08em]">
                   {draggingCategory}
@@ -19724,7 +19724,7 @@ export default function LocalPage({
             ) : null}
           </AnimatePresence>
 
-          <div className="fixed bottom-[36px] left-0 z-bar hidden h-[26px] w-fit items-stretch overflow-hidden border border-[#d8c99f]/25 bg-[linear-gradient(90deg,rgba(216,201,159,0.1),rgba(6,13,21,0.97))] shadow-[0_-8px_24px_rgba(0,0,0,0.28)] backdrop-blur-xl xl:flex">
+          <div className="fixed bottom-[36px] left-0 z-bar hidden h-[26px] w-fit items-stretch overflow-hidden border border-[#d8c99f]/25 bg-[linear-gradient(90deg,rgba(216,201,159,0.1),rgba(6,13,21,0.97))] shadow-[0_-8px_24px_rgba(0,0,0,0.28)] backdrop-blur-xl lg:flex">
             <span className="flex items-center gap-1 border-r border-[#d8c99f]/15 px-2 text-[7px] font-bold uppercase tracking-[0.03em] text-slate-400">
               <span className="text-[9px] font-black tabular-nums text-[#d8c99f]">
                 {activeProductCount}
@@ -19754,7 +19754,7 @@ export default function LocalPage({
           <div
             ref={categoryTabsRef}
             data-category-dragging={draggingCategoryKey ? "true" : undefined}
-            className="luxury-category-bar fixed bottom-0 left-0 right-0 z-bar hidden h-[36px] items-stretch overflow-x-auto overflow-y-hidden overscroll-x-contain overscroll-y-none whitespace-nowrap border-t md:flex"
+            className="luxury-category-bar fixed bottom-0 left-0 right-0 z-bar hidden h-[36px] items-stretch overflow-x-auto overflow-y-hidden overscroll-x-contain overscroll-y-none whitespace-nowrap border-t lg:flex"
             onDragOver={handleCategoryBarDragOver}
             onDrop={handleCategoryBarDrop}
           >
@@ -19842,7 +19842,7 @@ export default function LocalPage({
                 Chưa có sản phẩm phù hợp.
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 xl:[grid-template-columns:repeat(auto-fill,minmax(218px,1fr))]">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 lg:[grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
                 {visibleProducts.map((product, index) => {
                   const descriptionPreview =
                     product.description.trim() ||
@@ -20330,9 +20330,9 @@ export default function LocalPage({
       </section>
 
       {activeModal ? (
-        <div className="luxury-modal-overlay fixed inset-0 z-modal flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-8">
+        <div className="luxury-modal-overlay fixed inset-0 z-modal flex h-dvh w-full items-center justify-center overflow-hidden p-2 lg:p-4">
           <div
-            className="luxury-modal flex h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden border xl:h-[calc(100dvh-4rem)]"
+            className="luxury-modal flex h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden border lg:h-[calc(100dvh-2rem)]"
             data-shortcuts-modal={activeModal === "shortcuts" ? "true" : undefined}
           >
             <div className="luxury-modal-titlebar flex min-w-0 shrink-0 items-center justify-between gap-3 border-b p-2.5">
@@ -20517,8 +20517,8 @@ export default function LocalPage({
               ) : null}
 
               {activeModal === "imageOverlayEditor" && imageOverlayEditor ? (
-                <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 xl:grid xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <article className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden rounded-md border border-white/10 bg-slate-950/60 p-1.5 xl:h-full">
+                <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_260px]">
+                  <article className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5 overflow-hidden rounded-md border border-white/10 bg-slate-950/60 p-1.5 lg:h-full">
                     <style>{`.image-overlay-preview-viewport { scrollbar-width: none; -ms-overflow-style: none; touch-action: none; user-select: none; } .image-overlay-preview-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }`}</style>
                     <div
                       ref={imageOverlayViewportRef}
@@ -20586,7 +20586,7 @@ export default function LocalPage({
                     </div>
                   </article>
 
-                  <aside className="box-border flex max-h-[36dvh] w-full min-w-0 max-w-full shrink-0 flex-col gap-1.5 overflow-x-clip overflow-y-auto rounded-md border border-white/10 bg-slate-900/80 p-1.5 xl:h-full xl:max-h-none xl:min-h-0">
+                  <aside className="box-border flex max-h-[36dvh] w-full min-w-0 max-w-full shrink-0 flex-col gap-1.5 overflow-x-clip overflow-y-auto rounded-md border border-white/10 bg-slate-900/80 p-1.5 lg:h-full lg:max-h-none lg:min-h-0">
                     <section className="box-border w-full min-w-0 max-w-full overflow-x-clip rounded-md border border-white/10 bg-slate-950/50 p-2">
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -20597,7 +20597,7 @@ export default function LocalPage({
                           {imageOverlayEditor.width} × {imageOverlayEditor.height}
                         </span>
                       </div>
-                      <div className="mt-2 hidden min-w-0 flex-col gap-1.5 xl:flex">
+                      <div className="mt-2 hidden min-w-0 flex-col gap-1.5 lg:flex">
                         <span className="text-[9px] text-slate-400">Preview {Math.round(imageOverlayPreviewZoom * 100)}%</span>
                         <div className="flex min-w-0 items-center gap-1">
                           <button
@@ -20805,7 +20805,7 @@ export default function LocalPage({
                 <section className="flex w-full min-w-0 flex-col gap-2 py-1">
                   <div className="relative min-w-0 overflow-hidden rounded-md border border-white/10 bg-slate-950/45 shadow-[0_12px_34px_rgba(0,0,0,0.24)]">
                     <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#0556b1] via-[#009485] to-[#d8c99f]" />
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 xl:flex-nowrap">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 lg:flex-nowrap">
                       <div className="flex min-w-0 items-center gap-2">
                         <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-300/20 bg-cyan-300/[0.08] text-cyan-100">
                           <FiKey aria-hidden="true" className="h-3.5 w-3.5" />
@@ -20855,7 +20855,7 @@ export default function LocalPage({
                     ) : null}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-5">
+                  <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-5">
                     {HEADER_SHORTCUT_ACTIONS.map((definition, index) => {
                       const shortcut = headerShortcuts[definition.id];
                       const isCapturing = shortcutCaptureAction === definition.id;
@@ -20941,7 +20941,7 @@ export default function LocalPage({
                     </h3>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                     <Link
                       href="/"
                       onClick={() => closeModal()}
@@ -21062,7 +21062,7 @@ export default function LocalPage({
                         return (
                           <div
                             key={key}
-                            className="grid gap-2 border border-white/10 bg-slate-950/60 p-2 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
+                            className="grid gap-2 border border-white/10 bg-slate-950/60 p-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
                           >
                             <div className="min-w-0">
                               <p className="text-[10px] font-black text-white">
@@ -21171,9 +21171,9 @@ export default function LocalPage({
               ) : null}
 
               {activeModal === "imageDownload" ? (
-                <section className="grid w-full grid-cols-1 gap-3 xl:grid-cols-2">
-                  <article className="xl:col-span-2 flex flex-col rounded-md border border-emerald-300/15 bg-slate-900 p-3">
-                    <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <section className="grid w-full grid-cols-1 gap-3 lg:grid-cols-2">
+                  <article className="lg:col-span-2 flex flex-col rounded-md border border-emerald-300/15 bg-slate-900 p-3">
+                    <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div className="min-w-0">
                         <h3 className="text-sm font-black text-white">
                           Danh mục được phép tải
@@ -21182,7 +21182,7 @@ export default function LocalPage({
                           Chỉ áp dụng cho các lệnh tải ảnh trong modal này. Sản phẩm đã <strong className="text-emerald-300">Done</strong> luôn bị loại khỏi batch.
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5 xl:w-auto">
+                      <div className="grid grid-cols-2 gap-1.5 lg:w-auto">
                         <button
                           type="button"
                           className="min-h-9 border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-[10px] font-black text-emerald-100 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-40"
@@ -21208,7 +21208,7 @@ export default function LocalPage({
                           Không có danh mục nào từ sản phẩm đang hoạt động.
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-3">
                           {imageDownloadCategoryOptions.map((category) => {
                             const key = normalizeTextKey(category.name);
                             const isEnabled = !excludedImageDownloadCategories.has(key);
@@ -21596,7 +21596,7 @@ export default function LocalPage({
                                           </span>
                                         ) : null}
 
-                                        <p className={`${fullCardItemNameClassName} text-xs font-black leading-5 text-white xl:text-sm xl:leading-6`}>
+                                        <p className={`${fullCardItemNameClassName} text-xs font-black leading-5 text-white lg:text-sm lg:leading-6`}>
                                           {product.name}
                                         </p>
                                       </div>
@@ -21675,7 +21675,7 @@ export default function LocalPage({
 
               {activeModal === "productMerge" ? (
                 <section className="flex h-full min-h-0 w-full min-w-0 flex-col gap-2 overflow-hidden">
-                  <div className="grid min-h-0 min-w-0 flex-1 gap-2 xl:grid-cols-[360px_minmax(0,1fr)]">
+                  <div className="grid min-h-0 min-w-0 flex-1 gap-2 lg:grid-cols-[300px_minmax(0,1fr)]">
                     <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
                       <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
@@ -21794,8 +21794,8 @@ export default function LocalPage({
                   onSubmit={(event) => void handleSubmit(event)}
                 >
                   <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-1">
-                    <div className="grid min-h-full min-w-0 grid-cols-1 items-start gap-3 pb-24 xl:grid-cols-[minmax(320px,0.92fr)_minmax(360px,1.08fr)] xl:pb-2">
-                      <section className="order-2 flex min-h-0 min-w-0 flex-col gap-3 xl:order-1">
+                    <div className="grid min-h-full min-w-0 grid-cols-1 items-start gap-3 pb-24 lg:grid-cols-[minmax(280px,0.92fr)_minmax(300px,1.08fr)] lg:pb-2">
+                      <section className="order-2 flex min-h-0 min-w-0 flex-col gap-3 lg:order-1">
                         <div className="grid min-w-0 gap-1.5 rounded-md border border-white/10 bg-slate-950/70 p-2">
                           <span className="text-xs font-bold text-slate-300">
                             Thẻ
@@ -21981,8 +21981,8 @@ export default function LocalPage({
                             }
                             rows={8}
                             className={`min-h-[220px] w-full min-w-0 resize-y rounded-md border border-white/10 bg-slate-950/80 p-2 text-xs leading-6 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/60 sm:min-h-[260px] ${isPropertyContentType(scopedContentType)
-                              ? "xl:min-h-[260px]"
-                              : "xl:min-h-[calc(90dvh-260px)] xl:resize-none"
+                              ? "lg:min-h-[260px]"
+                              : "lg:min-h-[calc(90dvh-260px)] lg:resize-none"
                               }`}
                             placeholder={
                               isPropertyContentType(scopedContentType)
@@ -22018,7 +22018,7 @@ export default function LocalPage({
                         ) : null}
                       </section>
 
-                      <section className="order-1 flex min-h-0 min-w-0 flex-col gap-3 xl:order-2">
+                      <section className="order-1 flex min-h-0 min-w-0 flex-col gap-3 lg:order-2">
                         <label
                           className={`min-w-0 cursor-pointer rounded-md border border-dashed p-3 text-center transition ${dragOverImageField === "images"
                             ? "border-cyan-300/80 bg-cyan-300/10"
@@ -22117,7 +22117,7 @@ export default function LocalPage({
 
               {activeModal === "schedule" ? (
                 <section className="flex min-h-full flex-col gap-2">
-                  <div className="grid grid-cols-2 gap-2 xl:grid-cols-8">
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-8">
                     <div className="rounded-md border border-white/10 bg-slate-900 p-1">
                       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
                         Khung giờ
@@ -22211,7 +22211,7 @@ export default function LocalPage({
 
                   {!compactScheduleConfig ? (
                     <div className="rounded-md border border-white/10 bg-slate-950/70 p-2">
-                      <div className="grid grid-cols-2 gap-2 xl:grid-cols-8">
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-8">
                         <label className="flex flex-col gap-1">
                           <span className="text-[11px] font-bold text-slate-300">
                             Từ ngày
@@ -22400,7 +22400,7 @@ export default function LocalPage({
                     </div>
                   ) : null}
 
-                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-1 lg:grid-cols-[minmax(0,1fr)_280px]">
                     <section className=" rounded-md border border-white/10 bg-slate-950/70 p-1">
                       <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
                         {scheduleTaskIndexes.map((taskIndex) => {
@@ -22521,7 +22521,7 @@ export default function LocalPage({
                                     )
                                   }
                                 >
-                                  <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-1 xl:grid-cols-[58px_160px_minmax(0,1fr)_82px] xl:items-center">
+                                  <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-1 lg:grid-cols-[50px_132px_minmax(0,1fr)_72px] lg:items-center">
                                     <div className="rounded-md border border-white/10 bg-slate-950 p-1">
                                       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
                                         Bài {timeIndex + 1}
@@ -22545,7 +22545,7 @@ export default function LocalPage({
                                           event.target.value,
                                         )
                                       }
-                                      className="col-span-1 rounded-md border border-white/10 bg-slate-950 p-1.5 text-[11px] font-bold text-white outline-none focus:border-cyan-300/60 xl:col-span-1"
+                                      className="col-span-1 rounded-md border border-white/10 bg-slate-950 p-1.5 text-[11px] font-bold text-white outline-none focus:border-cyan-300/60 lg:col-span-1"
                                     >
                                       <option value="">Chọn sản phẩm</option>
                                       {activeScheduleProducts.map((product) => {
@@ -22590,7 +22590,7 @@ export default function LocalPage({
                                       })}
                                     </select>
 
-                                    <div className="col-span-2 flex  gap-1 xl:col-span-1">
+                                    <div className="col-span-2 flex  gap-1 lg:col-span-1">
                                       <button
                                         type="button"
                                         className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-900"
@@ -22650,7 +22650,7 @@ export default function LocalPage({
                                       </div>
                                     </div>
 
-                                    <div className="col-span-2 grid grid-cols-2 gap-1 xl:col-span-1 xl:grid-cols-1">
+                                    <div className="col-span-2 grid grid-cols-2 gap-1 lg:col-span-1 lg:grid-cols-1">
                                       <button
                                         type="button"
                                         title="Xem chi tiết lịch"
@@ -22879,7 +22879,7 @@ export default function LocalPage({
                       </span>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-3">
+                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
                       <label className="grid gap-1.5">
                         <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">
                           Phút trong giờ
@@ -22977,7 +22977,7 @@ export default function LocalPage({
                     </div>
                   </article>
 
-                  <article className="grid grid-cols-1 gap-3 rounded-md border border-white/10 bg-slate-950/70 p-3 xl:grid-cols-2">
+                  <article className="grid grid-cols-1 gap-3 rounded-md border border-white/10 bg-slate-950/70 p-3 lg:grid-cols-2">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
                         Cấu hình
@@ -23085,7 +23085,7 @@ export default function LocalPage({
                       onChange={(event) =>
                         updateSettingField("globalNote", event.target.value)
                       }
-                      className="h-full min-h-0 w-full resize-none rounded-md border border-white/10 bg-slate-900/70 p-2 text-sm leading-7 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/40 focus:bg-slate-900 xl:text-xs xl:leading-6"
+                      className="h-full min-h-0 w-full resize-none rounded-md border border-white/10 bg-slate-900/70 p-2 text-sm leading-7 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/40 focus:bg-slate-900 lg:text-xs lg:leading-6"
                       placeholder="Nhập ghi chú..."
                     />
                   </div>
@@ -23128,7 +23128,7 @@ export default function LocalPage({
                           event.target.value,
                         )
                       }
-                      className="h-full min-h-0 w-full resize-none rounded-md border border-white/10 bg-slate-900/70 p-2 text-sm leading-7 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/40 focus:bg-slate-900 xl:text-xs xl:leading-6"
+                      className="h-full min-h-0 w-full resize-none rounded-md border border-white/10 bg-slate-900/70 p-2 text-sm leading-7 text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/40 focus:bg-slate-900 lg:text-xs lg:leading-6"
                       placeholder="Nhập mô tả chung..."
                     />
                   </div>
@@ -23158,7 +23158,7 @@ export default function LocalPage({
                       </span>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
                       <button
                         type="button"
                         aria-pressed={autoCopyShareMode === "post"}
@@ -23331,14 +23331,14 @@ export default function LocalPage({
                       </span>
                     </div>
 
-                    <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
+                    <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
                       <textarea
                         value={contactDraft}
                         onChange={(event) => setContactDraft(event.target.value)}
                         className="min-h-24 w-full resize-y rounded-md border border-emerald-300/20 bg-slate-950/70 p-2 text-xs leading-5 text-white outline-none transition placeholder:text-slate-600 focus:border-emerald-300/50"
                         placeholder="Nhập nội dung liên hệ..."
                       />
-                      <div className="grid grid-cols-1 gap-2 xl:self-stretch">
+                      <div className="grid grid-cols-1 gap-2 lg:self-stretch">
                         <button
                           type="button"
                           className="flex items-center justify-center gap-2 rounded-md bg-emerald-300 px-3 py-2 text-xs font-black text-slate-950 transition hover:bg-emerald-200 active:opacity-80"
@@ -23446,7 +23446,7 @@ export default function LocalPage({
               ) : null}
 
               {activeModal === "facebookPages" ? (
-                <section className="grid w-full grid-cols-1 gap-2 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                <section className="grid w-full grid-cols-1 gap-2 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
                   <article className="border border-[#d8c99f]/20 bg-[#d8c99f]/[0.06] p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -23500,7 +23500,7 @@ export default function LocalPage({
                         />
                       </label>
 
-                      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                         <button
                           type="button"
                           className="flex items-center justify-center gap-2 border border-[#f0e3c0]/80 bg-[linear-gradient(135deg,#f2e8cd,#c9b47c)] px-3 py-2 text-xs font-black text-[#17130a] transition hover:brightness-105 active:opacity-80"
@@ -23756,7 +23756,7 @@ export default function LocalPage({
               ) : null}
 
               {activeModal === "facebookDuplicatePosts" ? (
-                <section className="grid w-full min-w-0 grid-cols-1 gap-2 overflow-x-hidden xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                <section className="grid w-full min-w-0 grid-cols-1 gap-2 overflow-x-hidden lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
                   <article className="min-w-0 max-w-full self-start overflow-x-hidden border border-[#d8c99f]/25 bg-[#d8c99f]/[0.055] p-3">
                     <div className="flex items-start justify-between gap-2 border-b border-[#d8c99f]/15 pb-2">
                       <div className="min-w-0">
@@ -23778,7 +23778,7 @@ export default function LocalPage({
                           <span className="text-[10px] font-black text-slate-300">
                             Chọn Fanpage
                           </span>
-                          <div className="grid max-h-40 min-w-0 max-w-full grid-cols-1 gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable] xl:grid-cols-2">
+                          <div className="grid max-h-40 min-w-0 max-w-full grid-cols-1 gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable] lg:grid-cols-2">
                             {settings.facebookPages.map((option) => (
                               <button
                                 type="button"
@@ -23925,7 +23925,7 @@ export default function LocalPage({
                         </span>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,0.45fr)_minmax(0,0.7fr)_minmax(0,1.35fr)_auto]">
+                      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.7fr)_minmax(0,1.35fr)_auto]">
                         <label className="grid min-w-0 gap-1">
                           <span className="text-[9px] font-black text-slate-300">
                             Danh mục
@@ -24044,7 +24044,7 @@ export default function LocalPage({
                                 {group.options.map((option) => (
                                   <div
                                     key={option.id}
-                                    className="grid min-w-0 grid-cols-1 gap-1.5 border border-white/10 bg-slate-900/65 p-2 transition hover:border-amber-300/30 hover:bg-amber-300/[0.05] xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center"
+                                    className="grid min-w-0 grid-cols-1 gap-1.5 border border-white/10 bg-slate-900/65 p-2 transition hover:border-amber-300/30 hover:bg-amber-300/[0.05] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
                                   >
                                     <div className="min-w-0">
                                       <p className="truncate text-[10px] font-black text-white">
@@ -24143,10 +24143,10 @@ export default function LocalPage({
               {activeModal === "importExport" ? (
                 <section className="flex w-full flex-col gap-3">
 
-                  <article className="relative overflow-hidden rounded-md border border-amber-200/45 bg-[linear-gradient(135deg,rgba(251,191,36,0.2),rgba(245,158,11,0.08)_55%,rgba(15,23,42,0.9))] p-3 shadow-[0_18px_50px_rgba(245,158,11,0.1)] xl:p-4">
+                  <article className="relative overflow-hidden rounded-md border border-amber-200/45 bg-[linear-gradient(135deg,rgba(251,191,36,0.2),rgba(245,158,11,0.08)_55%,rgba(15,23,42,0.9))] p-3 shadow-[0_18px_50px_rgba(245,158,11,0.1)] lg:p-4">
                     <div className="absolute inset-y-0 left-0 w-1 bg-amber-300" />
 
-                    <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-amber-200/35 bg-amber-200/15 text-amber-100">
                           <FiUploadCloud
@@ -24172,7 +24172,7 @@ export default function LocalPage({
 
                       <button
                         type="button"
-                        className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-amber-100/60 bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 shadow-[0_10px_30px_rgba(245,158,11,0.2)] transition hover:bg-amber-200 active:scale-[0.99] xl:w-auto xl:min-w-[260px]"
+                        className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-amber-100/60 bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 shadow-[0_10px_30px_rgba(245,158,11,0.2)] transition hover:bg-amber-200 active:scale-[0.99] lg:w-auto lg:min-w-[220px]"
                         title="Import JSON hoặc JSON.GZ"
                         onClick={handleBeginBackupRestore}
                       >
@@ -24189,7 +24189,7 @@ export default function LocalPage({
                     </div>
                   </article>
 
-                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr_0.85fr_0.85fr]">
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.15fr_0.85fr_0.85fr_0.85fr]">
                     <article className="flex min-w-0 flex-col rounded-md border border-cyan-300/20 bg-cyan-300/[0.07] p-3">
                       <div className="flex items-center gap-2">
                         <FiDownload
@@ -24206,7 +24206,7 @@ export default function LocalPage({
                         </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2 xl:mt-auto xl:pt-3">
+                      <div className="mt-3 grid grid-cols-2 gap-2 lg:mt-auto lg:pt-3">
                         <button
                           type="button"
                           className="flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-cyan-300 px-3 py-2 text-[11px] font-black text-slate-950 transition hover:bg-cyan-200 active:opacity-80"
@@ -24253,7 +24253,7 @@ export default function LocalPage({
 
                       <button
                         type="button"
-                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[11px] font-black text-emerald-100 transition hover:bg-emerald-300/20 active:opacity-80 xl:mt-auto"
+                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-emerald-300/35 bg-emerald-300/10 px-3 py-2 text-[11px] font-black text-emerald-100 transition hover:bg-emerald-300/20 active:opacity-80 lg:mt-auto"
                         onClick={() => void handleRefreshCloudData()}
                         title="Kiểm tra phiên bản và chỉ đồng bộ phần dữ liệu thay đổi"
                       >
@@ -24283,7 +24283,7 @@ export default function LocalPage({
 
                       <button
                         type="button"
-                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[11px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 xl:mt-auto"
+                        className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-amber-300/35 bg-amber-300/10 px-3 py-2 text-[11px] font-black text-amber-100 transition hover:bg-amber-300/20 active:opacity-80 lg:mt-auto"
                         onClick={handleClearAllBrowserLocalData}
                         title="Chỉ xóa localStorage và IndexedDB trên thiết bị này"
                       >
@@ -24314,7 +24314,7 @@ export default function LocalPage({
                       <button
                         type="button"
                         aria-disabled="true"
-                        className="mt-3 hidden 2xl:flex flex-col min-h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] font-black text-slate-500 opacity-70 transition hover:bg-slate-800 active:opacity-70 xl:mt-auto"
+                        className="mt-3 hidden 2xl:flex flex-col min-h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-[11px] font-black text-slate-500 opacity-70 transition hover:bg-slate-800 active:opacity-70 lg:mt-auto"
                         onClick={handleClearAllLocalData}
                         title="Tự hủy hệ thống"
                       >
@@ -24376,7 +24376,7 @@ export default function LocalPage({
 
               {activeModal === "slotDetail" ? (
                 selectedAssignedSlot ? (
-                  <section className="grid grid-cols-1 gap-2 xl:grid-cols-[360px_1fr]">
+                  <section className="grid grid-cols-1 gap-2 lg:grid-cols-[300px_1fr]">
                     <article className="rounded-md border border-white/10 bg-slate-950/70 p-2">
                       <button
                         type="button"
@@ -24522,7 +24522,7 @@ export default function LocalPage({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                         <button
                           type="button"
                           className={secondaryActionButtonClassName}
@@ -24611,9 +24611,9 @@ export default function LocalPage({
               ) : null}
 
               {activeModal === "imageAlbum" && albumSource ? (
-                <section className="grid h-full min-h-0  grid-rows-[minmax(0,1fr)_minmax(170px,30dvh)] gap-2 overflow-hidden md:grid-rows-[minmax(0,1fr)_minmax(190px,28dvh)] xl:grid-cols-[minmax(0,1fr)_310px] xl:grid-rows-1">
+                <section className="grid h-full min-h-0  grid-rows-[minmax(0,1fr)_minmax(170px,30dvh)] gap-2 overflow-hidden md:grid-rows-[minmax(0,1fr)_minmax(190px,28dvh)] lg:grid-cols-[minmax(0,1fr)_270px] lg:grid-rows-1">
                   <article className="flex min-h-0  flex-col overflow-hidden rounded-md border border-white/10 bg-slate-900 p-2 ">
-                    <div className="mb-2 grid  grid-cols-1 gap-2 rounded-md border border-white/10 bg-slate-900 p-2   xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                    <div className="mb-2 grid  grid-cols-1 gap-2 rounded-md border border-white/10 bg-slate-900 p-2   lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
                       <div className=" rounded-md bg-black/20 px-2 py-1">
                         <h3 className={`${fullCardItemNameClassName} text-xs font-black text-white`}>
                           {albumSource.title}
@@ -24630,7 +24630,7 @@ export default function LocalPage({
                         </p>
                       </div>
 
-                      <div className="flex shrink-0 gap-1 overflow-x-auto pb-1 xl:justify-end xl:overflow-visible xl:pb-0">
+                      <div className="flex shrink-0 gap-1 overflow-x-auto pb-1 lg:justify-end lg:overflow-visible lg:pb-0">
                         <button
                           type="button"
                           data-luxury-accent="amber"
@@ -24809,7 +24809,7 @@ export default function LocalPage({
                       </span>
                     </div>
 
-                    <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 content-start gap-2 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-2">
+                    <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 content-start gap-2 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-2">
                       {albumImages.map((image, index) => {
                         const active = image.id === selectedAlbumImage?.id;
                         const checked = selectedAlbumImageIds.has(image.id);
@@ -24887,7 +24887,7 @@ export default function LocalPage({
           {albumLightboxIndex !== null && albumImages[albumLightboxIndex] ? (
             <>
               <div
-                className="flex h-full w-full touch-none select-none items-center justify-center overflow-hidden xl:touch-auto"
+                className="flex h-full w-full touch-none select-none items-center justify-center overflow-hidden lg:touch-auto"
                 onTouchStart={handleAlbumTouchStart}
                 onTouchMove={handleAlbumTouchMove}
                 onTouchEnd={handleAlbumTouchEnd}
@@ -24900,7 +24900,7 @@ export default function LocalPage({
                   loading="eager"
                   decoding="async"
                   fetchPriority="high"
-                  className="block h-dvh w-dvw object-contain will-change-transform xl:transition-transform xl:duration-200"
+                  className="block h-dvh w-dvw object-contain will-change-transform lg:transition-transform lg:duration-200"
                   style={{
                     transform:
                       albumMobileZoom > 1
@@ -24910,21 +24910,21 @@ export default function LocalPage({
                 />
               </div>
 
-              <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex w-full -translate-x-1/2 justify-center px-2 xl:bottom-5 xl:left-auto xl:right-5 xl:w-auto xl:translate-x-0 xl:justify-end xl:px-0">
-                <div className="pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/15 bg-black/75 p-1.5 shadow-xl backdrop-blur-md xl:gap-2 xl:p-2">
+              <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex w-full -translate-x-1/2 justify-center px-2 lg:bottom-5 lg:left-auto lg:right-5 lg:w-auto lg:translate-x-0 lg:justify-end lg:px-0">
+                <div className="pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/15 bg-black/75 p-1.5 shadow-xl backdrop-blur-md lg:gap-2 lg:p-2">
                   <button
                     type="button"
-                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 lg:h-12 lg:w-12"
                     onClick={goToPreviousAlbumImage}
                     disabled={albumImages.length <= 1}
                     aria-label="Ảnh trước"
                     title="Ảnh trước"
                   >
-                    <FiChevronLeft aria-hidden="true" className="h-6 w-6 xl:h-7 xl:w-7" />
+                    <FiChevronLeft aria-hidden="true" className="h-6 w-6 lg:h-7 lg:w-7" />
                   </button>
 
                   <span
-                    className="min-w-12 px-1 text-center text-[11px] font-semibold tabular-nums text-white/85 xl:text-xs"
+                    className="min-w-12 px-1 text-center text-[11px] font-semibold tabular-nums text-white/85 lg:text-xs"
                     aria-live="polite"
                   >
                     {albumLightboxIndex + 1} / {albumImages.length}
@@ -24932,28 +24932,28 @@ export default function LocalPage({
 
                   <button
                     type="button"
-                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-25 lg:h-12 lg:w-12"
                     onClick={goToNextAlbumImage}
                     disabled={albumImages.length <= 1}
                     aria-label="Ảnh tiếp theo"
                     title="Ảnh tiếp theo"
                   >
-                    <FiChevronRight aria-hidden="true" className="h-6 w-6 xl:h-7 xl:w-7" />
+                    <FiChevronRight aria-hidden="true" className="h-6 w-6 lg:h-7 lg:w-7" />
                   </button>
 
                   <button
                     type="button"
-                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 xl:h-12 xl:w-12"
+                    className="flex h-11 w-11 touch-manipulation items-center justify-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-red-500/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 active:scale-95 lg:h-12 lg:w-12"
                     onClick={handleCloseAlbumFullscreen}
                     aria-label="Đóng xem toàn màn hình"
                     title="Đóng"
                   >
-                    <FiX aria-hidden="true" className="h-5 w-5 xl:h-6 xl:w-6" />
+                    <FiX aria-hidden="true" className="h-5 w-5 lg:h-6 lg:w-6" />
                   </button>
                 </div>
               </div>
 
-              <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[9px] font-semibold text-white/70 backdrop-blur-md xl:hidden">
+              <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[9px] font-semibold text-white/70 backdrop-blur-md lg:hidden">
                 Vuốt để chuyển · Pinch để zoom
               </div>
             </>
@@ -25034,7 +25034,7 @@ export default function LocalPage({
 
       {isPostQueueOpen ? (
         <div
-          className="fixed inset-0 z-[2147483002] flex h-dvh w-full items-center justify-center bg-black/80 p-2 backdrop-blur-md xl:p-6"
+          className="fixed inset-0 z-[2147483002] flex h-dvh w-full items-center justify-center bg-black/80 p-2 backdrop-blur-md lg:p-6"
           role="dialog"
           aria-modal="true"
           aria-label="Đăng bài theo danh mục"
@@ -25044,9 +25044,9 @@ export default function LocalPage({
           }}
         >
           <section className="relative flex max-h-[96dvh] min-h-0 w-full max-w-7xl flex-col overflow-hidden rounded-xl border border-[#d8c99f]/25 bg-[linear-gradient(145deg,#0b1722,#050a11)] shadow-[0_28px_100px_rgba(0,0,0,0.75)]">
-            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-3 py-3 xl:px-5">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-3 py-3 lg:px-5">
               <div className="min-w-0">
-                <h2 className="text-sm font-black tracking-wide text-white xl:text-base">
+                <h2 className="text-sm font-black tracking-wide text-white lg:text-base">
                   Đăng bài
                 </h2>
                 <p className="mt-0.5 text-[10px] text-slate-400">
@@ -25069,15 +25069,15 @@ export default function LocalPage({
             </header>
 
             {postQueueStage === "categories" ? (
-              <div className="min-h-0 flex-1 overflow-y-auto p-3 xl:p-5">
-                <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)] xl:gap-6">
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 lg:p-5">
+                <div className="grid min-h-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)] lg:gap-4">
                   <section className="min-w-0">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <h3 className="text-xs font-black text-white">Chọn danh mục</h3>
                       <span className="text-[10px] text-slate-500">Thứ tự chọn = thứ tự đăng</span>
                     </div>
                     {postQueueCategoryOptions.length > 0 ? (
-                      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                         {postQueueCategoryOptions.map((category) => {
                           const selectedIndex = postQueueSelectedCategories.findIndex(
                             (item) => normalizeTextKey(item) === normalizeTextKey(category.name),
@@ -25168,8 +25168,8 @@ export default function LocalPage({
             ) : null}
 
             {postQueueStage === "products" && currentPostQueueProduct ? (
-              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-2 xl:p-4">
-                <div className="mb-2 flex shrink-0 items-center justify-center gap-2 xl:mb-3">
+              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden p-2 lg:p-4">
+                <div className="mb-2 flex shrink-0 items-center justify-center gap-2 lg:mb-3">
                   <span className="max-w-[45%] truncate rounded-full border border-[#d8c99f]/20 bg-[#d8c99f]/[0.07] px-3 py-1 text-[10px] font-bold text-[#eadfbe]">
                     {normalizeCategoryName(currentPostQueueProduct.category) || "Chưa phân loại"}
                   </span>
@@ -25183,8 +25183,8 @@ export default function LocalPage({
                   ) : null}
                 </div>
 
-                <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.85fr)] xl:gap-4">
-                  <div className="flex min-h-[34dvh] min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/35 p-2 xl:min-h-0">
+                <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.85fr)] lg:gap-4">
+                  <div className="flex min-h-[34dvh] min-w-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/35 p-2 lg:min-h-0">
                     {currentPostQueueProduct.images[0]?.dataUrl ? (
                       <img
                         src={createCloudinaryThumbnailUrl(currentPostQueueProduct.images[0].dataUrl, 1280)}
@@ -25194,31 +25194,31 @@ export default function LocalPage({
                         loading="eager"
                         decoding="async"
                         fetchPriority="high"
-                        className="block h-full max-h-[42dvh] w-full object-contain xl:max-h-full"
+                        className="block h-full max-h-[42dvh] w-full object-contain lg:max-h-full"
                       />
                     ) : (
-                      <div className="flex h-full min-h-[34dvh] w-full flex-col items-center justify-center gap-2 text-slate-600 xl:min-h-0">
+                      <div className="flex h-full min-h-[34dvh] w-full flex-col items-center justify-center gap-2 text-slate-600 lg:min-h-0">
                         <FiImage aria-hidden="true" className="h-10 w-10" />
                         <span className="text-xs">Chưa có ảnh chính</span>
                       </div>
                     )}
                   </div>
 
-                  <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/20 p-3 xl:p-4">
+                  <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/20 p-3 lg:p-4">
                     <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/[0.07] bg-white/[0.025] p-3">
-                      <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-200 xl:text-sm">
+                      <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-6 text-slate-200 lg:text-sm">
                         {currentPostQueuePostText || "Sản phẩm chưa có nội dung Post."}
                       </pre>
                     </div>
                   </aside>
                 </div>
 
-                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-between px-2 xl:px-3">
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-between px-2 lg:px-3">
                   <button
                     type="button"
                     disabled={postQueueIndex <= 0 || isPostQueueProcessing}
                     onClick={() => navigatePostQueue(-1)}
-                    className="pointer-events-auto flex h-11 w-11 shrink-0 -translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    className="pointer-events-auto flex h-11 w-11 shrink-0 -translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 lg:h-12 lg:w-12"
                     title="Sản phẩm trước"
                     aria-label="Sản phẩm trước"
                   >
@@ -25228,7 +25228,7 @@ export default function LocalPage({
                     type="button"
                     disabled={postQueueIndex >= postQueueProducts.length - 1 || isPostQueueProcessing}
                     onClick={() => navigatePostQueue(1)}
-                    className="pointer-events-auto flex h-11 w-11 shrink-0 translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 xl:h-12 xl:w-12"
+                    className="pointer-events-auto flex h-11 w-11 shrink-0 translate-x-1 items-center justify-center rounded-full border border-white/20 bg-slate-950/95 text-white shadow-xl transition hover:border-[#d8c99f]/60 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-25 lg:h-12 lg:w-12"
                     title="Sản phẩm tiếp"
                     aria-label="Sản phẩm tiếp"
                   >
@@ -25270,7 +25270,7 @@ export default function LocalPage({
             ) : null}
 
             {postQueueStage === "categories" ? (
-              <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 px-3 py-3 xl:px-5">
+              <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 px-3 py-3 lg:px-5">
                 <span className="text-[10px] text-slate-500">
                   {postQueueSelectedCategories.length > 0
                     ? `${postQueueSelectedCategories.length} danh mục · ${postQueueSelectedCategories.reduce((total, category) => total + (postQueueCategoryOptions.find((option) => normalizeTextKey(option.name) === normalizeTextKey(category))?.count ?? 0), 0)} sản phẩm`
@@ -25290,7 +25290,7 @@ export default function LocalPage({
             ) : null}
 
             {postQueueStage === "products" ? (
-              <footer className="flex shrink-0 justify-center border-t border-white/10 px-3 py-3 xl:px-5">
+              <footer className="flex shrink-0 justify-center border-t border-white/10 px-3 py-3 lg:px-5">
                 <button
                   ref={postQueueConfirmButtonRef}
                   type="button"
@@ -25435,7 +25435,7 @@ export default function LocalPage({
 
                 <div
                   className={`mt-2 grid gap-2 ${pendingConfirm.onSecondary
-                    ? "grid-cols-1 xl:grid-cols-3"
+                    ? "grid-cols-1 lg:grid-cols-3"
                     : "grid-cols-2"
                     }`}
                 >
@@ -25567,11 +25567,11 @@ export default function LocalPage({
 
       {isFacebookSearchDialogOpen ? (
         <div
-          className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5"
+          className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 lg:p-5"
           onClick={() => setIsFacebookSearchDialogOpen(false)}
         >
           <form
-            className="luxury-dialog w-full max-w-xl border p-4 xl:p-5"
+            className="luxury-dialog w-full max-w-xl border p-4 lg:p-5"
             onClick={(event) => event.stopPropagation()}
             onSubmit={handleSubmitFacebookSearch}
           >
@@ -25661,10 +25661,10 @@ export default function LocalPage({
       ) : null}
 
       {pendingShare ? (
-        <div className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5">
+        <div className="luxury-modal-overlay fixed inset-0 z-modal-top flex h-dvh w-full items-center justify-center overflow-hidden p-2 lg:p-5">
           <div
             data-share-dialog="true"
-            className="luxury-dialog max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-6xl overflow-x-hidden overflow-y-auto overscroll-contain border p-3 xl:max-h-[calc(100dvh-2.5rem)] xl:overflow-y-auto xl:p-4"
+            className="luxury-dialog max-h-[calc(100dvh-1rem)] w-full min-w-0 max-w-6xl overflow-x-hidden overflow-y-auto overscroll-contain border p-3 lg:max-h-[calc(100dvh-2.5rem)] lg:overflow-y-auto lg:p-4"
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d8c99f]/20 pb-3">
               <div className="min-w-0">
@@ -25808,7 +25808,7 @@ export default function LocalPage({
                   </div>
 
                   {shareContactOptions.length > 0 ? (
-                    <div className="mt-2 h-[100px] xl:h-[130px] snap-y snap-mandatory space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+                    <div className="mt-2 h-[100px] lg:h-[130px] snap-y snap-mandatory space-y-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
                       {shareContactOptions.map((option, index) => {
                         const isActiveContact =
                           option.id === (shareContactId || selectedContactId);
@@ -25867,12 +25867,12 @@ export default function LocalPage({
       ) : null}
 
       {pendingShare && isShareMoreOpen && shareDialogStep === "share" ? (
-        <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center overflow-hidden p-2 xl:p-5">
+        <div className="luxury-modal-overlay fixed inset-0 z-[1000001] flex h-dvh w-full items-center justify-center overflow-hidden p-2 lg:p-5">
           <motion.div
             initial={{ opacity: 0, scale: 0.985, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="luxury-dialog flex h-[calc(100dvh-1rem)] w-full max-w-7xl min-w-0 flex-col overflow-hidden border p-3 xl:h-[calc(100dvh-2.5rem)] xl:p-4"
+            className="luxury-dialog flex h-[calc(100dvh-1rem)] w-full max-w-7xl min-w-0 flex-col overflow-hidden border p-3 lg:h-[calc(100dvh-2.5rem)] lg:p-4"
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#d8c99f]/20 pb-3">
               <div className="min-w-0">
@@ -25893,7 +25893,7 @@ export default function LocalPage({
               </button>
             </div>
 
-            <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 overflow-hidden xl:grid-cols-2 xl:grid-rows-1">
+            <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
               <section className="flex min-h-0 min-w-0 flex-col border border-sky-300/25 bg-sky-300/[0.055] p-2.5">
                 {settings.facebookPages.length > 0 ? (
                   <>
