@@ -39,6 +39,7 @@ const SystemControlSchema = new Schema<ISystemControl>(
     versionKey: false,
     timestamps: false,
     strict: "throw",
+    id: false,
   },
 );
 

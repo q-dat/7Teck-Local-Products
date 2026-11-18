@@ -56,6 +56,7 @@ const usedProductSchema = new Schema<IUsedProductDoc>(
     timestamps: true,
     versionKey: "__v",
     optimisticConcurrency: true,
+    id: false,
   },
 );
 

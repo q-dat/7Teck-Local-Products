@@ -1,18 +1,20 @@
 'use client';
 
-import { lazy, Suspense, useMemo, useState } from 'react';
-import type { ProductPosterRecord } from '@/types/local-products';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { FiUploadCloud } from 'react-icons/fi';
+import type { ProductContentType, ProductPosterRecord } from '@/types/local-products';
 
 const ProductPosterGenerator = lazy(
     () => import('@/components/ProductPosterGenerator'),
 );
 
 type PosterManagerProduct = {
-    id: string;
+    _id: string;
     name: string;
     priceText: string;
     category: string;
     categoryGroup: string;
+    contentType: ProductContentType;
     isDone: boolean;
     images: Array<{
         name: string;
@@ -21,7 +23,13 @@ type PosterManagerProduct = {
     posters: ProductPosterRecord[];
 };
 
+type PosterCategoryGroupOption = {
+    _id: string;
+    name: string;
+};
+
 type ProductPosterManagerModalProps = {
+    contentType: ProductContentType;
     products: PosterManagerProduct[];
     onClose: () => void;
     onSaveCategoryGroup: (productId: string, categoryGroup: string) => Promise<void>;
@@ -73,6 +81,7 @@ const getErrorMessage = (error: unknown): string => {
 };
 
 export default function ProductPosterManagerModal({
+    contentType,
     products,
     onClose,
     onSaveCategoryGroup,
@@ -86,6 +95,80 @@ export default function ProductPosterManagerModal({
     const [savingProductIds, setSavingProductIds] = useState<Set<string>>(() => new Set());
     const [feedback, setFeedback] = useState('');
     const [selectedProductId, setSelectedProductId] = useState('');
+    const [imageSourceProductId, setImageSourceProductId] = useState('');
+    const [initialImageFile, setInitialImageFile] = useState<File | null>(null);
+    const [categoryGroupOptions, setCategoryGroupOptions] = useState<PosterCategoryGroupOption[]>([]);
+    const imageSourceInputRef = useRef<HTMLInputElement | null>(null);
+
+    useEffect(() => {
+        let isActive = true;
+        const existingNames = Array.from(new Set(products
+            .map((product) => product.categoryGroup.trim())
+            .filter(Boolean)));
+
+        const loadCategoryGroups = async (): Promise<void> => {
+            try {
+                const response = await fetch(
+                    `/api/local-products/poster-category-groups?contentType=${encodeURIComponent(contentType)}`,
+                    { cache: 'no-store' },
+                );
+                let payload = (await response.json()) as {
+                    ok?: boolean;
+                    groups?: unknown;
+                    message?: unknown;
+                };
+
+                if (!response.ok || !payload.ok || !Array.isArray(payload.groups)) {
+                    throw new Error(
+                        typeof payload.message === 'string'
+                            ? payload.message
+                            : 'Không thể tải danh mục lớn.',
+                    );
+                }
+
+                let groups = payload.groups.filter(
+                    (group): group is PosterCategoryGroupOption =>
+                        Boolean(group) &&
+                        typeof group === 'object' &&
+                        typeof (group as PosterCategoryGroupOption)._id === 'string' &&
+                        typeof (group as PosterCategoryGroupOption).name === 'string',
+                );
+                const savedNameKeys = new Set(groups.map((group) => group.name.normalize('NFKC').trim().toLocaleLowerCase('vi-VN')));
+                const missingNames = existingNames.filter(
+                    (name) => !savedNameKeys.has(name.normalize('NFKC').trim().toLocaleLowerCase('vi-VN')),
+                );
+
+                if (missingNames.length > 0) {
+                    const seedResponse = await fetch('/api/local-products/poster-category-groups', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contentType, names: missingNames }),
+                    });
+                    payload = (await seedResponse.json()) as typeof payload;
+                    if (!seedResponse.ok || !payload.ok || !Array.isArray(payload.groups)) {
+                        throw new Error('Không thể đồng bộ danh mục lớn cũ.');
+                    }
+                    groups = payload.groups.filter(
+                        (group): group is PosterCategoryGroupOption =>
+                            Boolean(group) &&
+                            typeof group === 'object' &&
+                            typeof (group as PosterCategoryGroupOption)._id === 'string' &&
+                            typeof (group as PosterCategoryGroupOption).name === 'string',
+                    );
+                }
+
+                if (!isActive) return;
+                setCategoryGroupOptions(groups);
+            } catch {
+                // Existing product assignments remain available if the category API is offline.
+            }
+        };
+
+        void loadCategoryGroups();
+        return () => {
+            isActive = false;
+        };
+    }, [contentType, products]);
 
     const filteredProducts = useMemo(() => {
         const normalizedSearch = search.trim().toLocaleLowerCase('vi-VN');
@@ -152,21 +235,46 @@ export default function ProductPosterManagerModal({
     }, [filteredProducts]);
 
     const selectedProduct = products.find(
-        (product) => product.id === selectedProductId,
+        (product) => product._id === selectedProductId,
+    ) ?? null;
+    const imageSourceProduct = products.find(
+        (product) => product._id === imageSourceProductId,
     ) ?? null;
 
+    const useRepresentativeImage = (): void => {
+        if (!imageSourceProduct?.images[0]?.dataUrl) return;
+        setInitialImageFile(null);
+        setSelectedProductId(imageSourceProduct._id);
+        setImageSourceProductId('');
+    };
+
+    const handleImageSourceFileChange = (
+        event: ChangeEvent<HTMLInputElement>,
+    ): void => {
+        const file = event.currentTarget.files?.[0] ?? null;
+        event.currentTarget.value = '';
+        if (!file || !imageSourceProduct) return;
+
+        setInitialImageFile(file);
+        setSelectedProductId(imageSourceProduct._id);
+        setImageSourceProductId('');
+    };
+
     const saveCategoryGroup = async (product: PosterManagerProduct): Promise<void> => {
-        const nextValue = (categoryGroupDrafts[product.id] ?? product.categoryGroup).trim();
+        const nextValue = (categoryGroupDrafts[product._id] ?? product.categoryGroup)
+            .normalize('NFKC')
+            .trim()
+            .replace(/\s+/gu, ' ');
         if (nextValue === product.categoryGroup.trim()) return;
 
         setFeedback('');
-        setSavingProductIds((current) => new Set(current).add(product.id));
+        setSavingProductIds((current) => new Set(current).add(product._id));
 
         try {
-            await onSaveCategoryGroup(product.id, nextValue);
+            await onSaveCategoryGroup(product._id, nextValue);
             setCategoryGroupDrafts((current) => ({
                 ...current,
-                [product.id]: nextValue,
+                [product._id]: nextValue,
             }));
             setFeedback('Đã lưu danh mục lớn.');
         } catch (error) {
@@ -174,7 +282,7 @@ export default function ProductPosterManagerModal({
         } finally {
             setSavingProductIds((current) => {
                 const next = new Set(current);
-                next.delete(product.id);
+                next.delete(product._id);
                 return next;
             });
         }
@@ -187,12 +295,13 @@ export default function ProductPosterManagerModal({
     ): Promise<void> => {
         if (!selectedProduct) return;
 
-        setSavingProductIds((current) => new Set(current).add(selectedProduct.id));
+        setSavingProductIds((current) => new Set(current).add(selectedProduct._id));
         setFeedback('');
 
         try {
-            await onSavePoster(selectedProduct.id, posterName, posterBlob, fileName);
+            await onSavePoster(selectedProduct._id, posterName, posterBlob, fileName);
             setSelectedProductId('');
+            setInitialImageFile(null);
             setFeedback('Đã lưu poster vào sản phẩm.');
         } catch (error) {
             setFeedback(getErrorMessage(error));
@@ -200,7 +309,7 @@ export default function ProductPosterManagerModal({
         } finally {
             setSavingProductIds((current) => {
                 const next = new Set(current);
-                next.delete(selectedProduct.id);
+                next.delete(selectedProduct._id);
                 return next;
             });
         }
@@ -208,6 +317,13 @@ export default function ProductPosterManagerModal({
 
     return (
         <>
+            <input
+                ref={imageSourceInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="sr-only"
+                onChange={handleImageSourceFileChange}
+            />
             <div
                 className="fixed inset-0 z-[2147483000] flex h-dvh w-full items-center justify-center overflow-hidden bg-black/80 p-2 backdrop-blur-md xl:p-5"
                 role="dialog"
@@ -242,6 +358,11 @@ export default function ProductPosterManagerModal({
                             placeholder="Tìm sản phẩm hoặc danh mục..."
                             className="min-h-9 min-w-[180px] flex-1 rounded-lg border border-white/10 bg-black/25 px-3 text-xs text-white outline-none placeholder:text-slate-500 focus:border-cyan-300/50"
                         />
+                        <datalist id="poster-category-group-options">
+                            {categoryGroupOptions.map((group) => (
+                                <option key={group._id} value={group.name} />
+                            ))}
+                        </datalist>
 
                         <select
                             value={doneFilter}
@@ -295,12 +416,12 @@ export default function ProductPosterManagerModal({
                             filteredProducts.length > 0 ? (
                                 <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
                                     {filteredProducts.map((product) => {
-                                        const draftCategoryGroup = categoryGroupDrafts[product.id] ?? product.categoryGroup;
-                                        const isSaving = savingProductIds.has(product.id);
+                                        const draftCategoryGroup = categoryGroupDrafts[product._id] ?? product.categoryGroup;
+                                        const isSaving = savingProductIds.has(product._id);
 
                                         return (
                                             <article
-                                                key={product.id}
+                                                key={product._id}
                                                 className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-2.5"
                                             >
                                                 <div className="flex min-w-0 gap-3">
@@ -341,9 +462,10 @@ export default function ProductPosterManagerModal({
                                                     <div className="flex min-w-0 gap-2">
                                                         <input
                                                             value={draftCategoryGroup}
+                                                            list="poster-category-group-options"
                                                             onChange={(event) => setCategoryGroupDrafts((current) => ({
                                                                 ...current,
-                                                                [product.id]: event.target.value,
+                                                                [product._id]: event.target.value,
                                                             }))}
                                                             placeholder="Ví dụ: Laptop Văn Phòng"
                                                             aria-label={'Danh mục lớn của ' + product.name}
@@ -390,7 +512,7 @@ export default function ProductPosterManagerModal({
                                                     <button
                                                         type="button"
                                                         disabled={isSaving}
-                                                        onClick={() => setSelectedProductId(product.id)}
+                                                        onClick={() => setImageSourceProductId(product._id)}
                                                         className="min-h-9 rounded-md bg-cyan-300 px-4 text-[10px] font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-40"
                                                     >
                                                         Tạo Poster
@@ -437,7 +559,7 @@ export default function ProductPosterManagerModal({
                                                     <div className="space-y-1 border-t border-white/10 p-2">
                                                         {category.products.map((product) => (
                                                             <div
-                                                                key={product.id}
+                                                                key={product._id}
                                                                 className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-white/[0.035] px-2.5 py-2"
                                                             >
                                                                 <span className="min-w-0 break-words text-[10px] font-semibold text-slate-200">
@@ -470,6 +592,68 @@ export default function ProductPosterManagerModal({
                 </section>
             </div>
 
+            {imageSourceProduct ? (
+                <div
+                    className="fixed inset-0 z-[2147483005] flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Chọn ảnh dùng để tạo Poster"
+                    onMouseDown={(event) => {
+                        if (event.target === event.currentTarget) setImageSourceProductId('');
+                    }}
+                >
+                    <section className="w-full max-w-lg rounded-xl border border-cyan-300/20 bg-[linear-gradient(145deg,#0b1722,#050a11)] p-4 shadow-[0_28px_100px_rgba(0,0,0,0.8)]">
+                        <h2 className="text-sm font-black text-white">Chọn ảnh cho Poster</h2>
+                        <p className="mt-1 break-words text-[10px] text-slate-400">
+                            {imageSourceProduct.name}
+                        </p>
+
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                            <button
+                                type="button"
+                                disabled={!imageSourceProduct.images[0]?.dataUrl}
+                                onClick={useRepresentativeImage}
+                                className="group flex min-h-36 flex-col items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 text-center transition hover:border-cyan-300/45 hover:bg-cyan-300/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                {imageSourceProduct.images[0]?.dataUrl ? (
+                                    <img
+                                        src={imageSourceProduct.images[0].dataUrl}
+                                        alt="Ảnh đại diện sản phẩm"
+                                        className="h-20 w-20 rounded-md border border-white/10 object-contain"
+                                    />
+                                ) : (
+                                    <span className="flex h-20 w-20 items-center justify-center rounded-md border border-dashed border-white/15 text-[9px] text-slate-500">
+                                        Chưa có ảnh
+                                    </span>
+                                )}
+                                <span className="text-xs font-black text-white">Dùng ảnh đại diện</span>
+                                <span className="text-[9px] text-slate-500">Ảnh đầu tiên của sản phẩm</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => imageSourceInputRef.current?.click()}
+                                className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-cyan-300/30 bg-cyan-300/[0.035] p-3 text-center transition hover:border-cyan-200/60 hover:bg-cyan-300/[0.08]"
+                            >
+                                <FiUploadCloud className="h-8 w-8 text-cyan-200" aria-hidden="true" />
+                                <span className="text-xs font-black text-white">Tải ảnh khác lên</span>
+                                <span className="text-[9px] text-slate-500">PNG, JPG hoặc WEBP</span>
+                            </button>
+                        </div>
+
+                        <div className="mt-3 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setImageSourceProductId('')}
+                                className="min-h-9 rounded-lg border border-white/10 px-4 text-xs font-bold text-slate-300 transition hover:bg-white/[0.06]"
+                            >
+                                Hủy
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            ) : null}
+
             {selectedProduct ? (
                 <Suspense
                     fallback={
@@ -479,13 +663,17 @@ export default function ProductPosterManagerModal({
                     }
                 >
                     <ProductPosterGenerator
-                        key={selectedProduct.id}
+                        key={selectedProduct._id}
                         initialProductName={selectedProduct.name}
                         initialPrice={selectedProduct.priceText}
-                        initialImageUrl={selectedProduct.images[0]?.dataUrl ?? ''}
-                        initialImageName={selectedProduct.images[0]?.name ?? ''}
+                        initialImageUrl={initialImageFile ? '' : selectedProduct.images[0]?.dataUrl ?? ''}
+                        initialImageName={initialImageFile ? '' : selectedProduct.images[0]?.name ?? ''}
+                        initialImageFile={initialImageFile}
                         onSavePoster={saveGeneratedPoster}
-                        onClose={() => setSelectedProductId('')}
+                        onClose={() => {
+                            setSelectedProductId('');
+                            setInitialImageFile(null);
+                        }}
                     />
                 </Suspense>
             ) : null}

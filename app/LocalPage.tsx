@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -21,6 +22,7 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { VirtualizedGridHost } from "@/lib/use-virtualized-grid";
 import {
   FiArrowUp,
   FiArchive,
@@ -58,6 +60,7 @@ import {
 } from "react-icons/fi";
 import { toast, ToastContainer, type ToastOptions } from "react-toastify";
 import type { ProductPosterRecord } from "@/types/local-products";
+import { isMongoObjectIdString } from "@/lib/mongo-id";
 import "react-toastify/dist/ReactToastify.css";
 import {
   isApiGuardClientLocked,
@@ -204,7 +207,7 @@ const getContentTypeRoute = (contentType: ProductContentType): string =>
   CONTENT_TYPE_ROUTES[contentType];
 
 type LocalProduct = {
-  id: string;
+  _id: string;
   name: string;
   description: string;
   pin: string;
@@ -222,6 +225,11 @@ type LocalProduct = {
   doneAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type ProductImportRecord = Omit<LocalProduct, "_id"> & {
+  _id?: string;
+  legacyId?: string;
 };
 
 type ProductDraft = {
@@ -812,7 +820,7 @@ type ExportPayload = {
 
 type ParsedImportPayload = {
   settings?: GlobalSettings;
-  products: LocalProduct[];
+  products: ProductImportRecord[];
   scheduleConfig?: ScheduleConfig;
   scheduleAssignments?: ScheduleAssignmentMap;
   postedRecords?: PostedRecord[];
@@ -1867,13 +1875,7 @@ type SearchHighlightRange = {
   end: number;
 };
 
-type IndexedSearchToken = {
-  value: string;
-  ranges: SearchHighlightRange[];
-};
-
 type SearchTextIndex = {
-  tokens: IndexedSearchToken[];
   compactValue: string;
   compactRanges: SearchHighlightRange[];
 };
@@ -1891,6 +1893,20 @@ type ProductSearchSuggestion = {
   score: number;
 };
 
+type ProductListVirtualRow =
+  | {
+      type: "category";
+      category: string;
+      productCount: number;
+      soldCount: number;
+      activeCount: number;
+    }
+  | {
+      type: "product";
+      category: string;
+      product: LocalProduct;
+    };
+
 const normalizeSearchText = (value: string): string => {
   return value
     .normalize("NFKD")
@@ -1902,25 +1918,30 @@ const normalizeSearchText = (value: string): string => {
     .replace(/\s+/g, " ");
 };
 
+const compactSearchText = (value: string): string => {
+  const compactCharacters: string[] = [];
+
+  for (const sourceCharacter of value) {
+    const normalizedCharacters = sourceCharacter
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLocaleLowerCase("vi")
+      .replace(/đ/gu, "d");
+
+    for (const normalizedCharacter of normalizedCharacters) {
+      if (/[\p{L}\p{N}]/u.test(normalizedCharacter)) {
+        compactCharacters.push(normalizedCharacter);
+      }
+    }
+  }
+
+  return compactCharacters.join("");
+};
+
 const buildSearchTextIndex = (value: string): SearchTextIndex => {
-  const tokens: IndexedSearchToken[] = [];
   const compactRanges: SearchHighlightRange[] = [];
   const compactCharacters: string[] = [];
-  let tokenCharacters: Array<{
-    value: string;
-    range: SearchHighlightRange;
-  }> = [];
   let sourceOffset = 0;
-
-  const flushToken = (): void => {
-    if (tokenCharacters.length === 0) return;
-
-    tokens.push({
-      value: tokenCharacters.map((character) => character.value).join(""),
-      ranges: tokenCharacters.map((character) => character.range),
-    });
-    tokenCharacters = [];
-  };
 
   for (const sourceCharacter of value) {
     const start = sourceOffset;
@@ -1932,25 +1953,18 @@ const buildSearchTextIndex = (value: string): SearchTextIndex => {
       .toLocaleLowerCase("vi")
       .replace(/đ/gu, "d");
 
-    // Standalone combining marks must not split a word.
     if (!normalizedCharacters) continue;
 
     for (const normalizedCharacter of normalizedCharacters) {
       if (/[\p{L}\p{N}]/u.test(normalizedCharacter)) {
         const range = { start, end: sourceOffset };
-        tokenCharacters.push({ value: normalizedCharacter, range });
         compactCharacters.push(normalizedCharacter);
         compactRanges.push(range);
-      } else {
-        flushToken();
       }
     }
   }
 
-  flushToken();
-
   return {
-    tokens,
     compactValue: compactCharacters.join(""),
     compactRanges,
   };
@@ -1959,22 +1973,21 @@ const buildSearchTextIndex = (value: string): SearchTextIndex => {
 const findFlexibleSearchMatch = (
   content: string,
   query: string,
+  precomputedCompactQuery?: string,
 ): SearchTextMatch | null => {
   if (!query.trim()) return null;
 
-  const queryIndex = buildSearchTextIndex(query);
-  const contentIndex = buildSearchTextIndex(content);
-  const compactQuery = queryIndex.compactValue;
+  const compactQuery = precomputedCompactQuery ?? compactSearchText(query);
+  if (!compactQuery) return null;
 
-  if (!compactQuery || contentIndex.compactValue.length === 0) return null;
+  const compactMatchStart = compactSearchText(content).indexOf(compactQuery);
+  if (compactMatchStart < 0) return null;
+
+  const contentIndex = buildSearchTextIndex(content);
 
   // Match only one continuous phrase after ignoring whitespace and punctuation.
   // For example, "14 Pro" matches "14Pro", "14 Pro" and "14-Pro", but not
   // text where "14" and "Pro" occur in separate parts of the post.
-  const compactMatchStart = contentIndex.compactValue.indexOf(compactQuery);
-
-  if (compactMatchStart < 0) return null;
-
   const firstRange = contentIndex.compactRanges[compactMatchStart];
   const lastRange =
     contentIndex.compactRanges[compactMatchStart + compactQuery.length - 1];
@@ -1990,7 +2003,9 @@ const findFlexibleSearchMatch = (
 
 const matchesFlexibleSearch = (content: string, query: string): boolean => {
   if (!query.trim()) return true;
-  return findFlexibleSearchMatch(content, query) !== null;
+  const compactQuery = compactSearchText(query);
+  if (!compactQuery) return false;
+  return compactSearchText(content).includes(compactQuery);
 };
 
 const buildSearchMatchSnippet = (
@@ -2291,6 +2306,7 @@ const apiRequest = async <T,>(path: string, init?: RequestInit): Promise<T> => {
 
 type BootstrapPayload = {
   products: unknown[];
+  legacyIdMap?: Record<string, string>;
   settings?: unknown;
 };
 
@@ -2387,6 +2403,7 @@ type SyncChangesPayload = {
   mode: "snapshot" | "delta";
   products: unknown[];
   deletedProductIds: string[];
+  legacyIdMap?: Record<string, string>;
   state?: SyncStatePayload;
 };
 
@@ -2404,6 +2421,7 @@ type BootstrapCacheRecord = {
   version: 2;
   cachedAt: string;
   syncVersion: number;
+  needsMongoIdentitySync: boolean;
   payload: BootstrapPayload;
 };
 
@@ -2417,7 +2435,14 @@ const BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v2";
 const LEGACY_BOOTSTRAP_CACHE_FALLBACK_KEY = "local-products-bootstrap-cache-v1";
 const BOOTSTRAP_HOT_CACHE_MAX_CHARACTERS = 2_750_000;
 const INITIAL_PRODUCT_RENDER_LIMIT = 24;
-const PRODUCT_RENDER_BATCH_SIZE = 20;
+const INITIAL_PRODUCT_LIST_RENDER_LIMIT = 72;
+const INITIAL_ALBUM_THUMBNAIL_RENDER_LIMIT = 40;
+const PRODUCT_GRID_VIRTUALIZATION_THRESHOLD = 80;
+const ALBUM_GRID_VIRTUALIZATION_THRESHOLD = 96;
+const PRODUCT_LIST_VIRTUALIZATION_THRESHOLD = 120;
+const PRODUCT_GRID_ESTIMATED_ROW_HEIGHT = 520;
+const ALBUM_GRID_ESTIMATED_ROW_HEIGHT = 140;
+const PRODUCT_LIST_ESTIMATED_ROW_HEIGHT = 62;
 
 const normalizeBootstrapCacheRecord = (
   value: unknown,
@@ -2440,15 +2465,24 @@ const normalizeBootstrapCacheRecord = (
 
   if (!Array.isArray(payloadRecord.products)) return null;
 
+  const needsMongoIdentitySync = payloadRecord.products.some(
+    (product) =>
+      !product ||
+      typeof product !== "object" ||
+      !isMongoObjectIdString((product as Record<string, unknown>)._id),
+  );
+
   return {
     version: 2,
     cachedAt: record.cachedAt,
-    syncVersion:
-      typeof record.syncVersion === "number" &&
-        Number.isSafeInteger(record.syncVersion) &&
-        record.syncVersion >= 0
+    syncVersion: needsMongoIdentitySync
+      ? 0
+      : typeof record.syncVersion === "number" &&
+          Number.isSafeInteger(record.syncVersion) &&
+          record.syncVersion >= 0
         ? record.syncVersion
         : 0,
+    needsMongoIdentitySync,
     payload: {
       products: payloadRecord.products,
       settings: payloadRecord.settings,
@@ -2607,6 +2641,7 @@ const writeBootstrapCache = async (
     version: 2,
     cachedAt: new Date().toISOString(),
     syncVersion,
+    needsMongoIdentitySync: false,
     payload,
   };
 
@@ -2666,6 +2701,13 @@ type CloudinaryCleanupPayload = {
 };
 
 type ProductMutationPayload = SyncMutationPayload & {
+  cleanup?: CloudinaryCleanupPayload;
+  product?: unknown;
+};
+
+type ReplaceProductsPayload = SyncMutationPayload & {
+  products?: unknown;
+  legacyIdMap?: unknown;
   cleanup?: CloudinaryCleanupPayload;
 };
 
@@ -2792,7 +2834,7 @@ const createPendingImageUploadRecord = (
   file: File,
 ): PendingImageUploadRecord => ({
   id: image.id,
-  productId: product.id,
+  productId: product._id,
   product: toPersistedProduct(product),
   imageField,
   position,
@@ -3093,7 +3135,7 @@ const saveProductToDb = async (
   product: LocalProduct,
 ): Promise<CloudinaryCleanupPayload> => {
   const payload = await apiRequest<ProductMutationPayload>(
-    `/products/${encodeURIComponent(product.id)}`,
+    `/products/${encodeURIComponent(product._id)}`,
     {
       method: "PUT",
       body: JSON.stringify(toPersistedProduct(product)),
@@ -3102,6 +3144,24 @@ const saveProductToDb = async (
 
   publishLocalSyncVersion(payload.syncVersion);
   return payload.cleanup ?? emptyCloudinaryCleanup();
+};
+
+const createProductInDb = async (
+  product: Omit<LocalProduct, "_id">,
+): Promise<LocalProduct> => {
+  const payload = await apiRequest<ProductMutationPayload>("/products", {
+    method: "POST",
+    body: JSON.stringify({
+      ...product,
+      images: product.images.filter(isUploadedProductImage),
+      internalImages: product.internalImages.filter(isUploadedProductImage),
+    }),
+  });
+  const createdProduct = normalizeProduct(payload.product);
+  if (!createdProduct) throw new Error("MongoDB không trả về _id sản phẩm hợp lệ");
+
+  publishLocalSyncVersion(payload.syncVersion);
+  return createdProduct;
 };
 
 const deleteProductFromDb = async (
@@ -3116,13 +3176,33 @@ const deleteProductFromDb = async (
   return payload.cleanup ?? emptyCloudinaryCleanup();
 };
 
-const replaceAllProductsInDb = async (products: LocalProduct[]): Promise<void> => {
-  const payload = await apiRequest<SyncMutationPayload>("/products", {
+const replaceAllProductsInDb = async (
+  products: ProductImportRecord[],
+): Promise<{ products: LocalProduct[]; legacyIdMap: Record<string, string> }> => {
+  const payload = await apiRequest<ReplaceProductsPayload>("/products", {
     method: "PUT",
     body: JSON.stringify({ products }),
   });
 
   publishLocalSyncVersion(payload.syncVersion);
+
+  const savedProducts = normalizeProductsArray(payload.products);
+  if (savedProducts.length !== products.length) {
+    throw new Error("MongoDB không trả đủ sản phẩm đã import");
+  }
+
+  const rawLegacyIdMap = payload.legacyIdMap;
+  const legacyIdMap =
+    rawLegacyIdMap && typeof rawLegacyIdMap === "object"
+      ? Object.fromEntries(
+          Object.entries(rawLegacyIdMap).filter(
+            ([legacyId, mongoId]) =>
+              legacyId && isMongoObjectIdString(mongoId),
+          ),
+        ) as Record<string, string>
+      : {};
+
+  return { products: savedProducts, legacyIdMap };
 };
 
 const saveAppStatePatch = async (patch: Record<string, unknown>): Promise<void> => {
@@ -3625,7 +3705,7 @@ const getProductDoneSortValue = (
 ): number => {
   if (!product.isDone) return 0;
 
-  return pendingDoneProductIds.has(product.id) ? 0 : 1;
+  return pendingDoneProductIds.has(product._id) ? 0 : 1;
 };
 
 const sortProductsByDoneThenPrice = (
@@ -3987,14 +4067,10 @@ const normalizeImages = (value: unknown): ProductImage[] => {
   }, []);
 };
 
-const normalizeProduct = (value: unknown): LocalProduct | null => {
-  if (typeof value !== "object" || value === null) return null;
-
-  const record = value as Record<string, unknown>;
-
-  if (typeof record.id !== "string") return null;
+const normalizeProductFields = (
+  record: Record<string, unknown>,
+): Omit<LocalProduct, "_id"> | null => {
   if (typeof record.name !== "string") return null;
-
   const priceText =
     typeof record.priceText === "string" ? record.priceText : "";
   const description =
@@ -4011,7 +4087,6 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
     typeof record.isDone === "boolean" ? record.isDone : false;
 
   return {
-    id: record.id,
     name: normalizeDoneProductName(record.name, isDone),
     description,
     pin,
@@ -4063,12 +4138,54 @@ const normalizeProduct = (value: unknown): LocalProduct | null => {
   };
 };
 
+const normalizeProduct = (value: unknown): LocalProduct | null => {
+  if (typeof value !== "object" || value === null) return null;
+
+  const record = value as Record<string, unknown>;
+  if (!isMongoObjectIdString(record._id)) return null;
+
+  const fields = normalizeProductFields(record);
+  return fields ? { ...fields, _id: record._id.toLowerCase() } : null;
+};
+
+const normalizeImportedProduct = (value: unknown): ProductImportRecord | null => {
+  if (typeof value !== "object" || value === null) return null;
+
+  const record = value as Record<string, unknown>;
+  const fields = normalizeProductFields(record);
+  if (!fields) return null;
+
+  const mongoId = isMongoObjectIdString(record._id)
+    ? record._id.toLowerCase()
+    : undefined;
+  const legacyId =
+    typeof record.legacyId === "string" && record.legacyId.trim()
+      ? record.legacyId.trim()
+      : typeof record.id === "string" && record.id.trim()
+        ? record.id.trim()
+        : undefined;
+
+  return {
+    ...fields,
+    ...(mongoId ? { _id: mongoId } : {}),
+    ...(legacyId ? { legacyId } : {}),
+  };
+};
+
 const normalizeProductsArray = (value: unknown): LocalProduct[] => {
   if (!Array.isArray(value)) return [];
 
   return value
     .map((item) => normalizeProduct(item))
     .filter((item): item is LocalProduct => item !== null);
+};
+
+const normalizeImportedProductsArray = (value: unknown): ProductImportRecord[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => normalizeImportedProduct(item))
+    .filter((item): item is ProductImportRecord => item !== null);
 };
 
 const normalizeGlobalSettings = (
@@ -4194,9 +4311,46 @@ const normalizePostedRecords = (value: unknown): PostedRecord[] | undefined => {
   });
 };
 
+const remapLegacyProductReferences = (
+  legacyIdMap: Record<string, string>,
+  assignments: ScheduleAssignmentMap,
+  records: PostedRecord[],
+): { assignments: ScheduleAssignmentMap; records: PostedRecord[] } => {
+  if (Object.keys(legacyIdMap).length === 0) return { assignments, records };
+
+  const nextAssignments = Object.fromEntries(
+    Object.entries(assignments).map(([key, productId]) => [
+      key,
+      legacyIdMap[productId] ?? productId,
+    ]),
+  );
+  const nextRecords = records.map((record) => {
+    const separatorIndex = record.slotId.lastIndexOf("::");
+    if (separatorIndex < 0) return record;
+
+    const legacyId = record.slotId.slice(separatorIndex + 2);
+    const mongoId = legacyIdMap[legacyId];
+    return mongoId
+      ? { ...record, slotId: `${record.slotId.slice(0, separatorIndex + 2)}${mongoId}` }
+      : record;
+  });
+
+  return { assignments: nextAssignments, records: nextRecords };
+};
+
+const normalizeLegacyProductIdMap = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      ([legacyId, mongoId]) => legacyId.trim() && isMongoObjectIdString(mongoId),
+    ),
+  ) as Record<string, string>;
+};
+
 const parseImportPayload = (value: unknown): ParsedImportPayload | null => {
   if (Array.isArray(value)) {
-    const products = normalizeProductsArray(value);
+    const products = normalizeImportedProductsArray(value);
 
     if (products.length === 0) return null;
 
@@ -4208,7 +4362,7 @@ const parseImportPayload = (value: unknown): ParsedImportPayload | null => {
   if (typeof value !== "object" || value === null) return null;
 
   const record = value as Record<string, unknown>;
-  const products = normalizeProductsArray(record.products);
+  const products = normalizeImportedProductsArray(record.products);
 
   if (products.length === 0) return null;
 
@@ -5089,12 +5243,12 @@ const migrateBackupImageToCloudinary = async (image: ProductImage): Promise<Prod
 };
 
 const migrateBackupProductsToCloudinary = async (
-  products: LocalProduct[],
-): Promise<LocalProduct[]> => {
+  products: ProductImportRecord[],
+): Promise<ProductImportRecord[]> => {
   const newlyUploadedPublicIds: string[] = [];
 
   try {
-    const migrated: LocalProduct[] = [];
+    const migrated: ProductImportRecord[] = [];
     for (const product of products) {
       const migrateImages = async (images: ProductImage[]) => {
         const result: ProductImage[] = [];
@@ -5143,23 +5297,28 @@ const restorePayloadToLocal = async (
     taskNames: [...defaultScheduleConfig.taskNames],
     selectedCategories: [],
   };
-  const nextScheduleAssignments = payload.scheduleAssignments ?? {};
-  const nextPostedRecords = payload.postedRecords ?? [];
+  const importedScheduleAssignments = payload.scheduleAssignments ?? {};
+  const importedPostedRecords = payload.postedRecords ?? [];
 
   const cloudProducts = await migrateBackupProductsToCloudinary(payload.products);
-  await replaceAllProductsInDb(cloudProducts);
+  const imported = await replaceAllProductsInDb(cloudProducts);
+  const migratedReferences = remapLegacyProductReferences(
+    imported.legacyIdMap,
+    importedScheduleAssignments,
+    importedPostedRecords,
+  );
   await saveAppStatePatch({
     settings: nextSettings,
     scheduleConfig: nextScheduleConfig,
-    scheduleAssignments: nextScheduleAssignments,
-    postedRecords: nextPostedRecords,
+    scheduleAssignments: migratedReferences.assignments,
+    postedRecords: migratedReferences.records,
   });
 
   params.setSettings(nextSettings);
   params.setScheduleConfig(nextScheduleConfig);
-  params.setScheduleAssignments(nextScheduleAssignments);
-  params.setPostedRecords(nextPostedRecords);
-  params.setProducts(sortProductsByUpdatedAt(cloudProducts));
+  params.setScheduleAssignments(migratedReferences.assignments);
+  params.setPostedRecords(migratedReferences.records);
+  params.setProducts(sortProductsByUpdatedAt(imported.products));
 };
 
 type LocalFileSystemPermissionState = "granted" | "denied" | "prompt";
@@ -6217,7 +6376,7 @@ const saveProductImagesIntoFolders = async (
     let postFileSaved = false;
 
     try {
-      const postText = postTextByProductId.get(product.id);
+      const postText = postTextByProductId.get(product._id);
       if (postText === undefined) {
         throw new Error("Không tìm thấy nội dung Post của sản phẩm");
       }
@@ -6249,7 +6408,7 @@ const saveProductImagesIntoFolders = async (
 
     if (allImagesSaved && postFileSaved) {
       savedProducts += 1;
-      completedProductIds.push(product.id);
+      completedProductIds.push(product._id);
     } else if (!allImagesSaved) {
       // Do not mark partially saved products as complete; a subsequent run can retry them.
       failedProducts += 1;
@@ -6521,16 +6680,16 @@ const buildRandomSchedule = (
       const isFirstSlotOfDay = dailyUsedProductIds.size === 0;
 
       let candidate = dailyPool.find((product) => {
-        const duplicatedToday = dailyUsedProductIds.has(product.id);
+        const duplicatedToday = dailyUsedProductIds.has(product._id);
         const duplicatedWithPreviousDay =
-          isFirstSlotOfDay && previousDayLastTwoProductIds.includes(product.id);
+          isFirstSlotOfDay && previousDayLastTwoProductIds.includes(product._id);
 
         return !duplicatedToday && !duplicatedWithPreviousDay;
       });
 
       if (!candidate) {
         candidate = dailyPool.find(
-          (product) => !dailyUsedProductIds.has(product.id),
+          (product) => !dailyUsedProductIds.has(product._id),
         );
       }
 
@@ -6546,13 +6705,13 @@ const buildRandomSchedule = (
         contactText,
       );
 
-      dailyUsedProductIds.add(candidate.id);
+      dailyUsedProductIds.add(candidate._id);
 
       slots.push({
-        id: `${date}-${time}-${candidate.id}`,
+        id: `${date}-${time}-${candidate._id}`,
         date,
         time,
-        productId: candidate.id,
+        productId: candidate._id,
         productName: candidate.name,
         category: candidate.category,
         image: candidate.images[0]?.dataUrl,
@@ -6562,7 +6721,7 @@ const buildRandomSchedule = (
         postText,
       });
 
-      dailyPool = dailyPool.filter((product) => product.id !== candidate.id);
+      dailyPool = dailyPool.filter((product) => product._id !== candidate._id);
     }
 
     const currentDayProductIds = slots
@@ -6589,6 +6748,9 @@ export default function LocalPage({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const persistedDraftPublicIdsRef = useRef<Set<string>>(new Set<string>());
   const productsRef = useRef<LocalProduct[]>([]);
+  const legacyProductIdMapRef = useRef<Record<string, string>>({});
+  const legacyIdentitySyncInFlightRef = useRef<boolean>(false);
+  const productCreateInFlightRef = useRef<boolean>(false);
   const syncVersionRef = useRef<number>(0);
   const remoteSyncCheckInFlightRef = useRef<boolean>(false);
   const remoteSyncPromptedVersionRef = useRef<number>(0);
@@ -6770,10 +6932,6 @@ export default function LocalPage({
   const [query, setQuery] = useState<string>("");
   const [isSearchSuggestionsOpen, setIsSearchSuggestionsOpen] =
     useState<boolean>(false);
-  const [productRenderState, setProductRenderState] = useState<{
-    key: string;
-    limit: number;
-  }>({ key: "", limit: INITIAL_PRODUCT_RENDER_LIMIT });
   const [activeCategorySelection, setActiveCategorySelection] = useState<{
     scope: LocalPageScope;
     category: CategoryTab;
@@ -6929,6 +7087,8 @@ export default function LocalPage({
   const [pendingImageUploadCount, setPendingImageUploadCount] =
     useState<number>(0);
   const [isSettingsReady, setIsSettingsReady] = useState<boolean>(false);
+  const [isMongoIdentitySyncRequired, setIsMongoIdentitySyncRequired] =
+    useState<boolean>(false);
   const [pageLoadingText, setPageLoadingText] = useState<string>("");
   const [modalStack, setModalStack] = useState<ModalName[]>([]);
   const activeModal = modalStack[modalStack.length - 1] ?? "";
@@ -8550,6 +8710,7 @@ export default function LocalPage({
   const searchSuggestions = useMemo<ProductSearchSuggestion[]>(() => {
     const keyword = normalizeSearchText(query);
     const compactKeyword = keyword.replace(/\s+/g, "");
+    const compactQuery = compactSearchText(query);
 
     if (!keyword) return [];
 
@@ -8557,11 +8718,15 @@ export default function LocalPage({
       .map((product) => {
         const nameKey = normalizeSearchText(product.name);
         const compactNameKey = nameKey.replace(/\s+/g, "");
-        const nameMatch = findFlexibleSearchMatch(product.name, query);
-        const categoryMatch = findFlexibleSearchMatch(product.category, query);
-        const priceMatch = findFlexibleSearchMatch(product.priceText, query);
-        const descriptionMatch = findFlexibleSearchMatch(product.description, query);
-        const noteMatch = findFlexibleSearchMatch(product.realEstateComment, query);
+        const findFieldMatch = (
+          field: string,
+        ): SearchTextMatch | null =>
+          findFlexibleSearchMatch(field, query, compactQuery);
+        const nameMatch = findFieldMatch(product.name);
+        const descriptionMatch = findFieldMatch(product.description);
+        const noteMatch = findFieldMatch(product.realEstateComment);
+        const priceMatch = findFieldMatch(product.priceText);
+        const categoryMatch = findFieldMatch(product.category);
 
         let score = 0;
         if (nameMatch) {
@@ -8626,9 +8791,9 @@ export default function LocalPage({
   }, [query, viewProducts]);
 
   const filteredProducts = useMemo(() => {
-    const keyword = normalizeSearchText(query);
+    const compactKeyword = compactSearchText(query);
     const activeCategoryKey = normalizeTextKey(activeCategoryTab);
-    const shouldSearchAllCategories = keyword.length > 0;
+    const shouldSearchAllCategories = compactKeyword.length > 0;
 
     const matchedProducts = viewProducts.filter((product) => {
       const productCategoryKey = normalizeTextKey(product.category);
@@ -8636,15 +8801,13 @@ export default function LocalPage({
         shouldSearchAllCategories ||
         activeCategoryTab === "all" ||
         productCategoryKey === activeCategoryKey;
-      const searchableFields = [
-        product.name,
-        product.description,
-        product.realEstateComment,
-        product.priceText,
-        product.category,
-      ];
       const matchesKeyword =
-        !keyword || searchableFields.some((field) => matchesFlexibleSearch(field, query));
+        !compactKeyword ||
+        compactSearchText(product.name).includes(compactKeyword) ||
+        compactSearchText(product.description).includes(compactKeyword) ||
+        compactSearchText(product.realEstateComment).includes(compactKeyword) ||
+        compactSearchText(product.priceText).includes(compactKeyword) ||
+        compactSearchText(product.category).includes(compactKeyword);
 
       return matchesCategory && matchesKeyword;
     });
@@ -8661,6 +8824,15 @@ export default function LocalPage({
 
     return filteredProducts.filter((product) => !product.isDone);
   }, [filteredProducts, showDoneProducts]);
+
+  const selectedProductIndex = useMemo(
+    () => categoryProducts.findIndex((product) => product._id === selectedProductId),
+    [categoryProducts, selectedProductId],
+  );
+  const selectedProductGridIndexes = useMemo(
+    () => selectedProductIndex >= 0 ? [selectedProductIndex] : [],
+    [selectedProductIndex],
+  );
 
   const activeCategorySceneColor = useMemo(() => {
     if (activeCategoryTab === "all") return "";
@@ -8679,60 +8851,38 @@ export default function LocalPage({
       : activeCategoryTab;
   const isMobileSearchContext = query.trim().length > 0;
 
-  const productRenderKey = useMemo(() => {
-    return [
-      activeCategoryTab,
-      query,
-      viewProducts.length,
-      viewProducts[0]?.updatedAt ?? "",
-      categories.join("\u0000"),
-      showDoneProducts ? "show-done" : "hide-done",
-    ].join("\u0001");
-  }, [activeCategoryTab, categories, query, showDoneProducts, viewProducts]);
-  const visibleProductLimit =
-    productRenderState.key === productRenderKey
-      ? productRenderState.limit
-      : INITIAL_PRODUCT_RENDER_LIMIT;
-  const visibleProducts = useMemo(() => {
-    return categoryProducts.slice(0, visibleProductLimit);
-  }, [categoryProducts, visibleProductLimit]);
-
-  useEffect(() => {
-    if (productRenderState.key !== productRenderKey) {
-      setProductRenderState({
-        key: productRenderKey,
-        limit: INITIAL_PRODUCT_RENDER_LIMIT,
-      });
-      return;
-    }
-
-    if (productRenderState.limit >= categoryProducts.length) return;
-
-    const timeoutId = window.setTimeout(() => {
-      setProductRenderState((current) => {
-        if (current.key !== productRenderKey) return current;
-
-        return {
-          ...current,
-          limit: Math.min(
-            current.limit + PRODUCT_RENDER_BATCH_SIZE,
-            categoryProducts.length,
-          ),
-        };
-      });
-    }, 24);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [categoryProducts.length, productRenderKey, productRenderState]);
-
   const groupedProductsByCategory = useMemo(() => {
     return orderGroupsByCategories(
       createGroupedProducts(filteredProducts, pendingDoneProductIds),
       categories,
     );
   }, [categories, filteredProducts, pendingDoneProductIds]);
+
+  const productListVirtualRows = useMemo<ProductListVirtualRow[]>(() => {
+    if (activeModal !== "productList") return [];
+
+    return groupedProductsByCategory.flatMap((group) => {
+      const soldCount = group.products.reduce(
+        (count, product) => count + Number(product.isDone),
+        0,
+      );
+
+      return [
+        {
+          type: "category" as const,
+          category: group.category,
+          productCount: group.products.length,
+          soldCount,
+          activeCount: group.products.length - soldCount,
+        },
+        ...group.products.map((product) => ({
+          type: "product" as const,
+          category: group.category,
+          product,
+        })),
+      ];
+    });
+  }, [activeModal, groupedProductsByCategory]);
 
   const copyableProductGroups = useMemo(() => {
     return orderGroupsByCategories(
@@ -8818,7 +8968,7 @@ export default function LocalPage({
   const postQueueCandidates = useMemo(
     () =>
       sortProductsByCategoryThenDoneThenPrice(
-        downloadableProducts.filter((product) => !pendingDoneProductIds.has(product.id)),
+        downloadableProducts.filter((product) => !pendingDoneProductIds.has(product._id)),
         pendingDoneProductIds,
         categories,
       ),
@@ -9038,7 +9188,6 @@ export default function LocalPage({
       ...(albumSource.internalImages ?? []),
     ];
   }, [albumSource]);
-
   const albumInternalImageIds = useMemo<Set<string>>(() => {
     return new Set(
       (albumSource?.internalImages ?? []).map((image) => image.id),
@@ -9365,6 +9514,50 @@ export default function LocalPage({
     );
   }, []);
 
+  const applyLegacyProductIdentityMap = useCallback((value: unknown): void => {
+    const incomingMap = normalizeLegacyProductIdMap(value);
+    if (Object.keys(incomingMap).length === 0) return;
+
+    const legacyIdMap = {
+      ...legacyProductIdMapRef.current,
+      ...incomingMap,
+    };
+    legacyProductIdMapRef.current = legacyIdMap;
+
+    const migratedReferences = remapLegacyProductReferences(
+      legacyIdMap,
+      loadScheduleAssignments(),
+      loadPostedRecords(),
+    );
+    setScheduleAssignments(migratedReferences.assignments);
+    setPostedRecords(migratedReferences.records);
+    saveScheduleAssignments(migratedReferences.assignments);
+    savePostedRecords(migratedReferences.records);
+
+    const downloadedProductIds = loadDownloadedProductIds();
+    const migratedDownloadedProductIds = new Set(
+      Array.from(downloadedProductIds, (productId) => legacyIdMap[productId] ?? productId),
+    );
+    setDownloadedProductIds(migratedDownloadedProductIds);
+    saveDownloadedProductIds(migratedDownloadedProductIds);
+
+    const persistedShareState = loadPersistedShareModalState();
+    const migratedShareProductId = persistedShareState
+      ? legacyIdMap[persistedShareState.pendingShare.productId]
+      : undefined;
+    if (persistedShareState && migratedShareProductId) {
+      const nextShareState = {
+        ...persistedShareState,
+        pendingShare: {
+          ...persistedShareState.pendingShare,
+          productId: migratedShareProductId,
+        },
+      };
+      setPendingShare(nextShareState.pendingShare);
+      savePersistedShareModalState(nextShareState);
+    }
+  }, []);
+
   const applyBootstrapPayload = useCallback((payload: BootstrapPayload): void => {
     // Bootstrap data is only applied after a trusted, unlocked server snapshot.
     if (apiGuardActiveRef.current) return;
@@ -9375,8 +9568,18 @@ export default function LocalPage({
     const nextSettings =
       normalizeGlobalSettings(payload.settings) ?? loadGlobalSettings();
     const nextScheduleConfig = loadScheduleConfig();
-    const nextScheduleAssignments = loadScheduleAssignments();
-    const nextPostedRecords = loadPostedRecords();
+    applyLegacyProductIdentityMap(payload.legacyIdMap);
+    const legacyIdMap = legacyProductIdMapRef.current;
+    const migratedReferences = remapLegacyProductReferences(
+      legacyIdMap,
+      loadScheduleAssignments(),
+      loadPostedRecords(),
+    );
+    const nextScheduleAssignments = migratedReferences.assignments;
+    const nextPostedRecords = migratedReferences.records;
+    if (payload.legacyIdMap !== undefined) {
+      setIsMongoIdentitySyncRequired(false);
+    }
 
     persistedAppStateSignaturesRef.current = {
       settings: JSON.stringify(nextSettings),
@@ -9390,7 +9593,9 @@ export default function LocalPage({
     setScheduleConfig(nextScheduleConfig);
     setScheduleAssignments(nextScheduleAssignments);
     setPostedRecords(nextPostedRecords);
-  }, []);
+    saveScheduleAssignments(nextScheduleAssignments);
+    savePostedRecords(nextPostedRecords);
+  }, [applyLegacyProductIdentityMap]);
 
   const applySyncChangesPayload = useCallback(
     (payload: SyncChangesPayload): void => {
@@ -9398,22 +9603,25 @@ export default function LocalPage({
       if (payload.mode === "snapshot") {
         applyBootstrapPayload({
           products: payload.products,
+          legacyIdMap: payload.legacyIdMap,
           settings: payload.state?.settings,
         });
         return;
       }
 
+      applyLegacyProductIdentityMap(payload.legacyIdMap);
+
       const upsertedProducts = normalizeProductsArray(payload.products);
       const deletedProductIds = new Set<string>(payload.deletedProductIds);
       const upsertedProductIds = new Set(
-        upsertedProducts.map((product) => product.id),
+        upsertedProducts.map((product) => product._id),
       );
       const nextProducts = sortProductsByUpdatedAt([
         ...upsertedProducts,
         ...productsRef.current.filter(
           (product) =>
-            !upsertedProductIds.has(product.id) &&
-            !deletedProductIds.has(product.id),
+            !upsertedProductIds.has(product._id) &&
+            !deletedProductIds.has(product._id),
         ),
       ]);
 
@@ -9435,7 +9643,7 @@ export default function LocalPage({
       // records từ MongoDB hoặc /sync/changes để tránh ghi đè lịch Local.
 
     },
-    [applyBootstrapPayload],
+    [applyBootstrapPayload, applyLegacyProductIdentityMap],
   );
 
   const createCurrentBootstrapPayload = useCallback((): BootstrapPayload => {
@@ -9631,6 +9839,10 @@ export default function LocalPage({
 
         if (cacheRecord) {
           applyBootstrapPayload(cacheRecord.payload);
+          if (cacheRecord.needsMongoIdentitySync) {
+            clearSessionSyncVersionCheck();
+            setIsMongoIdentitySyncRequired(true);
+          }
           setLocalSyncVersion(cacheRecord.syncVersion);
           return;
         }
@@ -9654,6 +9866,52 @@ export default function LocalPage({
       cancelled = true;
     };
   }, [apiGuardSnapshotReady, applyBootstrapPayload, setLocalSyncVersion]);
+
+  useEffect(() => {
+    if (
+      !isMongoIdentitySyncRequired ||
+      !isSettingsReady ||
+      !apiGuardSnapshotReady ||
+      isApiGuardClientLocked() ||
+      legacyIdentitySyncInFlightRef.current
+    ) {
+      return;
+    }
+
+    legacyIdentitySyncInFlightRef.current = true;
+    setPageLoadingText("Đang nâng cấp danh tính sản phẩm theo MongoDB...");
+
+    void (async () => {
+      try {
+        const changes = await getSyncChanges(0);
+        if (isApiGuardClientLocked()) return;
+
+        applySyncChangesPayload(changes);
+        setLocalSyncVersion(changes.version);
+        saveSessionSyncVersionCheck(changes.version);
+        setIsMongoIdentitySyncRequired(false);
+        failedPendingImageUploadIdsRef.current.clear();
+        pendingImageQueueHydratedRef.current = false;
+        await hydratePendingImageUploads();
+      } catch (error) {
+        Toastify(
+          error instanceof Error
+            ? error.message
+            : "Không thể tải danh tính MongoDB. Nhấn Đồng bộ để thử lại.",
+          400,
+        );
+      } finally {
+        legacyIdentitySyncInFlightRef.current = false;
+        setPageLoadingText("");
+      }
+    })();
+  }, [
+    apiGuardSnapshotReady,
+    applySyncChangesPayload,
+    isMongoIdentitySyncRequired,
+    isSettingsReady,
+    setLocalSyncVersion,
+  ]);
 
   useEffect(() => {
     if (!isSettingsReady || typeof window === "undefined") return;
@@ -9975,14 +10233,14 @@ export default function LocalPage({
 
         const taskIndex = Number(taskNumberText) - 1;
         const legacyProduct = viewProducts.find(
-          (product) => product.id === legacyValue,
+          (product) => product._id === legacyValue,
         );
 
         if (!legacyProduct) return record;
 
         const matchedEntry = Object.entries(scheduleAssignments).find(
           ([key, value]) => {
-            if (value !== legacyProduct.id) return false;
+            if (value !== legacyProduct._id) return false;
             return key.startsWith(`${date}::task${taskIndex + 1}::slot`);
           },
         );
@@ -10242,7 +10500,7 @@ export default function LocalPage({
 
   useEffect(() => {
     const activeScheduleProductIds = new Set(
-      activeScheduleProducts.map((product) => product.id),
+      activeScheduleProducts.map((product) => product._id),
     );
     const removedAssignmentKeys: string[] = [];
     const nextAssignments: ScheduleAssignmentMap = {};
@@ -10922,7 +11180,7 @@ export default function LocalPage({
   const commitLocalProduct = (nextProduct: LocalProduct): LocalProduct => {
     const nextProducts = sortProductsByUpdatedAt([
       nextProduct,
-      ...productsRef.current.filter((product) => product.id !== nextProduct.id),
+      ...productsRef.current.filter((product) => product._id !== nextProduct._id),
     ]);
 
     productsRef.current = nextProducts;
@@ -10940,14 +11198,40 @@ export default function LocalPage({
       throw new Error("Hãy mở khóa quyền ghi dữ liệu rồi thử lưu lại.");
     }
 
-    const currentProduct = productsRef.current.find((product) => product.id === productId);
+    const currentProduct = productsRef.current.find((product) => product._id === productId);
     if (!currentProduct) throw new Error("Không tìm thấy sản phẩm cần cập nhật.");
 
+    const normalizedCategoryGroup = categoryGroup
+      .normalize("NFKC")
+      .trim()
+      .replace(/\s+/gu, " ");
     const nextProduct: LocalProduct = {
       ...currentProduct,
-      categoryGroup: categoryGroup.trim(),
+      categoryGroup: normalizedCategoryGroup,
       updatedAt: new Date().toISOString(),
     };
+
+    if (nextProduct.categoryGroup) {
+      const response = await fetch(`${API_BASE_URL}/poster-category-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contentType: nextProduct.contentType,
+          name: nextProduct.categoryGroup,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        message?: unknown;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(
+          typeof payload?.message === "string"
+            ? payload.message
+            : "Không thể lưu danh mục lớn vào API riêng.",
+        );
+      }
+    }
 
     await saveProductToDb(nextProduct);
     commitLocalProduct(nextProduct);
@@ -10964,7 +11248,7 @@ export default function LocalPage({
       throw new Error("Hãy mở khóa quyền ghi dữ liệu rồi thử lưu lại.");
     }
 
-    const currentProduct = productsRef.current.find((product) => product.id === productId);
+    const currentProduct = productsRef.current.find((product) => product._id === productId);
     if (!currentProduct) throw new Error("Không tìm thấy sản phẩm cần lưu poster.");
 
     const normalizedFileName = fileName.toLowerCase().endsWith(".png")
@@ -11038,7 +11322,7 @@ export default function LocalPage({
 
     const snapshotProduct = normalizeProduct(record.product);
     const currentProduct =
-      productsRef.current.find((product) => product.id === record.productId) ??
+      productsRef.current.find((product) => product._id === record.productId) ??
       snapshotProduct;
 
     if (!currentProduct) {
@@ -11089,7 +11373,7 @@ export default function LocalPage({
     }
 
     const latestProduct =
-      productsRef.current.find((product) => product.id === record.productId) ??
+      productsRef.current.find((product) => product._id === record.productId) ??
       currentProduct;
     const nextProduct = insertPendingImageIntoProduct(
       latestProduct,
@@ -11227,17 +11511,41 @@ export default function LocalPage({
 
     if (records.length === 0) return;
 
-    records.forEach((record) => {
+    const hydratedRecords = records.flatMap((record) => {
+      const rawSnapshot = record.product as unknown as Record<string, unknown>;
+      const mappedId = legacyProductIdMapRef.current[record.productId];
+      const mongoId = isMongoObjectIdString(record.productId)
+        ? record.productId
+        : mappedId ?? (isMongoObjectIdString(rawSnapshot._id) ? rawSnapshot._id : "");
+      if (!mongoId) return [];
+
+      const snapshotProduct = normalizeProduct({ ...rawSnapshot, _id: mongoId });
+      if (!snapshotProduct) return [];
+
+      return [{
+        ...record,
+        productId: mongoId,
+        product: snapshotProduct,
+      }];
+    });
+
+    if (hydratedRecords.some((record) =>
+      records.find((original) => original.id === record.id)?.productId !== record.productId,
+    )) {
+      await writePendingImageUploadRecords(hydratedRecords).catch(() => undefined);
+    }
+
+    hydratedRecords.forEach((record) => {
       pendingImageUploadsRef.current.set(record.id, record);
     });
+    if (hydratedRecords.length === 0) return;
     syncPendingImageUploadCount();
 
-    const nextProducts = records.reduce<LocalProduct[]>(
+    const nextProducts = hydratedRecords.reduce<LocalProduct[]>(
       (currentProducts, record) => {
-        const snapshotProduct = normalizeProduct(record.product);
         const product =
-          currentProducts.find((candidate) => candidate.id === record.productId) ??
-          snapshotProduct;
+          currentProducts.find((candidate) => candidate._id === record.productId) ??
+          record.product;
 
         if (!product) return currentProducts;
 
@@ -11250,7 +11558,7 @@ export default function LocalPage({
 
         return [
           nextProduct,
-          ...currentProducts.filter((candidate) => candidate.id !== nextProduct.id),
+          ...currentProducts.filter((candidate) => candidate._id !== nextProduct._id),
         ];
       },
       productsRef.current,
@@ -11697,7 +12005,7 @@ export default function LocalPage({
     const updatedRecords: PendingImageUploadRecord[] = [];
 
     Array.from(pendingImageUploadsRef.current.values())
-      .filter((record) => record.productId === product.id)
+      .filter((record) => record.productId === product._id)
       .forEach((record) => {
         const matchedField = ([
           "images",
@@ -11761,9 +12069,9 @@ export default function LocalPage({
     return records;
   };
 
-  const handleSubmit = (
+  const handleSubmit = async (
     event: FormEvent<HTMLFormElement>,
-  ): void => {
+  ): Promise<void> => {
     event.preventDefault();
     if (!requestWriteAccess()) return;
 
@@ -11784,15 +12092,14 @@ export default function LocalPage({
     }
 
     const currentProduct = productsRef.current.find(
-      (product) => product.id === editingId,
+      (product) => product._id === editingId,
     );
     const name = normalizeDoneProductName(
       rawName,
       currentProduct?.isDone ?? false,
     );
 
-    const product: LocalProduct = {
-      id: currentProduct?.id ?? crypto.randomUUID(),
+    const productFields: Omit<LocalProduct, "_id"> = {
       name,
       description,
       pin,
@@ -11812,6 +12119,30 @@ export default function LocalPage({
       updatedAt: now,
     };
 
+    let product: LocalProduct;
+    const isNewProduct = !currentProduct;
+
+    if (currentProduct) {
+      product = { ...currentProduct, ...productFields };
+    } else {
+      if (productCreateInFlightRef.current) return;
+      productCreateInFlightRef.current = true;
+      try {
+        const savedProduct = await createProductInDb(productFields);
+        product = { ...savedProduct, ...productFields };
+      } catch (error) {
+        Toastify(
+          error instanceof Error
+            ? error.message
+            : "Không thể tạo sản phẩm trong MongoDB",
+          400,
+        );
+        return;
+      } finally {
+        productCreateInFlightRef.current = false;
+      }
+    }
+
     const pendingRecords = collectDraftPendingImageUploads(product);
 
     synchronizePendingImageUploadsWithProduct(product);
@@ -11826,11 +12157,11 @@ export default function LocalPage({
 
     const existingPendingCount = Array.from(
       pendingImageUploadsRef.current.values(),
-    ).filter((record) => record.productId === product.id).length;
+    ).filter((record) => record.productId === product._id).length;
 
     if (pendingRecords.length > 0) {
       enqueuePendingImageUploads(pendingRecords);
-    } else if (existingPendingCount === 0) {
+    } else if (existingPendingCount === 0 && !isNewProduct) {
       void saveProductToDb(product)
         .then((cleanup) => {
           if (cleanup.failed.length > 0) {
@@ -11864,7 +12195,7 @@ export default function LocalPage({
   const handleEdit = (product: LocalProduct): void => {
     if (!requestWriteAccess()) return;
 
-    setEditingId(product.id);
+    setEditingId(product._id);
     setDraft({
       name: product.name,
       description: product.description,
@@ -11887,7 +12218,7 @@ export default function LocalPage({
   const handleDelete = async (id: string): Promise<void> => {
     if (!requestWriteAccess()) return;
 
-    const product = products.find((item) => item.id === id);
+    const product = products.find((item) => item._id === id);
     const productName = product?.name ?? "sản phẩm này";
 
     requestConfirm({
@@ -11932,7 +12263,7 @@ export default function LocalPage({
         });
 
         const nextProducts = productsRef.current.filter(
-          (item) => item.id !== id,
+          (item) => item._id !== id,
         );
         productsRef.current = nextProducts;
         setProducts(nextProducts);
@@ -11952,7 +12283,7 @@ export default function LocalPage({
   ): Promise<void> => {
     if (!requestWriteAccess()) return;
 
-    const productId = product.id;
+    const productId = product._id;
     const now = new Date().toISOString();
     const nextProduct: LocalProduct = {
       ...product,
@@ -11994,7 +12325,7 @@ export default function LocalPage({
     await saveProductToDb(nextProduct);
 
     setProducts((current) =>
-      current.map((item) => (item.id === productId ? nextProduct : item)),
+      current.map((item) => (item._id === productId ? nextProduct : item)),
     );
 
     Toastify(
@@ -12006,7 +12337,7 @@ export default function LocalPage({
   };
 
   const toggleProductDone = (productId: string): void => {
-    const product = products.find((item) => item.id === productId);
+    const product = products.find((item) => item._id === productId);
 
     if (!product) {
       Toastify("Không tìm thấy sản phẩm", 400);
@@ -12069,7 +12400,7 @@ export default function LocalPage({
       return;
     }
 
-    const copyKey = `cover-${product.id}`;
+    const copyKey = `cover-${product._id}`;
 
     try {
       await copyImageToClipboard(representativeImage);
@@ -12973,10 +13304,10 @@ export default function LocalPage({
         downloadResult.failedImageNames.length === 0 &&
         downloadResult.downloadedCount === product.images.length
       ) {
-        markProductImagesDownloaded([product.id]);
+        markProductImagesDownloaded([product._id]);
       }
 
-      advancePostQueue(product.id);
+      advancePostQueue(product._id);
 
       const feedback: string[] = [];
       feedback.push(copied ? "đã copy Post" : "không copy được Post");
@@ -13577,7 +13908,7 @@ export default function LocalPage({
       const descriptionText =
         product.description.trim() || settings.commonDescription.trim();
       const shareRequest: ShareRequest = {
-        productId: product.id,
+        productId: product._id,
         title: product.name,
         images: product.images,
         internalImages: product.internalImages,
@@ -13591,7 +13922,7 @@ export default function LocalPage({
           product.realEstateComment,
         ),
         commentTextIsVerbatim: isPropertyContentType(product.contentType),
-        shareKey: `share-product-${product.id}`,
+        shareKey: `share-product-${product._id}`,
         successMessage: "Đã mở chia sẻ chỉ hình ảnh",
       };
 
@@ -13614,7 +13945,7 @@ export default function LocalPage({
       autoCopyShareMode === "comment" ? "Cmt" : "Post";
 
     const request: DownloadRequest = {
-      productIds: [product.id],
+      productIds: [product._id],
       title: "Tải ảnh sản phẩm",
       description: `Tải ảnh của sản phẩm này về máy? Nội dung ${autoCopyLabel} đã chọn sẽ được tự động copy trước khi tải.`,
       mode: "multiple",
@@ -13657,8 +13988,8 @@ export default function LocalPage({
 
     const storedDownloadedProductIds = loadDownloadedProductIds();
     const wasDownloaded =
-      downloadedProductIds.has(product.id) ||
-      storedDownloadedProductIds.has(product.id);
+      downloadedProductIds.has(product._id) ||
+      storedDownloadedProductIds.has(product._id);
 
     if (!wasDownloaded) {
       requestDownload(request);
@@ -13689,7 +14020,7 @@ export default function LocalPage({
           );
 
           if (result.failedImageNames.length === 0) {
-            markProductImagesDownloaded([product.id]);
+            markProductImagesDownloaded([product._id]);
             Toastify(
               `Đã gửi ${result.downloadedCount} ảnh nguyên bản vào trình tải xuống`,
               200,
@@ -14056,7 +14387,7 @@ export default function LocalPage({
     if (!requestWriteAccess()) return;
 
     const currentProduct = productsRef.current.find(
-      (product) => product.id === imageOverlayEditor.productId,
+      (product) => product._id === imageOverlayEditor.productId,
     );
     if (!currentProduct) {
       Toastify("Không tìm thấy sản phẩm gốc để lưu ảnh ghép", 400);
@@ -14154,7 +14485,7 @@ export default function LocalPage({
       }
 
       const latestProduct =
-        productsRef.current.find((product) => product.id === currentProduct.id) ??
+        productsRef.current.find((product) => product._id === currentProduct._id) ??
         currentProduct;
       const imageField: ProductImageField = latestProduct.images.some(
         (image) => image.id === baseImage.id,
@@ -14233,9 +14564,9 @@ export default function LocalPage({
         );
       }
 
-      setAlbumSource((current) => current && current.productId === nextProduct.id
+      setAlbumSource((current) => current && current.productId === nextProduct._id
         ? {
-          productId: nextProduct.id,
+          productId: nextProduct._id,
           title: nextProduct.name,
           description: nextProduct.description,
           priceText: nextProduct.priceText,
@@ -14398,7 +14729,7 @@ export default function LocalPage({
   const handleShareProduct = (product: LocalProduct): void => {
     const descriptionText =
       product.description.trim() || settings.commonDescription.trim();
-    const shareKey = `share-product-${product.id}`;
+    const shareKey = `share-product-${product._id}`;
 
     scheduleProductImageBlobCache([
       ...product.images,
@@ -14410,7 +14741,7 @@ export default function LocalPage({
     setShareContactId(selectedContactId);
     setFacebookGroupActiveIndex(0);
     setPendingShare({
-      productId: product.id,
+      productId: product._id,
       title: product.name,
       images: product.images,
       internalImages: product.internalImages,
@@ -15133,7 +15464,7 @@ export default function LocalPage({
         : `danh mục ${imageDownloadCategory}`;
 
     requestDownload({
-      productIds: representativeImageProducts.map((product) => product.id),
+      productIds: representativeImageProducts.map((product) => product._id),
       title: "Tải ảnh đại diện",
       description: `Tải ${representativeImages.length} ảnh đại diện, là ảnh đầu tiên có index 0 của mỗi sản phẩm thuộc ${categoryLabel}, về máy?`,
       mode: representativeImages.length === 1 ? "single" : "multiple",
@@ -15189,10 +15520,10 @@ export default function LocalPage({
           (product) =>
             product.images.length + product.internalImages.length > 0,
         )
-        .map((product) => product.id),
+        .map((product) => product._id),
       productIdsWhenSkippingInternal: filteredImageDownloadProducts
         .filter((product) => product.images.length > 0)
-        .map((product) => product.id),
+        .map((product) => product._id),
       title: "Tải toàn bộ ảnh",
       description: `Tải ảnh của tất cả sản phẩm chưa DONE về máy? Toàn bộ nội dung ${autoCopyShareMode === "comment" ? "Cmt" : "Post"} của các sản phẩm này sẽ được tự động copy trước khi tải.`,
       mode: "multiple",
@@ -15252,7 +15583,7 @@ export default function LocalPage({
     const postTextByProductId = new Map<string, string>(
       products.map(
         (product): [string, string] => [
-          product.id,
+          product._id,
           buildPostTextSource(
             product,
             settings.commonDescription,
@@ -15261,7 +15592,7 @@ export default function LocalPage({
         ],
       ),
     );
-    const productIds = products.map((product) => product.id);
+    const productIds = products.map((product) => product._id);
     const storedDownloadedProductIds = loadDownloadedProductIds();
     const wasDownloaded = productIds.some(
       (productId) =>
@@ -15332,7 +15663,7 @@ export default function LocalPage({
           ),
         );
         const remainingProducts = products.filter(
-          (product) => !skippedIds.has(product.id),
+          (product) => !skippedIds.has(product._id),
         );
 
         if (remainingProducts.length === 0) {
@@ -15423,7 +15754,7 @@ export default function LocalPage({
       scheduleAssignments[legacyAssignmentKey];
 
     return viewProducts.find(
-      (product) => product.id === productId && !product.isDone,
+      (product) => product._id === productId && !product.isDone,
     );
   };
 
@@ -15448,7 +15779,7 @@ export default function LocalPage({
 
     if (productId) {
       const selectedProduct = viewProducts.find(
-        (product) => product.id === productId,
+        (product) => product._id === productId,
       );
 
       if (!selectedProduct) {
@@ -15713,7 +16044,7 @@ export default function LocalPage({
 
         if (!product) break;
 
-        if (usedProductIdsInTask.has(product.id)) {
+        if (usedProductIdsInTask.has(product._id)) {
           continue;
         }
 
@@ -15722,8 +16053,8 @@ export default function LocalPage({
           slotIndex,
           taskIndex,
         );
-        nextAssignments[assignmentKey] = product.id;
-        usedProductIdsInTask.add(product.id);
+        nextAssignments[assignmentKey] = product._id;
+        usedProductIdsInTask.add(product._id);
         productIndex += 1;
       }
     }
@@ -19320,7 +19651,7 @@ export default function LocalPage({
 
                       return (
                         <button
-                          key={product.id}
+                          key={product._id}
                           type="button"
                           role="option"
                           aria-selected="false"
@@ -19842,18 +20173,52 @@ export default function LocalPage({
                 Chưa có sản phẩm phù hợp.
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 lg:[grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
-                {visibleProducts.map((product, index) => {
+              <VirtualizedGridHost
+                itemCount={categoryProducts.length}
+                resetKey={categoryProducts}
+                initialItemCount={INITIAL_PRODUCT_RENDER_LIMIT}
+                virtualizeAfter={PRODUCT_GRID_VIRTUALIZATION_THRESHOLD}
+                estimatedRowHeight={PRODUCT_GRID_ESTIMATED_ROW_HEIGHT}
+                overscanRows={2}
+                pinnedIndexes={selectedProductGridIndexes}
+                getItemKey={(index) => categoryProducts[index]?._id}
+              >
+                {({
+                  gridRef,
+                  renderSegments,
+                  trailingSpacerHeight,
+                  wasRenderedBefore,
+                }) => (
+                  <div
+                    ref={gridRef}
+                    className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 lg:[grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
+                  >
+                {renderSegments.map((segment) => (
+                  <Fragment key={`${segment.startIndex}-${segment.endIndex}`}>
+                    {segment.beforeSpacerHeight > 0 ? (
+                      <div
+                        aria-hidden="true"
+                        className="col-span-full pointer-events-none"
+                        style={{
+                          gridColumn: "1 / -1",
+                          height: `${segment.beforeSpacerHeight}px`,
+                        }}
+                      />
+                    ) : null}
+                    {categoryProducts
+                      .slice(segment.startIndex, segment.endIndex)
+                      .map((product, segmentIndex) => {
+                  const index = segment.startIndex + segmentIndex;
                   const descriptionPreview =
                     product.description.trim() ||
                     settings.commonDescription.trim();
-                  const active = selectedProductId === product.id;
-                  const expanded = expandedProductIds.has(product.id);
+                  const active = selectedProductId === product._id;
+                  const expanded = expandedProductIds.has(product._id);
                   const productDone = product.isDone;
                   const pinText = product.pin.trim();
                   const statusText = product.status.trim();
                   const imagesDownloaded =
-                    downloadedProductIds.has(product.id);
+                    downloadedProductIds.has(product._id);
                   const pendingImageCount = [
                     ...product.images,
                     ...product.internalImages,
@@ -19861,8 +20226,9 @@ export default function LocalPage({
 
                   return (
                     <article
-                      key={`${activeCategoryTab}-${product.id}`}
+                      key={`${activeCategoryTab}-${product._id}`}
                       data-product-card="true"
+                      data-virtual-index={index}
                       data-active={active}
                       data-done={productDone}
                       data-content-type={product.contentType}
@@ -19875,6 +20241,7 @@ export default function LocalPage({
                           settings.categoryColors,
                         ),
                         animationDelay: `${Math.min(index * 34, 340)}ms`,
+                        animation: wasRenderedBefore(index) ? "none" : undefined,
                         contentVisibility: "auto",
                         containIntrinsicSize: "520px",
                       }}
@@ -19883,7 +20250,7 @@ export default function LocalPage({
                           ? "border-[#e8d9ae]/70 bg-[#15140f]"
                           : "border-[#d8c99f]/[0.15] bg-[#0b0e14]"
                         }`}
-                      onClickCapture={() => setSelectedProductId(product.id)}
+                      onClickCapture={() => setSelectedProductId(product._id)}
                     >
                       <button
                         type="button"
@@ -19895,7 +20262,7 @@ export default function LocalPage({
                         onClick={(event) => {
                           event.stopPropagation();
                           openImageAlbum({
-                            productId: product.id,
+                            productId: product._id,
                             title: product.name,
                             description: descriptionPreview,
                             priceText: product.priceText,
@@ -20018,7 +20385,7 @@ export default function LocalPage({
                                 return;
                               }
 
-                              toggleExpandedProduct(product.id);
+                              toggleExpandedProduct(product._id);
                             }}
                           >
                             {product.name}
@@ -20042,25 +20409,25 @@ export default function LocalPage({
                                 return;
                               }
 
-                              toggleExpandedProduct(product.id);
+                              toggleExpandedProduct(product._id);
                             }}
                             onKeyDown={(event) => {
                               event.stopPropagation();
 
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                toggleExpandedProduct(product.id);
+                                toggleExpandedProduct(product._id);
                               }
                             }}
                           >
                             <div className="w-full min-w-0 whitespace-pre-wrap text-[10px] leading-[16px] text-slate-300 [overflow-wrap:anywhere]">
                               {renderDescriptionText(
-                                product.id,
+                                product._id,
                                 descriptionPreview,
                                 true,
                               )}
                             </div>
-                            {selectedDescriptionCopy?.productId === product.id &&
+                            {selectedDescriptionCopy?.productId === product._id &&
                               selectedDescriptionCopy.text ? (
                               <button
                                 type="button"
@@ -20068,10 +20435,10 @@ export default function LocalPage({
                                 className="mt-2 inline-flex w-full items-center justify-center gap-1 border border-emerald-300/40 bg-emerald-300/[0.07] px-1.5 py-1 text-[9px] font-black text-emerald-100 transition hover:border-emerald-200/60 hover:bg-emerald-300/[0.12] active:opacity-80"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  void handleCopySelectedDescription(product.id);
+                                  void handleCopySelectedDescription(product._id);
                                 }}
                               >
-                                {renderCopyIcon(`selected-description-${product.id}`)}
+                                {renderCopyIcon(`selected-description-${product._id}`)}
                                 Copy phần đã chọn
                               </button>
                             ) : null}
@@ -20080,7 +20447,7 @@ export default function LocalPage({
                               className="mt-2 inline-flex w-full items-center justify-center border border-[#d8c99f]/20 bg-[#d8c99f]/[0.045] px-2 py-1.5 text-[10px] font-black text-slate-200 transition hover:border-[#d8c99f]/40 hover:bg-[#d8c99f]/[0.08] hover:text-[#f1e5c2]"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                toggleExpandedProduct(product.id);
+                                toggleExpandedProduct(product._id);
                               }}
                             >
                               Thu gọn
@@ -20094,7 +20461,7 @@ export default function LocalPage({
                             aria-label="Xem chi tiết mô tả"
                             onClick={(event) => {
                               event.stopPropagation();
-                              toggleExpandedProduct(product.id);
+                              toggleExpandedProduct(product._id);
                             }}
                           >
                             XEM CHI TIẾT
@@ -20119,7 +20486,7 @@ export default function LocalPage({
                               active={active}
                               shortcut="1"
                             />
-                            {renderCopyIcon(`cover-${product.id}`)}
+                            {renderCopyIcon(`cover-${product._id}`)}
                             <span className=" truncate whitespace-nowrap">Ảnh Chính</span>
                           </button>
 
@@ -20140,7 +20507,7 @@ export default function LocalPage({
                               active={active}
                               shortcut="2"
                             />
-                            {copiedKey === `share-product-${product.id}` ? (
+                            {copiedKey === `share-product-${product._id}` ? (
                               <FiCheck
                                 aria-hidden="true"
                                 className={iconClassName}
@@ -20165,7 +20532,7 @@ export default function LocalPage({
                             onClick={(event) => {
                               event.stopPropagation();
                               void handleCopyField(
-                                `post-${product.id}`,
+                                `post-${product._id}`,
                                 "post",
                                 composeCopyText(
                                   descriptionPreview,
@@ -20179,7 +20546,7 @@ export default function LocalPage({
                               active={active}
                               shortcut="6"
                             />
-                            {renderCopyIcon(`post-${product.id}`)}
+                            {renderCopyIcon(`post-${product._id}`)}
                             <span className=" truncate whitespace-nowrap">Post</span>
                           </button>
 
@@ -20194,7 +20561,7 @@ export default function LocalPage({
                             onClick={(event) => {
                               event.stopPropagation();
                               void handleCopyField(
-                                `cmt-${product.id}`,
+                                `cmt-${product._id}`,
                                 "cmt",
                                 appendRandomSocialTagsForCopy(
                                   buildCommentContentText(
@@ -20215,7 +20582,7 @@ export default function LocalPage({
                               active={active}
                               shortcut="3"
                             />
-                            {renderCopyIcon(`cmt-${product.id}`)}
+                            {renderCopyIcon(`cmt-${product._id}`)}
                             <span className=" truncate whitespace-nowrap">Cmt</span>
                           </button>
 
@@ -20254,7 +20621,7 @@ export default function LocalPage({
                             onClick={(event) => {
                               event.stopPropagation();
                               void handleCopyField(
-                                `name-${product.id}`,
+                                `name-${product._id}`,
                                 "tên",
                                 product.name,
                               );
@@ -20264,7 +20631,7 @@ export default function LocalPage({
                               active={active}
                               shortcut="5"
                             />
-                            {renderCopyIcon(`name-${product.id}`)}
+                            {renderCopyIcon(`name-${product._id}`)}
                             <span className=" truncate whitespace-nowrap">Tên</span>
                           </button>
 
@@ -20281,7 +20648,7 @@ export default function LocalPage({
                                   }`}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  void toggleProductDone(product.id);
+                                  void toggleProductDone(product._id);
                                 }}
                               >
                                 <FiCheckCircle
@@ -20301,7 +20668,7 @@ export default function LocalPage({
                                 className={`${productActionButtonBaseClassName} border-rose-300/[0.28] bg-rose-300/[0.045] text-rose-100 hover:border-rose-300/[0.55] hover:bg-rose-300/[0.08]`}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  void handleDelete(product.id);
+                                  void handleDelete(product._id);
                                 }}
                               >
                                 <FiTrash2
@@ -20317,13 +20684,21 @@ export default function LocalPage({
                     </article>
                   );
                 })}
-                {visibleProducts.length < categoryProducts.length ? (
-                  <div className="col-span-full flex items-center justify-center gap-2 border border-[#d8c99f]/10 bg-[#d8c99f]/[0.025] px-3 py-2 text-[10px] font-bold text-slate-400">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#e6cf8b]" />
-                    Đang dựng {visibleProducts.length}/{categoryProducts.length} sản phẩm
-                  </div>
+                  </Fragment>
+                ))}
+                {trailingSpacerHeight > 0 ? (
+                  <div
+                    aria-hidden="true"
+                    className="col-span-full pointer-events-none"
+                    style={{
+                      gridColumn: "1 / -1",
+                      height: `${trailingSpacerHeight}px`,
+                    }}
+                  />
                 ) : null}
-              </div>
+                  </div>
+                )}
+              </VirtualizedGridHost>
             )}
           </div>
         </section>
@@ -21519,141 +21894,183 @@ export default function LocalPage({
                           <div className="px-2 py-2">Cập nhật</div>
                         </div>
 
-                        {groupedProductsByCategory.map((group) => {
-                          const groupSoldCount = group.products.filter(
-                            (product) => product.isDone,
-                          ).length;
-                          const groupActiveCount =
-                            group.products.length - groupSoldCount;
-
-                          return (
+                        <VirtualizedGridHost
+                          itemCount={productListVirtualRows.length}
+                          resetKey={productListVirtualRows}
+                          initialItemCount={INITIAL_PRODUCT_LIST_RENDER_LIMIT}
+                          virtualizeAfter={PRODUCT_LIST_VIRTUALIZATION_THRESHOLD}
+                          estimatedRowHeight={PRODUCT_LIST_ESTIMATED_ROW_HEIGHT}
+                          overscanRows={6}
+                          scrollTarget="closest"
+                          scrollContainerSelector=".product-list-scroll"
+                        >
+                          {({ gridRef, renderSegments, trailingSpacerHeight }) => (
                             <div
-                              key={group.category}
-                              style={createCategoryColorStyle(
-                                group.category,
-                                settings.categoryColors,
-                              )}
+                              ref={gridRef}
+                              className="grid min-w-[860px] grid-cols-1"
                             >
-                              <div className="category-list-group-header grid grid-cols-[170px_minmax(360px,1fr)_120px_90px_140px] border-b text-xs font-black">
-                                <div className="border-r border-[#d8c99f]/20 px-2 py-2">
-                                  {group.category}
-                                </div>
-
-                                <div className="border-r border-[#d8c99f]/20 px-2 py-2">
-                                  {group.products.length} sản phẩm
-                                </div>
-
-                                <div className="border-r border-[#d8c99f]/20 px-2 py-2">
-                                  {groupSoldCount} bán / {groupActiveCount} còn
-                                </div>
-
-                                <div className="border-r border-[#d8c99f]/20 px-2 py-2" />
-
-                                <div className="px-2 py-2" />
-                              </div>
-
-                              {group.products.map((product) => {
-                                const isSelected =
-                                  selectedProductId === product.id;
-                                const statusLabel = product.isDone
-                                  ? "Đã bán"
-                                  : "Chưa bán";
-
-                                return (
-                                  <div
-                                    key={product.id}
-                                    className={`grid grid-cols-[170px_minmax(360px,1fr)_120px_90px_140px] border-b border-white/10 text-xs transition ${isSelected
-                                      ? "bg-cyan-300/10 text-white"
-                                      : product.isDone
-                                        ? "bg-emerald-400/[0.04] text-slate-300 hover:bg-emerald-400/10"
-                                        : "bg-slate-950 text-slate-300 hover:bg-slate-800"
-                                      }`}
-                                    onClick={() =>
-                                      setSelectedProductId(product.id)
-                                    }
-                                  >
-                                    <div className="category-list-name flex items-center border-r border-white/10 px-2 py-2 text-[11px] font-bold">
-                                      {group.category}
-                                    </div>
-
-                                    <button
-                                      type="button"
-                                      className=" border-r border-white/10 px-2 py-2 text-left transition hover:bg-slate-800"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleEdit(product);
+                              {renderSegments.map((segment) => (
+                                <Fragment key={`${segment.startIndex}-${segment.endIndex}`}>
+                                  {segment.beforeSpacerHeight > 0 ? (
+                                    <div
+                                      aria-hidden="true"
+                                      className="pointer-events-none"
+                                      style={{
+                                        gridColumn: "1 / -1",
+                                        height: `${segment.beforeSpacerHeight}px`,
                                       }}
-                                    >
-                                      <div className="flex  items-center gap-2">
-                                        {isPropertyContentType(product.contentType) ? (
-                                          <span className="shrink-0 rounded-md border border-amber-300/40 bg-amber-300/15 px-1.5 py-0.5 text-[9px] font-black text-amber-100">
-                                            {getContentTypeTag(product.contentType)}
-                                          </span>
-                                        ) : null}
-                                        {product.isDone ? (
-                                          <span className="shrink-0 rounded-md bg-emerald-300 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
-                                            Đã bán
-                                          </span>
-                                        ) : null}
+                                    />
+                                  ) : null}
+                                  {productListVirtualRows
+                                    .slice(segment.startIndex, segment.endIndex)
+                                    .map((row, segmentIndex) => {
+                                      const index = segment.startIndex + segmentIndex;
 
-                                        <p className={`${fullCardItemNameClassName} text-xs font-black leading-5 text-white lg:text-sm lg:leading-6`}>
-                                          {product.name}
-                                        </p>
-                                      </div>
+                                      if (row.type === "category") {
+                                        return (
+                                          <div
+                                            key={`category-${row.category}`}
+                                            data-virtual-index={index}
+                                            style={createCategoryColorStyle(
+                                              row.category,
+                                              settings.categoryColors,
+                                            )}
+                                            className="category-list-group-header grid grid-cols-[170px_minmax(360px,1fr)_120px_90px_140px] border-b text-xs font-black"
+                                          >
+                                            <div className="border-r border-[#d8c99f]/20 px-2 py-2">
+                                              {row.category}
+                                            </div>
+                                            <div className="border-r border-[#d8c99f]/20 px-2 py-2">
+                                              {row.productCount} sản phẩm
+                                            </div>
+                                            <div className="border-r border-[#d8c99f]/20 px-2 py-2">
+                                              {row.soldCount} bán / {row.activeCount} còn
+                                            </div>
+                                            <div className="border-r border-[#d8c99f]/20 px-2 py-2" />
+                                            <div className="px-2 py-2" />
+                                          </div>
+                                        );
+                                      }
 
-                                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                                        <span className="rounded-md bg-cyan-300 px-2 py-1 text-xs font-black text-slate-950">
-                                          {product.priceText || "Chưa có giá"}
-                                        </span>
+                                      const { product } = row;
+                                      const isSelected =
+                                        selectedProductId === product._id;
+                                      const statusLabel = product.isDone
+                                        ? "Đã bán"
+                                        : "Chưa bán";
 
-                                        <span className="text-[10px] font-bold text-slate-500">
-                                          Bấm vào tên để sửa
-                                        </span>
-                                      </div>
-                                    </button>
+                                      return (
+                                        <div
+                                          key={product._id}
+                                          data-virtual-index={index}
+                                          style={createCategoryColorStyle(
+                                            row.category,
+                                            settings.categoryColors,
+                                          )}
+                                          className={`grid grid-cols-[170px_minmax(360px,1fr)_120px_90px_140px] border-b border-white/10 text-xs transition ${isSelected
+                                            ? "bg-cyan-300/10 text-white"
+                                            : product.isDone
+                                              ? "bg-emerald-400/[0.04] text-slate-300 hover:bg-emerald-400/10"
+                                              : "bg-slate-950 text-slate-300 hover:bg-slate-800"
+                                            }`}
+                                          onClick={() =>
+                                            setSelectedProductId(product._id)
+                                          }
+                                        >
+                                          <div className="category-list-name flex items-center border-r border-white/10 px-2 py-2 text-[11px] font-bold">
+                                            {row.category}
+                                          </div>
 
-                                    <div className="flex items-center border-r border-white/10 px-2 py-2">
-                                      <button
-                                        type="button"
-                                        className={`w-full rounded-md px-2 py-1.5 text-[10px] font-black transition active:opacity-80 ${product.isDone
-                                          ? "bg-emerald-300 text-slate-950 hover:bg-emerald-200"
-                                          : "border border-slate-500/40 bg-slate-800 text-slate-300 hover:bg-slate-700"
-                                          }`}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          void toggleProductDone(product.id);
-                                        }}
-                                      >
-                                        {statusLabel}
-                                      </button>
-                                    </div>
+                                          <button
+                                            type="button"
+                                            className=" border-r border-white/10 px-2 py-2 text-left transition hover:bg-slate-800"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              handleEdit(product);
+                                            }}
+                                          >
+                                            <div className="flex  items-center gap-2">
+                                              {isPropertyContentType(product.contentType) ? (
+                                                <span className="shrink-0 rounded-md border border-amber-300/40 bg-amber-300/15 px-1.5 py-0.5 text-[9px] font-black text-amber-100">
+                                                  {getContentTypeTag(product.contentType)}
+                                                </span>
+                                              ) : null}
+                                              {product.isDone ? (
+                                                <span className="shrink-0 rounded-md bg-emerald-300 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
+                                                  Đã bán
+                                                </span>
+                                              ) : null}
 
-                                    <div className="flex items-center border-r border-white/10 px-2 py-2 text-xs font-black text-slate-300">
-                                      {product.images.length}
-                                    </div>
+                                              <p className={`${fullCardItemNameClassName} text-xs font-black leading-5 text-white lg:text-sm lg:leading-6`}>
+                                                {product.name}
+                                              </p>
+                                            </div>
 
-                                    <div className="flex flex-col justify-center px-2 py-1.5 text-[10px] text-slate-500">
-                                      <span>
-                                        {new Date(
-                                          product.updatedAt,
-                                        ).toLocaleDateString("vi-VN")}
-                                      </span>
+                                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                                              <span className="rounded-md bg-cyan-300 px-2 py-1 text-xs font-black text-slate-950">
+                                                {product.priceText || "Chưa có giá"}
+                                              </span>
 
-                                      {product.doneAt ? (
-                                        <span className="mt-0.5 text-slate-300/80">
-                                          Bán:{" "}
-                                          {new Date(
-                                            product.doneAt,
-                                          ).toLocaleDateString("vi-VN")}
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                                              <span className="text-[10px] font-bold text-slate-500">
+                                                Bấm vào tên để sửa
+                                              </span>
+                                            </div>
+                                          </button>
+
+                                          <div className="flex items-center border-r border-white/10 px-2 py-2">
+                                            <button
+                                              type="button"
+                                              className={`w-full rounded-md px-2 py-1.5 text-[10px] font-black transition active:opacity-80 ${product.isDone
+                                                ? "bg-emerald-300 text-slate-950 hover:bg-emerald-200"
+                                                : "border border-slate-500/40 bg-slate-800 text-slate-300 hover:bg-slate-700"
+                                                }`}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                void toggleProductDone(product._id);
+                                              }}
+                                            >
+                                              {statusLabel}
+                                            </button>
+                                          </div>
+
+                                          <div className="flex items-center border-r border-white/10 px-2 py-2 text-xs font-black text-slate-300">
+                                            {product.images.length}
+                                          </div>
+
+                                          <div className="flex flex-col justify-center px-2 py-1.5 text-[10px] text-slate-500">
+                                            <span>
+                                              {new Date(
+                                                product.updatedAt,
+                                              ).toLocaleDateString("vi-VN")}
+                                            </span>
+
+                                            {product.doneAt ? (
+                                              <span className="mt-0.5 text-slate-300/80">
+                                                Bán:{" "}
+                                                {new Date(
+                                                  product.doneAt,
+                                                ).toLocaleDateString("vi-VN")}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </Fragment>
+                              ))}
+                              {trailingSpacerHeight > 0 ? (
+                                <div
+                                  aria-hidden="true"
+                                  className="pointer-events-none"
+                                  style={{
+                                    gridColumn: "1 / -1",
+                                    height: `${trailingSpacerHeight}px`,
+                                  }}
+                                />
+                              ) : null}
                             </div>
-                          );
-                        })}
+                          )}
+                        </VirtualizedGridHost>
                       </div>
                     ) : (
                       <div className="flex h-full min-h-[260px] items-center justify-center p-2 text-center">
@@ -22501,13 +22918,13 @@ export default function LocalPage({
 
                                     event.dataTransfer.setData(
                                       "text/plain",
-                                      assignedProduct.id,
+                                      assignedProduct._id,
                                     );
                                     event.dataTransfer.setData(
                                       "application/x-schedule-assignment-key",
                                       assignmentKey,
                                     );
-                                    setDraggingProductId(assignedProduct.id);
+                                    setDraggingProductId(assignedProduct._id);
                                   }}
                                   onDragEnd={() => setDraggingProductId("")}
                                   onDragOver={(event) => event.preventDefault()}
@@ -22535,7 +22952,7 @@ export default function LocalPage({
                                     </div>
 
                                     <select
-                                      value={assignedProduct?.id ?? ""}
+                                      value={assignedProduct?._id ?? ""}
                                       onChange={(event) =>
                                         assignProductToSchedule(
                                           today,
@@ -22575,10 +22992,10 @@ export default function LocalPage({
 
                                         return (
                                           <option
-                                            key={product.id}
-                                            value={product.id}
+                                            key={product._id}
+                                            value={product._id}
                                             disabled={usedProductIds.has(
-                                              product.id,
+                                              product._id,
                                             )}
                                           >
                                             {product.name}{" "}
@@ -22597,7 +23014,7 @@ export default function LocalPage({
                                         onClick={() =>
                                           assignedProduct
                                             ? openImageAlbum({
-                                              productId: assignedProduct.id,
+                                              productId: assignedProduct._id,
                                               title: assignedProduct.name,
                                               description:
                                                 assignedProduct.description.trim() ||
@@ -22741,28 +23158,28 @@ export default function LocalPage({
                       <div className="grid max-h-[62dvh] grid-cols-1 gap-1 overflow-y-auto pr-1">
                         {filteredScheduleProducts.map((product, index) => {
                           const scheduleLabels = getTodayProductScheduleLabels(
-                            product.id,
+                            product._id,
                           );
                           const doneToday = todayPostedProductIds.has(
-                            product.id,
+                            product._id,
                           );
-                          const active = selectedProductId === product.id;
+                          const active = selectedProductId === product._id;
 
                           return (
                             <article
-                              key={`${activeCategoryTab}-${product.id}`}
+                              key={`${activeCategoryTab}-${product._id}`}
                               style={{ animationDelay: `${Math.min(index * 34, 340)}ms` }}
                               draggable
                               onDragStart={(event) => {
                                 event.dataTransfer.setData(
                                   "text/plain",
-                                  product.id,
+                                  product._id,
                                 );
-                                setDraggingProductId(product.id);
-                                setSelectedProductId(product.id);
+                                setDraggingProductId(product._id);
+                                setSelectedProductId(product._id);
                               }}
                               onDragEnd={() => setDraggingProductId("")}
-                              onClick={() => setSelectedProductId(product.id)}
+                              onClick={() => setSelectedProductId(product._id)}
                               className={`cursor-grab rounded-md border p-1 transition active:cursor-grabbing ${active
                                 ? "border-cyan-300/60 bg-cyan-300/10  "
                                 : "border-white/10 bg-slate-950/80 hover:border-cyan-300/30"
@@ -22775,7 +23192,7 @@ export default function LocalPage({
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     openImageAlbum({
-                                      productId: product.id,
+                                      productId: product._id,
                                       title: product.name,
                                       description:
                                         product.description.trim() ||
@@ -24383,7 +24800,7 @@ export default function LocalPage({
                         className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-slate-900"
                         onClick={() =>
                           openImageAlbum({
-                            productId: selectedAssignedSlot.product.id,
+                            productId: selectedAssignedSlot.product._id,
                             title: selectedAssignedSlot.product.name,
                             description: selectedAssignedSlot.description,
                             priceText: selectedAssignedSlot.product.priceText,
@@ -24429,7 +24846,7 @@ export default function LocalPage({
                                 className="aspect-square overflow-hidden rounded-md bg-slate-900   transition "
                                 onClick={() =>
                                   openImageAlbum({
-                                    productId: selectedAssignedSlot.product.id,
+                                    productId: selectedAssignedSlot.product._id,
                                     title: selectedAssignedSlot.product.name,
                                     description:
                                       selectedAssignedSlot.description,
@@ -24809,8 +25226,36 @@ export default function LocalPage({
                       </span>
                     </div>
 
-                    <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 content-start gap-2 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-2">
-                      {albumImages.map((image, index) => {
+                    <VirtualizedGridHost
+                      itemCount={albumImages.length}
+                      resetKey={albumImages}
+                      initialItemCount={INITIAL_ALBUM_THUMBNAIL_RENDER_LIMIT}
+                      virtualizeAfter={ALBUM_GRID_VIRTUALIZATION_THRESHOLD}
+                      estimatedRowHeight={ALBUM_GRID_ESTIMATED_ROW_HEIGHT}
+                      overscanRows={2}
+                      scrollTarget="element"
+                    >
+                      {({ gridRef, renderSegments, trailingSpacerHeight }) => (
+                        <div
+                          ref={gridRef}
+                          className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 content-start gap-2 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-2"
+                        >
+                      {renderSegments.map((segment) => (
+                        <Fragment key={`${segment.startIndex}-${segment.endIndex}`}>
+                          {segment.beforeSpacerHeight > 0 ? (
+                            <div
+                              aria-hidden="true"
+                              className="col-span-full pointer-events-none"
+                              style={{
+                                gridColumn: "1 / -1",
+                                height: `${segment.beforeSpacerHeight}px`,
+                              }}
+                            />
+                          ) : null}
+                          {albumImages
+                            .slice(segment.startIndex, segment.endIndex)
+                            .map((image, segmentIndex) => {
+                        const index = segment.startIndex + segmentIndex;
                         const active = image.id === selectedAlbumImage?.id;
                         const checked = selectedAlbumImageIds.has(image.id);
                         const internal = albumInternalImageIds.has(image.id);
@@ -24819,6 +25264,7 @@ export default function LocalPage({
                           <button
                             key={image.id}
                             type="button"
+                            data-virtual-index={index}
                             className={`group relative aspect-square w-full shrink-0 overflow-hidden rounded-md bg-slate-900 transition active:opacity-80 ${checked
                               ? " "
                               : active
@@ -24864,7 +25310,21 @@ export default function LocalPage({
                           </button>
                         );
                       })}
-                    </div>
+                        </Fragment>
+                      ))}
+                      {trailingSpacerHeight > 0 ? (
+                        <div
+                          aria-hidden="true"
+                          className="col-span-full pointer-events-none"
+                          style={{
+                            gridColumn: "1 / -1",
+                            height: `${trailingSpacerHeight}px`,
+                          }}
+                        />
+                      ) : null}
+                        </div>
+                      )}
+                    </VirtualizedGridHost>
                   </aside>
                 </section>
               ) : null}
@@ -25176,7 +25636,7 @@ export default function LocalPage({
                   <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-semibold text-slate-400">
                     {postQueueIndex + 1} / {postQueueProducts.length}
                   </span>
-                  {postQueueItemStatuses[currentPostQueueProduct.id] ? (
+                  {postQueueItemStatuses[currentPostQueueProduct._id] ? (
                     <span className="rounded-full bg-emerald-300/10 px-2.5 py-1 text-[9px] font-black text-emerald-200">
                       ĐÃ XÁC NHẬN
                     </span>
@@ -25333,6 +25793,7 @@ export default function LocalPage({
           }
         >
           <ProductPosterManagerModal
+            contentType={scopedContentType}
             products={viewProducts}
             onClose={() => setIsPosterManagerOpen(false)}
             onSaveCategoryGroup={handleSavePosterCategoryGroup}

@@ -42,7 +42,6 @@ interface LocalImage {
 
 interface LocalProduct {
   _id: string;
-  id?: string;
   name: string;
   description?: string;
   price?: number;
@@ -57,7 +56,6 @@ interface LocalProduct {
 
 interface LocalProductDoneStatus {
   _id: string;
-  id?: string;
   isDone: boolean;
   doneAt?: string | null;
   updatedAt?: string;
@@ -476,13 +474,11 @@ export default function UsedProductsSyncAdminClient() {
 
       for (const status of statuses) {
         if (status._id) statusById.set(status._id, status);
-        if (status.id) statusById.set(status.id, status);
       }
 
       setLocalProducts((current) =>
         current.map((product) => {
-          const latest = statusById.get(product._id) ??
-            (product.id ? statusById.get(product.id) : undefined);
+          const latest = statusById.get(product._id);
 
           if (!latest) return product;
 
@@ -639,7 +635,7 @@ export default function UsedProductsSyncAdminClient() {
       if (syncDoneFilter === "done" && !isDone) return false;
       if (syncDoneFilter === "not-done" && isDone) return false;
       if (!query) return true;
-      return [product.name, product._id, product.id, product.category]
+      return [product.name, product._id, product.category]
         .some((value) => value?.toLocaleLowerCase("vi-VN").includes(query));
     });
   }, [localProducts, syncSearch, syncDoneFilter, getSourceProductDone]);
@@ -1334,7 +1330,7 @@ export default function UsedProductsSyncAdminClient() {
                     const imageUrl = getImageUrl(product.images);
                     const selected = selectedLocalIds.has(product._id);
                     return (
-                      <tr key={product._id || product.id} className={`transition hover:bg-slate-800/50 ${selected ? "bg-sky-950/20" : ""}`}>
+                      <tr key={product._id} className={`transition hover:bg-slate-800/50 ${selected ? "bg-sky-950/20" : ""}`}>
                         <td className="px-3 py-2.5">
                           <input type="checkbox" className={checkboxClass} checked={selected} disabled={synced || !product._id} onChange={() => toggleLocalSelection(product._id)} aria-label={`Chọn ${product.name}`} />
                         </td>
@@ -1349,7 +1345,7 @@ export default function UsedProductsSyncAdminClient() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5"><code className="text-[11px] text-sky-300">{product._id || product.id || "—"}</code></td>
+                        <td className="px-3 py-2.5"><code className="text-[11px] text-sky-300">{product._id}</code></td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-xs text-emerald-300">{formatPrice(product.price, product.priceText)}</td>
                         <td className="px-3 py-2.5 text-xs text-slate-400">{product.category || "Chưa phân loại"}</td>
                         <td className="px-3 py-2.5">

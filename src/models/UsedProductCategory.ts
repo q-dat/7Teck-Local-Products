@@ -21,6 +21,7 @@ const usedProductCategorySchema = new Schema<IUsedProductCategoryDoc>(
   {
     collection: "used_product_categories",
     timestamps: true,
+    id: false,
   },
 );
 

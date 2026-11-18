@@ -1,5 +1,9 @@
 import { apiError, jsonNoStore } from "@/lib/http";
-import { connectMongo } from "@/lib/mongodb";
+import {
+  ensureLegacyProductIdMigration,
+  isMongoObjectIdString,
+  serializeProductRecord,
+} from "@/lib/products";
 import { ensureSyncBaseline } from "@/lib/sync";
 import AppStateModel from "@/models/AppState";
 import ProductModel from "@/models/Product";
@@ -30,6 +34,7 @@ const readAppState = async (): Promise<Record<string, unknown>> => {
       key: 0,
       syncVersion: 0,
       updatedAt: 0,
+      legacyProductIdMap: 0,
     },
   ).lean();
 
@@ -38,14 +43,15 @@ const readAppState = async (): Promise<Record<string, unknown>> => {
     : {};
 };
 
-const readCatalogSnapshot = async () => {
+const readCatalogSnapshot = async (legacyIdMap: Record<string, string>) => {
   const [products, state] = await Promise.all([
-    ProductModel.find({}, { _id: 0 }).sort({ updatedAt: -1 }).lean(),
+    ProductModel.find({}).sort({ updatedAt: -1 }).lean(),
     readAppState(),
   ]);
 
   return {
-    products,
+    products: products.map(serializeProductRecord),
+    legacyIdMap,
     state,
   };
 };
@@ -59,7 +65,7 @@ export async function GET(request: Request) {
       return apiError(new Error("since phải là số nguyên không âm"), 400);
     }
 
-    await connectMongo();
+    const legacyIdMap = await ensureLegacyProductIdMigration();
     const version = await ensureSyncBaseline();
 
     if (since >= version) {
@@ -69,6 +75,7 @@ export async function GET(request: Request) {
         mode: "delta",
         products: [],
         deletedProductIds: [],
+        legacyIdMap,
       });
     }
 
@@ -85,17 +92,19 @@ export async function GET(request: Request) {
       changes.length === 0 ||
       changes.some(
         (change) =>
-          change.entity === "catalog" && change.operation === "reset",
+          (change.entity === "catalog" && change.operation === "reset") ||
+          (change.entity === "product" && !isMongoObjectIdString(change.entityId)),
       );
 
     if (requiresSnapshot) {
-      const snapshot = await readCatalogSnapshot();
+      const snapshot = await readCatalogSnapshot(legacyIdMap);
       return jsonNoStore({
         ok: true,
         version,
         mode: "snapshot",
         products: snapshot.products,
         deletedProductIds: [],
+        legacyIdMap: snapshot.legacyIdMap,
         state: snapshot.state,
       });
     }
@@ -118,7 +127,7 @@ export async function GET(request: Request) {
 
     const [changedProducts, state] = await Promise.all([
       productIdsToRead.length > 0
-        ? ProductModel.find({ id: { $in: productIdsToRead } }, { _id: 0 }).lean()
+        ? ProductModel.find({ _id: { $in: productIdsToRead } }).lean()
         : Promise.resolve([]),
       latestChanges.has("state:main") ? readAppState() : Promise.resolve(null),
     ]);
@@ -127,8 +136,9 @@ export async function GET(request: Request) {
       ok: true,
       version,
       mode: "delta",
-      products: changedProducts,
+      products: changedProducts.map(serializeProductRecord),
       deletedProductIds: productIdsToDelete,
+      legacyIdMap,
       ...(state ? { state } : {}),
     });
   } catch (error) {

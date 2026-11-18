@@ -23,8 +23,7 @@ export type CloudinaryProductImage = {
 };
 
 export type ProductRecord = {
-  _id?: string;
-  id: string;
+  _id: string;
   name: string;
   description: string;
   pin: string;
@@ -44,16 +43,19 @@ export type ProductRecord = {
   updatedAt: string;
 };
 
+export type ProductInput = Omit<ProductRecord, "_id">;
+
 export type AppStateRecord = {
   settings?: unknown;
 };
 
 export type BootstrapResponse = AppStateRecord & {
   products: ProductRecord[];
+  legacyIdMap?: Record<string, string>;
 };
 
 export type UsedProductRecord = {
-  _id?: string;
+  _id: string;
   name: string;
   slug: string;
   sourceProductId?: string | null;
@@ -72,7 +74,7 @@ export type UsedProductRecord = {
 };
 
 export type UsedProductCategoryRecord = {
-  _id?: string;
+  _id: string;
   name: string;
   slug: string;
   parentSlug?: string | null;

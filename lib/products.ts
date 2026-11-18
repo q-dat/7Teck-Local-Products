@@ -1,4 +1,10 @@
-import type { ProductRecord } from "@/types/local-products";
+import type { ProductInput, ProductRecord } from "@/types/local-products";
+import { connectMongo } from "@/lib/mongodb";
+import AppStateModel from "@/models/AppState";
+import ProductModel from "@/models/Product";
+import { isMongoObjectIdString } from "@/lib/mongo-id";
+
+export { isMongoObjectIdString } from "@/lib/mongo-id";
 
 type ImageLike = { publicId?: unknown };
 
@@ -24,13 +30,10 @@ export const getProductPublicIds = (product: unknown): string[] => {
   return [...imagePublicIds, ...posterPublicIds];
 };
 
-export const validateProductInput = (value: unknown): ProductRecord => {
+export const validateProductInput = (value: unknown): ProductInput => {
   if (!value || typeof value !== "object") throw new Error("Sản phẩm không hợp lệ");
-  const product = value as ProductRecord;
+  const product = value as Partial<ProductRecord> & Record<string, unknown>;
 
-  if (typeof product.id !== "string" || !product.id.trim()) {
-    throw new Error("Sản phẩm thiếu ID");
-  }
   if (typeof product.name !== "string" || !product.name.trim()) {
     throw new Error("Sản phẩm thiếu tên");
   }
@@ -62,9 +65,118 @@ export const validateProductInput = (value: unknown): ProductRecord => {
     }
   }
 
+  const fields = { ...product };
+  delete fields._id;
+  delete fields.id;
+  delete fields.legacyId;
+
   return {
-    ...product,
+    ...(fields as ProductInput),
     categoryGroup: typeof product.categoryGroup === "string" ? product.categoryGroup : "",
     posters,
   };
+};
+
+export const serializeProductRecord = (value: unknown): ProductRecord => {
+  if (!value || typeof value !== "object") {
+    throw new Error("Sản phẩm MongoDB không hợp lệ");
+  }
+
+  const source = value as Record<string, unknown>;
+  const mongoId = source._id;
+  if (!mongoId || typeof mongoId !== "string" && typeof mongoId !== "object") {
+    throw new Error("Sản phẩm MongoDB thiếu _id");
+  }
+
+  const fields = { ...source };
+  delete fields._id;
+  delete fields.id;
+  return {
+    ...fields,
+    _id: String(mongoId),
+  } as ProductRecord;
+};
+
+let legacyProductIndexesChecked = false;
+
+export const ensureLegacyProductIdMigration = async (): Promise<Record<string, string>> => {
+  await connectMongo();
+
+  const legacyProducts = await ProductModel.collection
+    .find({ id: { $exists: true } })
+    .project<{ _id: unknown; id: unknown }>({ _id: 1, id: 1 })
+    .toArray();
+  const appState = (await AppStateModel.findOne(
+    { key: "main" },
+    { legacyProductIdMap: 1, _id: 0 },
+  ).lean()) as { legacyProductIdMap?: unknown } | null;
+  const storedMap = appState?.legacyProductIdMap;
+  const legacyIdMap: Record<string, string> = {};
+  if (storedMap && typeof storedMap === "object" && !Array.isArray(storedMap)) {
+    Object.entries(storedMap as Record<string, unknown>).forEach(([legacyId, mongoId]) => {
+      if (legacyId.trim() && isMongoObjectIdString(mongoId)) {
+        legacyIdMap[legacyId] = mongoId;
+      }
+    });
+  }
+
+  legacyProducts.forEach((product) => {
+    const legacyId = typeof product.id === "string" ? product.id.trim() : "";
+    const mongoId = product._id ? String(product._id) : "";
+    if (legacyId && isMongoObjectIdString(mongoId)) {
+      legacyIdMap[legacyId] = mongoId;
+    }
+  });
+
+  if (legacyProducts.length > 0) {
+    await AppStateModel.updateOne(
+      { key: "main" },
+      {
+        $set: { legacyProductIdMap: legacyIdMap },
+        $setOnInsert: { key: "main" },
+      },
+      { upsert: true, runValidators: true },
+    );
+  }
+
+  if (!legacyProductIndexesChecked || legacyProducts.length > 0) {
+    const productIndexes = await ProductModel.collection.indexes().catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === 26
+      ) {
+        return [];
+      }
+      throw error;
+    });
+    await Promise.all(
+      productIndexes
+        .filter((index) => index.name !== "_id_" && "id" in index.key)
+        .map((index) =>
+          ProductModel.collection.dropIndex(index.name!).catch((error: unknown) => {
+            if (
+              error &&
+              typeof error === "object" &&
+              "code" in error &&
+              error.code === 27
+            ) {
+              return;
+            }
+            throw error;
+          }),
+        ),
+    );
+    legacyProductIndexesChecked = true;
+  }
+
+  if (legacyProducts.length > 0) {
+    await ProductModel.collection.updateMany(
+      { id: { $exists: true } },
+      { $unset: { id: "" } },
+    );
+  }
+
+  return legacyIdMap;
 };

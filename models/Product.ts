@@ -36,7 +36,6 @@ const productPosterSchema = new Schema(
 
 const productSchema = new Schema(
   {
-    id: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
     description: { type: String, default: "" },
     pin: { type: String, default: "" },
@@ -59,7 +58,7 @@ const productSchema = new Schema(
     createdAt: { type: String, required: true },
     updatedAt: { type: String, required: true, index: true },
   },
-  { collection: "products", versionKey: false },
+  { collection: "products", versionKey: false, id: false },
 );
 
 const ProductModel =

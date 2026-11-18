@@ -31,6 +31,7 @@ type ProductPosterGeneratorProps = {
     initialPrice?: string;
     initialImageUrl?: string;
     initialImageName?: string;
+    initialImageFile?: File | null;
     onSavePoster?: (posterBlob: Blob, fileName: string, posterName: string) => Promise<void>;
 };
 
@@ -664,6 +665,7 @@ export default function ProductPosterGenerator({
     initialPrice,
     initialImageUrl,
     initialImageName,
+    initialImageFile,
     onSavePoster,
 }: ProductPosterGeneratorProps) {
     const productInputRef = useRef<HTMLInputElement | null>(null);
@@ -807,6 +809,10 @@ export default function ProductPosterGenerator({
     }, [processBackground, revokeUrl]);
 
     useEffect(() => {
+        if (initialImageFile) {
+            applyProductFile(initialImageFile);
+            return;
+        }
         if (!initialImageUrl) return;
 
         let isActive = true;
@@ -844,7 +850,7 @@ export default function ProductPosterGenerator({
         return () => {
             isActive = false;
         };
-    }, [applyProductFile, initialImageName, initialImageUrl]);
+    }, [applyProductFile, initialImageFile, initialImageName, initialImageUrl]);
 
     const handleProductFileChange = useCallback((event: ChangeEvent<HTMLInputElement>): void => {
         const file = event.target.files?.[0] ?? null;

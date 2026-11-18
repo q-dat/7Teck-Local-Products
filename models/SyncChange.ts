@@ -16,7 +16,7 @@ const syncChangeSchema = new Schema(
     },
     createdAt: { type: Date, default: Date.now },
   },
-  { collection: "local_product_sync_changes", versionKey: false },
+  { collection: "local_product_sync_changes", versionKey: false, id: false },
 );
 
 const SyncChangeModel =
